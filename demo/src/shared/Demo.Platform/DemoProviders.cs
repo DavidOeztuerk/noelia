@@ -5,6 +5,7 @@ using Noelia.Dashboard;
 using Noelia.InMemory.Hosting;
 using Noelia.InMemory.Security;
 using Noelia.Infrastructure.Audit;
+using Noelia.Infrastructure.Builder;
 using Noelia.Infrastructure.Security.Encryption;
 using Noelia.Infrastructure.Security.Keys;
 using Noelia.Redis;
@@ -59,10 +60,34 @@ public static class DemoProviders
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
 
         // The dashboard records who looked at it, and refuses to answer when it
-        // cannot. The sink is in-process in every stage because Noelia ships no
-        // other ISovereignAuditSink yet — a single-replica demo keeps one chain,
-        // which is exactly the limitation AuditTrailService documents.
+        // cannot.
         noelia.Services.AddSovereignAuditTrail();
+
+        // The argument this library makes, made visible. Without this the
+        // dashboard said "No sovereignty report is registered" — the headline
+        // feature missing from the one place a customer would look for it.
+        //
+        // The declarations are the point: an outbound call to a host nobody
+        // named fails, and the report says what this service reaches. Loopback
+        // and private networks are allowed because everything here is a
+        // container talking to its neighbour; a deployment that reaches the
+        // internet names those hosts one by one.
+        noelia.AddSovereignPlatform(sovereign =>
+        {
+            sovereign.DeclareDependency("Sessions", "sqlite:///data");
+
+            if (environment.UsesRedis)
+            {
+                sovereign
+                    .Allow(environment.RedisConnectionString!.Split(':')[0])
+                    .DeclareDependency("Cache, rate limits, revocation, audit chain",
+                        environment.RedisConnectionString);
+            }
+            else
+            {
+                sovereign.DeclareDependency("Cache, rate limits, revocation", "in-process");
+            }
+        });
 
         // The key ring needs a master key and somewhere to put the result, and
         // every stage has both. Requiring a whole encryption provider — which
