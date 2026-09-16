@@ -1,0 +1,13 @@
+# The image serves static files and the nginx config. Everything below is for
+# developing and testing them, and shipping it would only make the build
+# context — and the layer cache — larger for no one's benefit.
+node_modules
+test
+e2e
+eng
+playwright.config.js
+package.json
+package-lock.json
+test-results
+playwright-report
+.DS_Store
