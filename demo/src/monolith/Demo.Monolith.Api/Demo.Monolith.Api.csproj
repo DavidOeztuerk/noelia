@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../shared/Demo.Platform/Demo.Platform.csproj" />
+    <ProjectReference Include="../../services/UserService/UserService.Application/UserService.Application.csproj" />
+    <ProjectReference Include="../../services/UserService/UserService.Contracts/UserService.Contracts.csproj" />
+    <ProjectReference Include="../../services/UserService/UserService.Infrastructure/UserService.Infrastructure.csproj" />
+    <ProjectReference Include="../../services/TodoService/TodoService.Application/TodoService.Application.csproj" />
+    <ProjectReference Include="../../services/TodoService/TodoService.Contracts/TodoService.Contracts.csproj" />
+    <ProjectReference Include="../../services/TodoService/TodoService.Infrastructure/TodoService.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Noelia.Infrastructure" />
+    <PackageReference Include="Noelia.InMemory" />
+    <PackageReference Include="Noelia.Dashboard" />
+  </ItemGroup>
+</Project>

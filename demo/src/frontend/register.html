@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Registrieren · Noelia Demo</title>
+    <link rel="icon" href="/favicon.png" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script type="module" src="/js/pages/register.js"></script>
+  </head>
+  <body class="page page--auth">
+    <main class="auth">
+      <h1 class="auth__title">Konto anlegen</h1>
+      <p data-notice class="notice" role="status" aria-live="polite" hidden></p>
+
+      <form data-auth-form class="form" novalidate>
+        <div class="field">
+          <label class="field__label" for="displayName">Anzeigename</label>
+          <input class="field__input" id="displayName" name="displayName" type="text"
+                 minlength="2" maxlength="80" required autocomplete="name" />
+          <p class="field__error" data-error-for="displayName" hidden></p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="email">E-Mail</label>
+          <input class="field__input" id="email" name="email" type="email"
+                 required autocomplete="username" />
+          <p class="field__error" data-error-for="email" hidden></p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="password">Passwort</label>
+          <input class="field__input" id="password" name="password" type="password"
+                 minlength="12" required autocomplete="new-password"
+                 aria-describedby="password-hint" />
+          <p class="field__hint" id="password-hint">Mindestens 12 Zeichen.</p>
+          <p class="field__error" data-error-for="password" hidden></p>
+        </div>
+
+        <button type="submit" class="button button--wide">Registrieren</button>
+      </form>
+
+      <p class="auth__switch">Schon ein Konto? <a href="/login">Anmelden</a></p>
+    </main>
+  </body>
+</html>

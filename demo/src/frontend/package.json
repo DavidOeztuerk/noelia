@@ -1,0 +1,14 @@
+{
+  "name": "noelia-demo-frontend",
+  "private": true,
+  "type": "module",
+  "description": "Plain HTML, CSS and ES modules. A DOM for the unit tests, and a browser for the flows a DOM cannot answer for.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "jsdom": "^25.0.1"
+  }
+}

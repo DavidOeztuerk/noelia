@@ -1,0 +1,12 @@
+.git
+.env
+.nuget.secrets*
+.agents
+**/bin
+**/obj
+**/.DS_Store
+**/node_modules
+
+# The frontend is its own image, built from src/frontend with its own
+# Dockerfile. Copying it into the SDK image would only make that image larger.
+src/frontend

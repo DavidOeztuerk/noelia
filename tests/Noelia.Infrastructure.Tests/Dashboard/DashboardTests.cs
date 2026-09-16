@@ -102,6 +102,50 @@ public sealed class DashboardTests
     }
 
     [Fact]
+    public async Task The_production_reason_is_shown_to_the_operator_in_its_own_words()
+    {
+        const string reason = "operations network only, reviewed 2026-09 by the platform team";
+
+        await using var app = await DashboardHost.Start(
+            options => options.VisibleTo(_ => true).InProduction(reason),
+            Environments.Production);
+
+        var html = await app.Client.GetStringAsync("/noelia");
+
+        html.Should().Contain(reason);
+        html.Should().NotContain("characters",
+            "until 5.1.0 the page printed the length of the reason instead of the reason, "
+            + "which let it say anything at all without a reader ever seeing it");
+    }
+
+    [Fact]
+    public async Task The_production_reason_travels_with_the_operator_access_check()
+    {
+        const string reason = "operations network only";
+
+        await using var app = await DashboardHost.Start(
+            options => options.VisibleTo(_ => true).InProduction(reason),
+            Environments.Production);
+
+        var report = app.Host.Services.GetRequiredService<ISecurityCheckReport>();
+        var access = report.Latest.Single(result => result.Id == "noelia.dashboard.operator-access");
+
+        access.Summary.Should().Contain(reason,
+            "whoever reads the check is the person who has to judge whether the exposure "
+            + "still holds, and they cannot judge a reason they are never shown");
+    }
+
+    [Fact]
+    public async Task Outside_production_no_reason_is_claimed()
+    {
+        await using var app = await DashboardHost.Start(options => options.VisibleTo(_ => true));
+
+        var html = await app.Client.GetStringAsync("/noelia");
+
+        html.Should().NotContain("Production exposure reason");
+    }
+
+    [Fact]
     public async Task Non_get_requests_are_never_a_dashboard_command_surface()
     {
         await using var app = await DashboardHost.Start(options => options.VisibleTo(_ => true));
@@ -293,7 +337,10 @@ public sealed class DashboardTests
 
         composition.Included.Should().Equal(NoeliaModule.Dashboard);
         report.Latest.Select(result => result.Module).Should()
-            .BeEquivalentTo([NoeliaModule.Composition, NoeliaModule.Dashboard]);
+            .BeEquivalentTo([
+                NoeliaModule.Composition,
+                NoeliaModule.Composition,
+                NoeliaModule.Dashboard]);
         html.Should().Contain("noelia.composition.providers");
         html.Should().Contain("noelia.dashboard.operator-access");
     }

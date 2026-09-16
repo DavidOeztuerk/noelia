@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anmelden · Noelia Demo</title>
+    <link rel="icon" href="/favicon.png" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script type="module" src="/js/pages/login.js"></script>
+  </head>
+  <body class="page page--auth">
+    <main class="auth">
+      <h1 class="auth__title">Anmelden</h1>
+      <p data-notice class="notice" role="status" aria-live="polite" hidden></p>
+
+      <form data-auth-form class="form" novalidate>
+        <div class="field">
+          <label class="field__label" for="email">E-Mail</label>
+          <input class="field__input" id="email" name="email" type="email"
+                 required autocomplete="username" />
+          <p class="field__error" data-error-for="email" hidden></p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="password">Passwort</label>
+          <input class="field__input" id="password" name="password" type="password"
+                 required autocomplete="current-password" />
+          <p class="field__error" data-error-for="password" hidden></p>
+        </div>
+
+        <button type="submit" class="button button--wide">Anmelden</button>
+      </form>
+
+      <p class="auth__switch">Noch kein Konto? <a href="/register">Registrieren</a></p>
+    </main>
+  </body>
+</html>

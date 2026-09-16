@@ -1,3 +1,156 @@
+# Noelia 5.0.0 → 5.1.0
+
+**Neun Stellen behaupteten etwas, das nicht stattfand.** Sechs sind entfernt,
+drei wirken jetzt. Der Anlass war eine Bestandsaufnahme am laufenden Demo-Stack:
+drei Health-Endpunkte antworteten mit `200` und `"checks": []`, und die Suche
+nach dem Grund fand dieselbe Sorte Fehler noch achtmal.
+
+Es ist dieselbe Fehlerklasse wie in [MASTERPLAN-5.0.md](docs/MASTERPLAN-5.0.md)
+§1: etwas ist *registriert* und deshalb *anwesend*, aber nicht *wirksam* — und
+nichts im System merkt den Unterschied. 5.0 hat die Mechanik gebaut, die das
+aufdeckt. 5.1 ist, was diese Mechanik zuerst gefunden hat, angewandt auf Noelia
+selbst.
+
+| Was | Was es behauptete | Was es tat |
+|---|---|---|
+| `AddDatabaseHealthCheck()` und zwei Geschwister | Prüfungen einzurichten | leerer Rumpf, gibt `this` zurück |
+| deren Tests | diese Methoden abzudecken | nageln den Rückgabewert fest |
+| `RabbitMQHealthCheck` | den Broker zu prüfen | verlangt ein `IConnection`, das niemand registriert |
+| `RedisHealthCheck` | den Server zu prüfen | ruft `INFO`, außerhalb Development gesperrt |
+| `RedisPerformanceHealthCheck` | Kennzahlen zu melden | dasselbe, plus Serverinterna im Rumpf von `/health` |
+| `/health`-Antwort | den Fehler zu nennen | nennt den Endpunkt aus der Treiberausnahme |
+| `TrustForwardedHeadersFrom` | dem Vermittler zu glauben | belegt Optionen, die niemand anwendet |
+| `AddRedisCache` neben `UseDefaults()` | den verteilten Zähler zu setzen | wird vom eingebauten überschrieben |
+| `InProduction(reason)` | den Grund festzuhalten | druckt seine Zeichenzahl |
+
+## Was du tun musst
+
+1. **Prüfe, ob `/health/ready` in deinen Diensten etwas prüft.** Ohne eine
+   Registrierung mit dem Etikett `ready` antwortet der Endpunkt `200`, auch
+   wenn Datenbank, Cache und Broker nicht erreichbar sind. Der neue Check
+   `noelia.health.readiness-coverage` meldet das ab 5.1.0 als `Fail` im
+   Dashboard und beim Start. Registriere die Prüfungen deiner Anbieter:
+   `AddDatabase<TContext>(...)`, `AddRedisConnection(...)`,
+   `UseMassTransitMessaging(...)`.
+2. **Entferne Aufrufe von `AddDatabaseHealthCheck()`,
+   `AddRabbitMqHealthCheck()` und `AddExternalApiHealthChecks()`.** Die drei
+   Methoden auf `HealthCheckBuilder` sind gestrichen. Sie hatten einen
+   auskommentierten Rumpf und gaben `this` zurück — ein Dienst konnte alle drei
+   aufrufen und registrierte nichts. Sie lassen sich in
+   `Noelia.Infrastructure` auch nicht füllen: Wer eine Datenbank oder einen
+   Broker erreicht, nennt einen Treiber, und dieses Paket darf das nicht
+   (ADR-0001). Die Prüfungen kommen mit ihrem Anbieter.
+3. **`RabbitMQHealthCheck` ist gestrichen.** Die Klasse verlangte ein
+   `IConnection` von RabbitMQ.Client, das MassTransit nicht registriert — sie
+   war nicht auflösbar und wurde nirgends registriert. Die Erreichbarkeit des
+   Brokers prüft MassTransits eigener Bus-Check, den
+   `UseMassTransitMessaging(...)` mit dem Etikett `ready` einrichtet.
+4. **`AddRedisConnection(...)` registriert jetzt zwei Health-Checks**
+   (`redis` mit `ready`, `redis-performance`). Wenn dein
+   Bereitschaftsendpunkt bisher `200` meldete, während Redis nicht erreichbar
+   war, meldet er jetzt `503`. Das ist die Absicht: Ein Dienst, der ohne
+   diesen Server nicht arbeiten kann, ist ohne ihn nicht bereit.
+   `Noelia.Redis` wächst dadurch von 14 auf 15 wiederhergestellte Pakete.
+
+## Weitergereichte Kopfzeilen werden jetzt angewandt
+
+`TrustForwardedHeadersFrom(...)` hat die Optionen des Rahmenwerks belegt, und
+**niemand hat sie angewandt**: Noelias Pipeline rief `UseForwardedHeaders()`
+nie auf. Ein Dienst hinter einem Vermittler zählte deshalb weiterhin den
+Vermittler — in jeder Bremse, in jedem Eintrag der Prüfspur und in jeder
+Sicherheitsmeldung — und sah hinter einer TLS-Terminierung `http`, was ein
+Refresh-Cookie ohne `Secure` ausgibt.
+
+Ab 5.1.0 stellt `UseNoelia(...)` den Schritt als Erstes ein, **sofern**
+`TrustForwardedHeadersFrom` mindestens einen Vermittler benannt hat. Wer nie
+Vertrauen erklärt hat, merkt nichts.
+
+**Was du tun musst:** Wenn deine Anwendung `app.UseForwardedHeaders()` selbst
+aufruft *und* `TrustForwardedHeadersFrom` benutzt, entferne den eigenen Aufruf.
+Zwei Durchläufe verbrauchen zwei Einträge aus `X-Forwarded-For`.
+
+### Und für Dienste, die selbst weiterleiten
+
+Neu: `AddForwardedOriginPropagation()` beziehungsweise der
+`ForwardedOriginHandler` aus `Noelia.Http`. `UseForwardedHeaders` *verbraucht*
+die Kopfzeilen — richtig so —, weshalb ein Gateway die Kette beendet: Der
+Dienst dahinter sah wieder `http`. Ein Gateway, eine Fassade oder jede
+Fächerverteilung reicht den Ursprung damit weiter. Ein Dienst, der nur
+antwortet, braucht den Aufruf nicht.
+
+## Die Health-Antwort nennt keinen Ausnahmetext mehr
+
+`/health`, `/health/live` und `/health/ready` schrieben
+`error: exception.Message` in den Rumpf. Der Endpunkt ist dort, wo er
+veröffentlicht wird, nicht authentifiziert, und ein Treiberfehler nennt den
+Endpunkt, mit dem er gesprochen hat — bei StackExchange.Redis samt Adresse.
+
+Ab 5.1.0 steht dort `description`: das, was die Prüfung selbst gesagt hat. Die
+Ausnahme wird protokolliert.
+
+**Was du tun musst:** Wenn eine Überwachung das Feld `error` liest, stelle sie
+auf `description` um.
+
+## `Noelia.Redis` nimmt an der Zusammensetzung teil
+
+Neu: `UseRedisCache(prefix)`, `UseRedisTokenRevocation(maxTokenLifetime)` und
+`UseRedisSecurityAudit()` auf dem `NoeliaBuilder`.
+
+Der Grund ist eine stille Falle: `AddRedisCache(prefix)` registriert sofort,
+die eingebauten Module registrieren beim Bauen der Zusammensetzung — also
+später. Wer `AddRedisCache` neben `UseDefaults()` aufrief, bekam deshalb den
+prozessinternen Zähler, den `RateLimiting` mitbringt. Nichts schlug fehl,
+nichts wurde protokolliert; die Zähler blieben im Prozess, und das ist eine
+Grenze je Replik unter dem Namen einer gemeinsamen.
+
+**Was du tun musst:** Stelle `AddRedisCache(...)` neben `AddNoelia` auf
+`UseRedisCache(...)` **innerhalb** der Zusammensetzung um. Die `Add…`-Aufrufe
+bleiben für Hosts, die von Hand zusammensetzen.
+
+## `RedisPerformanceHealthCheck` ist gestrichen
+
+Die Klasse las `INFO` und meldete Speicherverbrauch, Trefferquote und
+Verbindungszahl. Drei Gründe, und jeder allein hätte gereicht: `INFO` ist ein
+Admin-Kommando, das `AddRedisConnection` außerhalb von Development sperrt;
+Serverkennzahlen gehören in die Telemetrie, wo man sie über die Zeit sieht,
+nicht in eine Sonde, die mit ja oder nein antwortet; und sie landeten im Rumpf
+von `/health`.
+
+`RedisHealthCheck` bleibt, prüft aber nur noch, was eine Bereitschaftssonde
+fragt: Schreiben, Zurücklesen, Vergleichen, Löschen. Auch er brauchte bis 5.1.0
+`INFO` und meldete deshalb **jeden** erreichbaren Server außerhalb von
+Development als ungesund — weshalb ihn nie jemand registriert hat.
+
+## Verhaltensänderung in einer Nebenversion
+
+Punkt 2 und 3 entfernen öffentliche API, Punkt 4 ändert eine Antwort. Nach der
+Regel in der README wäre das eine Hauptversion. Es ist bewusst 5.1.0:
+
+- Die drei Methoden **registrierten nachweislich nichts**. Kein Verhalten kann
+  auf ihnen beruhen; es bricht eine Übersetzung, und die Behebung ist das
+  Löschen der Zeile.
+- `RabbitMQHealthCheck` **konnte nie ausgeführt werden**, weil seine
+  Abhängigkeit in keinem Behälter stand.
+- Punkt 4 ändert eine Antwort von einer falschen in eine richtige. Ein
+  Bereitschaftsendpunkt, der über einem ausgefallenen Cache `200` meldet, ist
+  kein Verhalten, das Bestandsschutz verdient.
+
+Die Alternative wäre gewesen, die Falschaussagen bis 6.0 stehen zu lassen.
+
+## `InProduction(reason)` erreicht jetzt einen Leser
+
+Der Aufruf hat die Zusammensetzung schon in 5.0.0 abgebrochen, wenn in
+`Production` kein Grund angegeben war — das war nie kaputt. Festgehalten wurde
+der Grund aber nirgends: Die Seite druckte
+`"Production exposure reason: recorded (37 characters)."` und nie den Text.
+
+Ab 5.1.0 steht der Grund im Wortlaut auf der Seite und im Ergebnis von
+`noelia.dashboard.operator-access`. **Prüfe deine Begründungen**, bevor du
+umstellst: Sie sind ab jetzt für Betriebspersonal sichtbar und gehören
+entsprechend formuliert — kein Hostname, kein Ticketinhalt, kein Geheimnis.
+
+---
+
 # 4.4.3 code line → Noelia 5.0.0
 
 This is a complete identity change, not only a package rename. Every package id,

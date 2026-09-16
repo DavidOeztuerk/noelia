@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Noelia — a shared foundation for .NET microservices</title>
+<meta name="description" content="One application, two architectures, three stages. What Noelia composes, and what it refuses to compose silently." />
+<link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;text y=%22.9em%22 font-size=%2290%22&gt;🧱&lt;/text&gt;&lt;/svg&gt;" />
+<style>
+  :root {
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #1a1a18;
+    --muted: #5f5f58;
+    --line: #e2e1dc;
+    --accent: #2f5d50;
+    --warn: #8a5a1c;
+    --bad: #8c2f2a;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a; --panel: #1e2024; --ink: #ecebe6; --muted: #a3a29b;
+      --line: #32343a; --accent: #7fc0ab; --warn: #d8a45e; --bad: #e08c86;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16171a; --panel: #1e2024; --ink: #ecebe6; --muted: #a3a29b;
+    --line: #32343a; --accent: #7fc0ab; --warn: #d8a45e; --bad: #e08c86;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 68rem; margin: 0 auto; padding: 0 16px; }
+  header { border-bottom: 1px solid var(--line); padding: 4.5rem 0 3rem; }
+  h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.1; margin: 0 0 .75rem; letter-spacing: -.02em; }
+  .lede { font-size: clamp(1.05rem, 2.3vw, 1.25rem); color: var(--muted); max-width: 46rem; margin: 0 0 1.5rem; }
+  .pills { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .pill {
+    font: 500 .8rem/1 var(--mono); padding: .45rem .7rem; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  }
+  section { padding: 3.25rem 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 1.5rem; margin: 0 0 .5rem; letter-spacing: -.01em; }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+  p { max-width: 46rem; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
+  .card h3 { margin-top: 0; }
+  .card p { font-size: .94rem; margin-bottom: 0; }
+  figure { margin: 1.5rem 0 0; }
+  figure img {
+    width: 100%; height: auto; display: block; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--panel);
+  }
+  figcaption { color: var(--muted); font-size: .88rem; margin-top: .6rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: .92rem; }
+  th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+  td code, .mono { font-family: var(--mono); font-size: .88em; }
+  .pass { color: var(--accent); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem; overflow-x: auto; font-family: var(--mono); font-size: .86rem; line-height: 1.6;
+  }
+  .scroll { overflow-x: auto; }
+  footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: .9rem; }
+  a { color: inherit; text-decoration-color: var(--line); text-underline-offset: .2em; }
+  a:hover { text-decoration-color: currentColor; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Noelia</h1>
+    <p class="lede">
+      A shared foundation for .NET microservices: a CQRS pipeline, security and
+      identity primitives, caching, messaging, health probes, resilience and
+      observability. The engine names no driver — where data lives is the
+      operator's decision, and it is made where anyone can read it.
+    </p>
+    <div class="pills">
+      <span class="pill">13 packages</span>
+      <span class="pill">net10.0</span>
+      <span class="pill">MIT</span>
+      <span class="pill">3&nbsp;300+ tests</span>
+      <span class="pill">0 warnings</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>One application, two architectures, three stages</h2>
+    <p class="muted">
+      The demo in this repository runs the same todo application as a set of
+      microservices behind a gateway and as a single monolith, in Development,
+      Staging and Production, all from one <code>docker compose</code>. The
+      application code is identical everywhere. Two things differ, and both are
+      decisions somebody wrote down.
+    </p>
+
+    <div class="grid" style="margin-top:1.5rem">
+      <div class="card">
+        <h3>Where the state lives</h3>
+        <p>
+          Development keeps the cache, the rate counters and the revocation list
+          in the process. Staging and Production put all three on Valkey. No
+          application code knows which of the two it got — that is what the port
+          cut is for.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Who may look</h3>
+        <p>
+          The operator dashboard is open in Development, needs an operator
+          secret in Staging and Production, and is not composed at all on the
+          gateway — which holds no key and could not verify an operator if it
+          wanted to.
+        </p>
+      </div>
+      <div class="card">
+        <h3>What the answer is when the answer is no</h3>
+        <p>
+          A refused dashboard request is a 404 that looks like every other 404.
+          It never announces that the page exists, which is more than a login
+          screen can say.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The dashboard, in each stage</h2>
+    <p class="muted">
+      Real screenshots from a real run, captured from the stack by
+      <code>eng/capture-dashboards.mjs</code> rather than drawn. The dashboard is
+      read-only and value-free: configuration keys appear, configuration values
+      never do.
+    </p>
+
+    <figure>
+      <img src="assets/dashboard-dev.png" alt="The Noelia operator dashboard in Development, listing every composed module and the security check results." />
+      <figcaption><strong>Development.</strong> Open to anyone who can reach the port, because Development is Development — and the configuration says so rather than a condition in the code.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="assets/dashboard-prod.png" alt="The same dashboard in Production, reached with an operator secret, showing the recorded exposure reason." />
+      <figcaption><strong>Production.</strong> Reached with an operator secret, and the reason for exposing it at all is printed in full. Until 5.1.0 the page printed the length of that reason instead of the reason.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="assets/dashboard-refused.png" alt="A 404 page: the Production dashboard without the operator secret." />
+      <figcaption><strong>Production, without the secret.</strong> Not a 403, not a login form. Nothing here distinguishes this response from a path that was never routed.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Security checks, not promises</h2>
+    <p class="muted">
+      Every Noelia service runs executable assertions at startup and reports
+      them to the dashboard and the log. They exist because of a class of defect
+      the 5.0 line was built to end: something is registered, and therefore
+      present, but not effective — and nothing in the system notices.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Check</th><th>Development</th><th>Staging &amp; Production</th><th>What it asks</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>noelia.composition.providers</code></td>
+            <td class="pass">Pass</td><td class="pass">Pass</td>
+            <td>Does every active module's declared requirement have a registered provider?</td>
+          </tr>
+          <tr>
+            <td><code>noelia.health.readiness-coverage</code></td>
+            <td class="pass">Pass</td><td class="pass">Pass</td>
+            <td>Does readiness check anything at all, or does it answer 200 over a dead database?</td>
+          </tr>
+          <tr>
+            <td><code>noelia.revocation.degradation</code></td>
+            <td class="warn">Warning</td><td class="pass">Pass</td>
+            <td>Is the revocation list shared, or does each replica keep its own empty one?</td>
+          </tr>
+          <tr>
+            <td><code>noelia.headers.browser-baseline</code></td>
+            <td class="pass">Pass</td><td class="pass">Pass</td>
+            <td>Do the response headers a browser enforces actually reach the browser?</td>
+          </tr>
+          <tr>
+            <td><code>noelia.dashboard.operator-access</code></td>
+            <td class="pass">Pass</td><td class="pass">Pass</td>
+            <td>Is dashboard access policed, and can it be written to an audit trail?</td>
+          </tr>
+          <tr>
+            <td><code>noelia.jwt.key-separation</code></td>
+            <td class="pass">Pass</td><td class="pass">Pass</td>
+            <td>Can every service that verifies a token also mint one?</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="muted" style="margin-top:1.25rem">
+      The <span class="warn">Warning</span> is the point, not an oversight.
+      Development runs an in-process revocation list, a second replica would not
+      see it, and the check says so instead of letting the stage look like
+      Production.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Run it yourself</h2>
+    <p class="muted">
+      Everything below is in this repository under <code>demo/</code>. It needs
+      Docker and nothing else; the Noelia packages come from nuget.org.
+    </p>
+
+<pre>git clone https://github.com/DavidOeztuerk/noelia
+cd noelia/demo
+cp .env.example .env        # then fill in a key pair and an operator secret
+
+docker compose --profile dev     up -d --build --wait
+docker compose --profile staging up -d --build --wait
+docker compose --profile prod    up -d --build --wait
+docker compose --profile all     up -d --build --wait</pre>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Address</th><th>What is behind it</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">http://micro-dev.localhost:8080</td><td>Microservices: frontend, gateway, user and todo service</td></tr>
+          <tr><td class="mono">http://mono-dev.localhost:8080</td><td>The same application as a single host</td></tr>
+          <tr><td class="mono">…/noelia</td><td>The operator dashboard</td></tr>
+          <tr><td class="mono">…/api-docs</td><td>The API description — Development only</td></tr>
+          <tr><td class="mono">https://micro-prod.localhost:8443</td><td>Production posture: TLS, HSTS, Valkey, operator secret</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="muted" style="margin-top:1.25rem">
+      The staged hosts serve a certificate the image generates for names that
+      resolve only on your machine, so the browser will warn. That warning is
+      the honest signal that this is a local demo and not a deployment.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Install only what the service runs</h2>
+    <p class="muted">
+      A service that speaks to no broker leaves out
+      <code>Noelia.Messaging.MassTransit</code> and never sees MassTransit. An
+      architecture test pins the complete restored NuGet load of every package,
+      including the zeroes, so growth is a reviewed decision rather than an
+      invisible one.
+    </p>
+
+<pre>dotnet add package Noelia.Infrastructure
+dotnet add package Noelia.Redis                    # or Noelia.InMemory
+dotnet add package Noelia.Data.EntityFrameworkCore</pre>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Package</th><th>Contents</th><th>Restored packages</th></tr></thead>
+        <tbody>
+          <tr><td><code>Noelia.Core</code></td><td>Entities, domain exceptions, identity primitives</td><td>0</td></tr>
+          <tr><td><code>Noelia.Contracts</code></td><td>Boundary DTOs: paging, contract versioning</td><td>0</td></tr>
+          <tr><td><code>Noelia.Http</code></td><td>Correlation, rate limiting, the client address</td><td>0</td></tr>
+          <tr><td><code>Noelia.Dashboard</code></td><td>The read-only operator view</td><td>0</td></tr>
+          <tr><td><code>Noelia.Abstractions</code></td><td>Every port, plus the composition builder</td><td>8</td></tr>
+          <tr><td><code>Noelia.Infrastructure</code></td><td>Middleware, telemetry, resilience, sessions</td><td>44</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      MIT · <a href="https://github.com/DavidOeztuerk/noelia">github.com/DavidOeztuerk/noelia</a>
+      · <a href="https://www.nuget.org/packages?q=Noelia">nuget.org</a>
+    </p>
+    <p>
+      This page is generated from the repository and shows screenshots of a real
+      local run. It is not a hosted instance — GitHub Pages serves static files,
+      and a page that pretended otherwise would be exactly the kind of claim
+      this project exists to stop making.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

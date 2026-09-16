@@ -1,0 +1,152 @@
+.panel {
+  padding: var(--space-6);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-surface);
+}
+
+.panel__title {
+  margin-bottom: var(--space-4);
+  font-size: 1.125rem;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Title and button on one line, wrapping to two on a narrow screen. */
+.form--inline {
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+@media (width < 30rem) {
+  .form--inline {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.field__label {
+  color: var(--colour-text-muted);
+  font-size: 0.875rem;
+}
+
+.field__input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-surface-raised);
+}
+
+.field__input:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--colour-accent);
+  outline-offset: 2px;
+}
+
+.field__input[aria-invalid="true"] {
+  border-color: var(--colour-danger);
+}
+
+.field__hint {
+  color: var(--colour-text-muted);
+  font-size: 0.8125rem;
+}
+
+.field__error {
+  color: var(--colour-danger);
+  font-size: 0.8125rem;
+}
+
+.button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--colour-accent);
+  color: var(--colour-accent-text);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.button--ghost {
+  background: transparent;
+  border-color: var(--colour-border);
+  color: var(--colour-text);
+}
+
+.button--wide {
+  width: 100%;
+}
+
+.button--small {
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.875rem;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-inline-start: 3px solid var(--colour-success);
+  border-radius: var(--radius);
+  background: var(--colour-surface-raised);
+}
+
+.notice--error {
+  border-inline-start-color: var(--colour-danger);
+  color: var(--colour-danger);
+}
+
+.todo-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.todo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-surface-raised);
+}
+
+.todo--done .todo__title {
+  color: var(--colour-text-muted);
+  text-decoration: line-through;
+}
+
+.todo__title {
+  overflow-wrap: anywhere;
+}
+
+.todo__state {
+  color: var(--colour-success);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--colour-text-muted);
+}
+
+/* The form is disabled while a request is in flight; say so visually too. */
+[aria-busy="true"] {
+  opacity: 0.7;
+}

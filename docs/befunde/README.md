@@ -8,6 +8,12 @@ Reproduktion **nur mit Noelia**, was es kostet, und ein Stand zum Abhaken.
 Die gemeinsame Frage war immer dieselbe und ist die, die den ursprünglichen
 Defekt gefunden hat: **tut die Stelle, was ihr Name sagt?**
 
+Die beiden letzten Einträge stammen aus einer zweiten Runde am 16.09.2026, in
+der dieselbe Frage an den *laufenden* Stack gestellt wurde statt an den
+Quelltext. Die vollständige Liste dieser Runde — neun Stellen, überwiegend ohne
+Sicherheitsbezug — steht in [MIGRATION.md](../../MIGRATION.md) unter
+5.0.0 → 5.1.0; hier stehen nur die beiden mit einer Sicherheitswirkung.
+
 Die Paketspalte verwendet die heutigen Noelia-5-Nachfolgernamen. Die
 Versionsstände 4.4.x gehören zur Vorgängerlinie; Noelia-Paketkennungen beginnen
 erst mit 5.0.
@@ -24,6 +30,8 @@ erst mit 5.0.
 | [`HashAsync`: 30 000 Runden, wo Noelia selbst 600 000 fordert](hashasync-arbeitsfaktor.md) | Fehler | mittel | `Noelia.Redis` | 4.4.3 veröffentlicht |
 | [`DataEncryptionOptions`: fünf von sieben Einstellungen liest niemand](verschluesselungsoptionen-ohne-leser.md) | Lücke | niedrig | `Noelia.Abstractions` | Sicherheitsanteil in 4.4.3 veröffentlicht; Cache-API für 5.0 offen |
 | [`JwtConfigurationValidator` prüft einen Abschnitt, den Noelia nicht liest](jwt-pruefer-falscher-abschnitt.md) | Lücke | niedrig | `Noelia.Infrastructure` | 4.4.3 veröffentlicht |
+| [Erklärtes Vermittler-Vertrauen wurde nie angewandt](vermittler-vertrauen-ohne-wirkung.md) | Lücke | mittel | `Noelia.Infrastructure` | in 5.1.0 behoben |
+| [Der Health-Endpunkt liefert den Ausnahmetext des Treibers aus](health-endpunkt-nennt-den-treiber.md) | Fehler | niedrig–mittel | `Noelia.Infrastructure`, `Noelia.Redis` | in 5.1.0 behoben |
 
 ## Geprüft und in Ordnung
 

@@ -1,20 +1,47 @@
-using Noelia.Redis.HealthChecks;
-using Noelia.Abstractions.Caching;
+using System.Diagnostics;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
-using System.Diagnostics;
 
 namespace Noelia.Redis.HealthChecks;
 
 /// <summary>
-/// Health check for Redis connectivity and basic operations
+/// Whether this service can actually read and write on its RESP server.
 /// </summary>
+/// <remarks>
+/// <para>A round trip, not a description of the server. The check writes a key,
+/// reads it back, compares it and deletes it — which is the question a
+/// readiness probe is asking, and the only one whose answer decides whether
+/// traffic should arrive. A connection that reports itself as open proves
+/// nothing: a replica in the middle of a failover accepts connections and
+/// refuses writes.</para>
+///
+/// <para><strong>No admin commands.</strong> Until 5.1.0 this asked for
+/// <c>INFO</c> to report the version, the memory in use and the client count.
+/// <c>AddRedisConnection</c> enables admin commands in Development only — for
+/// good reason, since the same permission carries FLUSHALL and CONFIG — so
+/// outside Development the check threw <em>"This operation is not available
+/// unless admin mode is enabled"</em> and reported the server as unhealthy
+/// whether or not it was. That is why nothing ever registered it: the class was
+/// dead because it could not work.</para>
+///
+/// <para>The figures it used to collect were never a health question anyway.
+/// Memory, hit ratio and operations per second belong in the telemetry pipeline
+/// where they can be graphed over time, not in a probe that has to answer yes
+/// or no — and not in a response body that <c>/health</c> serves to whoever
+/// asks.</para>
+/// </remarks>
 public class RedisHealthCheck : IHealthCheck
 {
+    /// <summary>Beyond this, the server answers but is not answering well.</summary>
+    private static readonly TimeSpan Slow = TimeSpan.FromMilliseconds(500);
+
     private readonly IConnectionMultiplexer _connectionMultiplexer;
     private readonly ILogger<RedisHealthCheck> _logger;
 
+    /// <summary>Takes the multiplexer <c>AddRedisConnection</c> registered.</summary>
+    /// <param name="connectionMultiplexer">The shared connection.</param>
+    /// <param name="logger">Where the detail of a failure goes.</param>
     public RedisHealthCheck(
         IConnectionMultiplexer connectionMultiplexer,
         ILogger<RedisHealthCheck> logger)
@@ -23,176 +50,70 @@ public class RedisHealthCheck : IHealthCheck
         _logger = logger;
     }
 
+    /// <summary>Writes, reads, compares and deletes one key.</summary>
+    /// <param name="context">Supplied by the health check service.</param>
+    /// <param name="cancellationToken">Abandons the probe.</param>
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
-            var server = _connectionMultiplexer.GetServer(_connectionMultiplexer.GetEndPoints().First());
-            
-            var stopwatch = Stopwatch.StartNew();
-            
-            // Test basic connectivity
             if (!_connectionMultiplexer.IsConnected)
             {
-                return HealthCheckResult.Unhealthy("Redis connection is not established");
+                return HealthCheckResult.Unhealthy("The connection to the RESP server is not established.");
             }
 
-            // Test basic read/write operations
-            var testKey = $"healthcheck:{Environment.MachineName}:{Guid.NewGuid()}";
-            var testValue = DateTimeOffset.UtcNow.ToString();
-            
-            await database.StringSetAsync(testKey, testValue, TimeSpan.FromMinutes(1));
-            var retrievedValue = await database.StringGetAsync(testKey);
-            await database.KeyDeleteAsync(testKey);
-            
-            if (retrievedValue != testValue)
-            {
-                return HealthCheckResult.Unhealthy("Redis read/write test failed");
-            }
-
-            // Get server info
-            var info = await server.InfoAsync("server");
-            var memory = await server.InfoAsync("memory");
-            
-            stopwatch.Stop();
-
-            var data = new Dictionary<string, object>
-            {
-                ["connection_test"] = "passed",
-                ["read_write_test"] = "passed",
-                ["response_time_ms"] = stopwatch.ElapsedMilliseconds,
-                ["redis_version"] = info.SelectMany(g => g).FirstOrDefault(x => x.Key == "redis_version").Value ?? "unknown",
-                ["used_memory"] = memory.SelectMany(g => g).FirstOrDefault(x => x.Key == "used_memory").Value ?? "unknown",
-                ["connected_clients"] = info.SelectMany(g => g).FirstOrDefault(x => x.Key == "connected_clients").Value ?? "unknown"
-            };
-
-            if (stopwatch.ElapsedMilliseconds > 500)
-            {
-                _logger.LogWarning("Redis health check slow response: {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-                return HealthCheckResult.Degraded($"Redis responding slowly: {stopwatch.ElapsedMilliseconds}ms", data: data);
-            }
-
-            return HealthCheckResult.Healthy("Redis is healthy", data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Redis health check failed");
-            return HealthCheckResult.Unhealthy($"Redis health check failed: {ex.Message}", ex);
-        }
-    }
-}
-
-/// <summary>
-/// Health check for Redis performance metrics
-/// </summary>
-public class RedisPerformanceHealthCheck : IHealthCheck
-{
-    private readonly IConnectionMultiplexer _connectionMultiplexer;
-    private readonly ILogger<RedisPerformanceHealthCheck> _logger;
-
-    public RedisPerformanceHealthCheck(
-        IConnectionMultiplexer connectionMultiplexer,
-        ILogger<RedisPerformanceHealthCheck> logger)
-    {
-        _connectionMultiplexer = connectionMultiplexer;
-        _logger = logger;
-    }
-
-    public async Task<HealthCheckResult> CheckHealthAsync(
-        HealthCheckContext context,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var server = _connectionMultiplexer.GetServer(_connectionMultiplexer.GetEndPoints().First());
             var database = _connectionMultiplexer.GetDatabase();
 
-            // Get performance metrics
-            var info = await server.InfoAsync();
-            var memory = info.SelectMany(g => g).Where(x => x.Key.StartsWith("used_memory")).ToDictionary(x => x.Key, x => x.Value);
-            var stats = info.SelectMany(g => g).Where(x => x.Key.StartsWith("instantaneous_")).ToDictionary(x => x.Key, x => x.Value);
-            
-            // Test latency with multiple operations
-            var latencyTests = new List<Task<TimeSpan>>();
-            for (int i = 0; i < 10; i++)
+            // Namespaced and short-lived: a probe must not leave anything behind
+            // that another probe, or another replica, could read as state.
+            var key = new RedisKey($"noelia:healthcheck:{Guid.NewGuid():N}");
+            var written = Guid.NewGuid().ToString("N");
+
+            var stopwatch = Stopwatch.StartNew();
+
+            await database.StringSetAsync(key, written, TimeSpan.FromMinutes(1));
+            var read = await database.StringGetAsync(key);
+            await database.KeyDeleteAsync(key);
+
+            stopwatch.Stop();
+
+            if (read != written)
             {
-                latencyTests.Add(MeasureLatencyAsync(database));
+                return HealthCheckResult.Unhealthy(
+                    "The RESP server accepted a write and returned something else.");
             }
 
-            var latencies = await Task.WhenAll(latencyTests);
-            var averageLatency = latencies.Average(l => l.TotalMilliseconds);
-            var maxLatency = latencies.Max(l => l.TotalMilliseconds);
-
-            // Parse memory usage
-            var usedMemory = long.TryParse(memory.GetValueOrDefault("used_memory", "0"), out var mem) ? mem : 0;
-            var maxMemory = long.TryParse(memory.GetValueOrDefault("maxmemory", "0"), out var maxMem) ? maxMem : 0;
-            
-            var memoryUsagePercent = maxMemory > 0 ? (double)usedMemory / maxMemory * 100 : 0;
-
-            // Parse connection metrics
-            var connectedClients = int.TryParse(info.SelectMany(g => g).FirstOrDefault(x => x.Key == "connected_clients").Value, out var clients) ? clients : 0;
-            var maxClients = int.TryParse(info.SelectMany(g => g).FirstOrDefault(x => x.Key == "maxclients").Value, out var maxCli) ? maxCli : 0;
-
+            // Shapes only. /health is not an authenticated endpoint everywhere
+            // it is exposed, and a round-trip time is the most it should say
+            // about the infrastructure behind it.
             var data = new Dictionary<string, object>
             {
-                ["average_latency_ms"] = averageLatency,
-                ["max_latency_ms"] = maxLatency,
-                ["used_memory_bytes"] = usedMemory,
-                ["memory_usage_percent"] = memoryUsagePercent,
-                ["connected_clients"] = connectedClients,
-                ["max_clients"] = maxClients,
-                ["ops_per_sec"] = stats.GetValueOrDefault("instantaneous_ops_per_sec", "0"),
-                ["keyspace_hits"] = info.SelectMany(g => g).FirstOrDefault(x => x.Key == "keyspace_hits").Value ?? "0",
-                ["keyspace_misses"] = info.SelectMany(g => g).FirstOrDefault(x => x.Key == "keyspace_misses").Value ?? "0"
+                ["round_trip_ms"] = stopwatch.ElapsedMilliseconds
             };
 
-            // Determine health status based on metrics
-            var issues = new List<string>();
-
-            if (averageLatency > 100)
+            if (stopwatch.Elapsed > Slow)
             {
-                issues.Add($"High average latency: {averageLatency:F1}ms");
+                _logger.LogWarning(
+                    "RESP round trip took {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+
+                return HealthCheckResult.Degraded(
+                    $"The RESP server answered in {stopwatch.ElapsedMilliseconds}ms.", data: data);
             }
 
-            if (maxLatency > 1000)
-            {
-                issues.Add($"Very high max latency: {maxLatency:F1}ms");
-            }
-
-            if (memoryUsagePercent > 90)
-            {
-                issues.Add($"High memory usage: {memoryUsagePercent:F1}%");
-            }
-
-            if (connectedClients > maxClients * 0.9)
-            {
-                issues.Add($"High client connection usage: {connectedClients}/{maxClients}");
-            }
-
-            if (issues.Any())
-            {
-                var issueDescription = string.Join(", ", issues);
-                _logger.LogWarning("Redis performance issues detected: {Issues}", issueDescription);
-                return HealthCheckResult.Degraded($"Redis performance issues: {issueDescription}", data: data);
-            }
-
-            return HealthCheckResult.Healthy("Redis performance is good", data);
+            return HealthCheckResult.Healthy("The RESP server accepted a write and returned it.", data);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Redis performance health check failed");
-            return HealthCheckResult.Degraded($"Redis performance check failed: {ex.Message}", ex);
-        }
-    }
+            // The detail goes to the log, which has a reader who is allowed to
+            // see it. The description does not: a StackExchange.Redis failure
+            // names the endpoint it was talking to, and /health hands its body
+            // to whoever asked.
+            _logger.LogError(exception, "RESP health check failed");
 
-    private async Task<TimeSpan> MeasureLatencyAsync(IDatabase database)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        await database.PingAsync();
-        stopwatch.Stop();
-        return stopwatch.Elapsed;
+            return HealthCheckResult.Unhealthy(
+                "The RESP server could not be reached or refused the round trip.");
+        }
     }
 }

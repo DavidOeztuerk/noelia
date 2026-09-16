@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../UserService.Domain/UserService.Domain.csproj" />
+    <ProjectReference Include="../UserService.Contracts/UserService.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Noelia.Abstractions" />
+    <PackageReference Include="Noelia.Application" />
+  </ItemGroup>
+</Project>

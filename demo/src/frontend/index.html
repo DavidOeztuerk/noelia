@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todos · Noelia Demo</title>
+    <link rel="icon" href="/favicon.png" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <script type="module" src="/js/pages/dashboard.js"></script>
+  </head>
+  <body class="page page--app">
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+
+    <header class="topbar">
+      <p class="topbar__brand">Noelia&nbsp;Demo</p>
+      <div class="topbar__session">
+        <span data-session-name class="topbar__user"></span>
+        <button type="button" data-logout class="button button--ghost">Abmelden</button>
+      </div>
+    </header>
+
+    <main id="main" class="shell">
+      <p data-notice class="notice" role="status" aria-live="polite" hidden></p>
+
+      <section class="panel" aria-labelledby="new-todo-heading">
+        <h2 id="new-todo-heading" class="panel__title">Neue Aufgabe</h2>
+        <form data-todo-form class="form form--inline" novalidate>
+          <div class="field">
+            <label class="field__label" for="todo-title">Titel</label>
+            <input class="field__input" id="todo-title" name="title" type="text"
+                   minlength="2" maxlength="160" required autocomplete="off"
+                   placeholder="Was ist zu tun?" />
+            <p class="field__error" data-error-for="title" hidden></p>
+          </div>
+          <button type="submit" class="button">Anlegen</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="todo-list-heading">
+        <h2 id="todo-list-heading" class="panel__title">Meine Aufgaben</h2>
+        <ul data-todo-list class="todo-list"></ul>
+        <p data-todo-empty class="empty" hidden>Noch nichts zu tun.</p>
+      </section>
+    </main>
+  </body>
+</html>

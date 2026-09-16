@@ -1,0 +1,389 @@
+name: noelia-demo
+
+# One file, three stages, two architectures.
+#
+#   docker compose --profile dev     up -d --build --wait
+#   docker compose --profile staging up -d --build --wait
+#   docker compose --profile prod    up -d --build --wait
+#   docker compose --profile all     up -d --build --wait
+#
+# The stages differ in two things and nothing else: who may see the operator
+# dashboard, and where the state lives. The application code is identical.
+#
+#   http://micro-dev.localhost      https://micro-staging.localhost
+#   http://mono-dev.localhost       https://mono-staging.localhost
+#                                   https://micro-prod.localhost
+#                                   https://mono-prod.localhost
+#
+# No service publishes a port. Everything reaches the outside through the edge,
+# because a gateway that can be walked around is not a boundary — the services
+# used to listen on 0.0.0.0:8081 and 0.0.0.0:8082, where any client on the
+# machine could skip the gateway entirely.
+
+x-service: &service
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/live"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 15s
+
+# Secrets arrive as files under /run/secrets and are read by the KeyPerFile
+# provider, so the private key is not in the process environment where
+# `docker inspect` and /proc/<pid>/environ show it to anyone on the host.
+x-issuer-secrets: &issuer-secrets
+  - source: jwt_key_id
+    target: Jwt__KeyId
+  - source: jwt_private_key
+    target: Jwt__PrivateKey
+  - source: jwt_public_key
+    target: Jwt__PublicKey
+  - source: operator_secret
+    target: Demo__Dashboard__OperatorSecret
+
+# No private key. This service verifies signatures and holds nothing it could
+# sign with, so taking it over grants no ability to impersonate anyone.
+x-verifier-secrets: &verifier-secrets
+  - source: jwt_key_id
+    target: Jwt__KeyId
+  - source: jwt_public_key
+    target: Jwt__PublicKey
+  - source: operator_secret
+    target: Demo__Dashboard__OperatorSecret
+
+secrets:
+  jwt_key_id:
+    environment: NOELIA_JWT_KID
+  jwt_private_key:
+    environment: NOELIA_JWT_PRIVATE_KEY
+  jwt_public_key:
+    environment: NOELIA_JWT_PUBLIC_KEY
+  operator_secret:
+    environment: NOELIA_DASHBOARD_OPERATOR_SECRET
+
+services:
+
+  # --- the one way in ------------------------------------------------------
+  edge:
+    build:
+      context: ./src/frontend
+    profiles: [dev, staging, prod, all]
+    networks: [dev, staging, prod]
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8443:8443"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "--header", "Host: micro-dev.localhost", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  # --- dev: state in the process, dashboard open ---------------------------
+  gateway-dev:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
+        PROJECT_DLL: Gateway.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [dev, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    networks:
+      dev:
+        aliases: [gateway]
+
+  user-dev:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
+        PROJECT_DLL: UserService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [dev, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__Path: /data/user-service.db
+    secrets: *issuer-secrets
+    volumes:
+      - user-dev-data:/data
+    networks:
+      dev:
+        aliases: [user-service]
+
+  todo-dev:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
+        PROJECT_DLL: TodoService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [dev, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    secrets: *verifier-secrets
+    networks:
+      dev:
+        aliases: [todo-service]
+
+  mono-dev:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
+        PROJECT_DLL: Demo.Monolith.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [dev, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__Path: /data/monolith.db
+    secrets: *issuer-secrets
+    volumes:
+      - mono-dev-data:/data
+    networks:
+      dev:
+        aliases: [monolith]
+
+  # --- staging: state in Valkey, dashboard behind an operator secret -------
+  #
+  # Valkey rather than Redis: the BSD-3 fork under Linux Foundation governance,
+  # wire-compatible with the same client. SOVEREIGNTY.md names it as the
+  # sovereign choice, and a demo that recommends one thing and runs another
+  # would be making the argument badly.
+  valkey-staging:
+    image: valkey/valkey:8-alpine
+    networks: [staging]
+    profiles: [staging, all]
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  gateway-staging:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
+        PROJECT_DLL: Gateway.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [staging, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      Demo__Providers__Redis: valkey-staging:6379
+    depends_on:
+      valkey-staging:
+        condition: service_healthy
+    networks:
+      staging:
+        aliases: [gateway]
+
+  user-staging:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
+        PROJECT_DLL: UserService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [staging, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      Database__Path: /data/user-service.db
+      Demo__Providers__Redis: valkey-staging:6379
+    secrets: *issuer-secrets
+    volumes:
+      - user-staging-data:/data
+    depends_on:
+      valkey-staging:
+        condition: service_healthy
+    networks:
+      staging:
+        aliases: [user-service]
+
+  todo-staging:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
+        PROJECT_DLL: TodoService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [staging, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      Demo__Providers__Redis: valkey-staging:6379
+    secrets: *verifier-secrets
+    depends_on:
+      valkey-staging:
+        condition: service_healthy
+    networks:
+      staging:
+        aliases: [todo-service]
+
+  mono-staging:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
+        PROJECT_DLL: Demo.Monolith.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [staging, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Staging
+      Database__Path: /data/monolith.db
+      Demo__Providers__Redis: valkey-staging:6379
+    secrets: *issuer-secrets
+    volumes:
+      - mono-staging-data:/data
+    depends_on:
+      valkey-staging:
+        condition: service_healthy
+    networks:
+      staging:
+        aliases: [monolith]
+
+  # --- production: the same as staging, and it says why it is visible ------
+  valkey-prod:
+    image: valkey/valkey:8-alpine
+    networks: [prod]
+    profiles: [prod, all]
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  gateway-prod:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
+        PROJECT_DLL: Gateway.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [prod, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Demo__Providers__Redis: valkey-prod:6379
+    depends_on:
+      valkey-prod:
+        condition: service_healthy
+    networks:
+      prod:
+        aliases: [gateway]
+
+  user-prod:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
+        PROJECT_DLL: UserService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [prod, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Path: /data/user-service.db
+      Demo__Providers__Redis: valkey-prod:6379
+    secrets: *issuer-secrets
+    volumes:
+      - user-prod-data:/data
+    depends_on:
+      valkey-prod:
+        condition: service_healthy
+    networks:
+      prod:
+        aliases: [user-service]
+
+  todo-prod:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
+        PROJECT_DLL: TodoService.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [prod, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Demo__Providers__Redis: valkey-prod:6379
+    secrets: *verifier-secrets
+    depends_on:
+      valkey-prod:
+        condition: service_healthy
+    networks:
+      prod:
+        aliases: [todo-service]
+
+  mono-prod:
+    <<: *service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
+        PROJECT_DLL: Demo.Monolith.Api.dll
+        NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+    profiles: [prod, all]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Path: /data/monolith.db
+      Demo__Providers__Redis: valkey-prod:6379
+    secrets: *issuer-secrets
+    volumes:
+      - mono-prod-data:/data
+    depends_on:
+      valkey-prod:
+        condition: service_healthy
+    networks:
+      prod:
+        aliases: [monolith]
+
+networks:
+  # One network per stage. Two reasons, and both matter more than the tidiness:
+  # ocelot.json can keep naming `user-service` because that alias means
+  # something different on each of the three, and a container in one stage
+  # cannot open a connection to another stage at all.
+  dev:
+  staging:
+  prod:
+
+volumes:
+  # Only so a restart does not sign everyone out. The application owns the
+  # file; nothing else reads it.
+  user-dev-data:
+  user-staging-data:
+  user-prod-data:
+  mono-dev-data:
+  mono-staging-data:
+  mono-prod-data:

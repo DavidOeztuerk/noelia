@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Noelia.Redis.HealthChecks;
 using StackExchange.Redis;
 
 namespace Noelia.Redis;
@@ -51,6 +53,16 @@ public static class RedisConnectionRegistration
             cache.ConnectionMultiplexerFactory = () => Task.FromResult<IConnectionMultiplexer>(multiplexer);
             cache.InstanceName = instanceName.ToLowerInvariant() + ":";
         });
+
+        // A service that has taken a dependency on this server is not ready
+        // while the server is unreachable, and readiness is the probe that says
+        // so. Until 5.1.0 RedisHealthCheck existed and nothing registered it,
+        // which left /health/ready answering 200 over an unreachable Redis.
+        services.AddHealthChecks()
+            .AddCheck<RedisHealthCheck>(
+                "redis",
+                HealthStatus.Unhealthy,
+                tags: ["ready", "redis"]);
 
         return services;
     }

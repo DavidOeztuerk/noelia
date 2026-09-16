@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../TodoService.Domain/TodoService.Domain.csproj" />
+    <ProjectReference Include="../TodoService.Contracts/TodoService.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Noelia.Abstractions" />
+    <PackageReference Include="Noelia.Application" />
+  </ItemGroup>
+</Project>

@@ -28,6 +28,42 @@ jobs:
       # RedisTokenRevocationConformanceTests.
       - run: dotnet test Noelia.slnx --no-build -c Release --logger "console;verbosity=normal"
 
+  demo:
+    # The demo is the acceptance environment, and it consumes the packages
+    # rather than the source tree — so it can only be built against a packed
+    # candidate, never against a project reference. That is the property
+    # DemoStaysAForeignConsumerTests guards, and this job is where it is
+    # exercised: pack, restore from the local feed, build, test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Pack the candidate
+        run: |
+          dotnet restore Noelia.slnx
+          dotnet pack Noelia.slnx -c Release -o demo/.local-feed
+
+      # A candidate keeps its version number while its contents change, and
+      # NuGet has no way to know that. Without this the job silently tests
+      # whatever was cached first.
+      - name: Build and test the demo against it
+        working-directory: demo
+        run: |
+          rm -rf ~/.nuget/packages/noelia.*
+          dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
+          dotnet build Noelia.TodoDemo.sln --no-restore -c Release
+          dotnet test Noelia.TodoDemo.sln --no-build -c Release
+
+      - name: Frontend unit tests
+        working-directory: demo/src/frontend
+        run: |
+          npm ci
+          npm test
+
   vulnerabilities:
     runs-on: ubuntu-latest
     steps:
