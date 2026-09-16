@@ -26,10 +26,19 @@ public sealed record NoeliaServiceProvision(
     string Registration);
 
 /// <summary>What one module requires from others and provides to them.</summary>
+/// <param name="Module">The module this describes.</param>
+/// <param name="Requirements">What it cannot operate without.</param>
+/// <param name="Provisions">What it registers for others.</param>
+/// <param name="RegistersNothingBecause">
+/// Why this module registers nothing, when that is the point of it. A pipeline
+/// step has no service to offer, and without this a deliberate emptiness and a
+/// contract nobody wrote look identical to anyone reading the dashboard.
+/// </param>
 public sealed record NoeliaModuleContract(
     NoeliaModule Module,
     IReadOnlyList<NoeliaServiceRequirement> Requirements,
-    IReadOnlyList<NoeliaServiceProvision> Provisions);
+    IReadOnlyList<NoeliaServiceProvision> Provisions,
+    string? RegistersNothingBecause = null);
 
 /// <summary>Builds a module contract beside the registration it describes.</summary>
 public sealed class NoeliaModuleContractBuilder
@@ -37,6 +46,7 @@ public sealed class NoeliaModuleContractBuilder
     private readonly NoeliaModule _module;
     private readonly List<NoeliaServiceRequirement> _requirements = [];
     private readonly List<NoeliaServiceProvision> _provisions = [];
+    private string? _registersNothingBecause;
 
     /// <summary>Starts the contract for <paramref name="module"/>.</summary>
     public NoeliaModuleContractBuilder(NoeliaModule module) => _module = module;
@@ -65,12 +75,44 @@ public sealed class NoeliaModuleContractBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(registration);
 
+        if (_registersNothingBecause is not null)
+        {
+            throw new InvalidOperationException(
+                $"{_module} declared that it registers nothing and then declared "
+                + $"{typeof(TService).Name}.");
+        }
+
         _provisions.Add(new NoeliaServiceProvision(typeof(TService), packageId, registration));
         return this;
     }
 
+    /// <summary>
+    /// Declares that this module registers nothing, and why.
+    /// </summary>
+    /// <remarks>
+    /// For a module that is a pipeline step and nothing else. It is a claim
+    /// like any other and is checked like one: calling this and then
+    /// <see cref="Provides{TService}"/> is a contradiction, and the second call
+    /// throws rather than quietly winning.
+    /// </remarks>
+    /// <param name="reason">What the module does instead, in one sentence.</param>
+    public NoeliaModuleContractBuilder RegistersNothing(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        if (_provisions.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"{_module} declared a provision and then declared that it registers nothing.");
+        }
+
+        _registersNothingBecause = reason;
+        return this;
+    }
+
     /// <summary>Produces the immutable contract.</summary>
-    public NoeliaModuleContract Build() => new(_module, _requirements.ToArray(), _provisions.ToArray());
+    public NoeliaModuleContract Build() =>
+        new(_module, _requirements.ToArray(), _provisions.ToArray(), _registersNothingBecause);
 }
 
 /// <summary>A module's executable registration and its public contract.</summary>

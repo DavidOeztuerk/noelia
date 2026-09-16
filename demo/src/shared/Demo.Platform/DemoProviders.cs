@@ -4,6 +4,8 @@ using Noelia.Abstractions.Hosting;
 using Noelia.Dashboard;
 using Noelia.InMemory.Hosting;
 using Noelia.Infrastructure.Audit;
+using Noelia.Infrastructure.Security.Encryption;
+using Noelia.Infrastructure.Security.Keys;
 using Noelia.Redis;
 using Noelia.Redis.Caching;
 using Noelia.Redis.Security;
@@ -83,6 +85,17 @@ public static class DemoProviders
         {
             noelia.UseRedisTokenRevocation(MaxTokenLifetime);
         }
+
+        // The chain that ends the two data-protection warnings ASP.NET writes at
+        // every start: a master key opens the encryption provider, the
+        // encryption provider protects the key ring, and the cache provider
+        // keeps it where the next container can read it. Without all three the
+        // ring lives in one container's filesystem in the clear, and every
+        // cookie or antiforgery token protected with it stops verifying when
+        // that container is replaced.
+        noelia.Services.AddConfiguredMasterKey();
+        noelia.UseRedisEncryption();
+        noelia.UseDataProtection(serviceName);
 
         return noelia;
     }

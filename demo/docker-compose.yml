@@ -46,6 +46,8 @@ x-issuer-secrets: &issuer-secrets
     target: Jwt__PublicKey
   - source: operator_secret
     target: Demo__Dashboard__OperatorSecret
+  - source: master_key
+    target: Encryption__MasterKey
 
 # No private key. This service verifies signatures and holds nothing it could
 # sign with, so taking it over grants no ability to impersonate anyone.
@@ -56,6 +58,14 @@ x-verifier-secrets: &verifier-secrets
     target: Jwt__PublicKey
   - source: operator_secret
     target: Demo__Dashboard__OperatorSecret
+  - source: master_key
+    target: Encryption__MasterKey
+
+# The gateway reads no token and needs no key pair. It does need the master key,
+# because it keeps a data protection key ring like every other host.
+x-gateway-secrets: &gateway-secrets
+  - source: master_key
+    target: Encryption__MasterKey
 
 secrets:
   jwt_key_id:
@@ -66,6 +76,8 @@ secrets:
     environment: NOELIA_JWT_PUBLIC_KEY
   operator_secret:
     environment: NOELIA_DASHBOARD_OPERATOR_SECRET
+  master_key:
+    environment: NOELIA_MASTER_KEY
 
 services:
 
@@ -103,6 +115,7 @@ services:
       dev:
         aliases: [gateway]
 
+    secrets: *gateway-secrets
   user-dev:
     <<: *service
     build:
@@ -198,6 +211,7 @@ services:
       staging:
         aliases: [gateway]
 
+    secrets: *gateway-secrets
   user-staging:
     <<: *service
     build:
@@ -300,6 +314,7 @@ services:
       prod:
         aliases: [gateway]
 
+    secrets: *gateway-secrets
   user-prod:
     <<: *service
     build:

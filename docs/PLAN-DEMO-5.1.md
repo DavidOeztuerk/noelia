@@ -155,12 +155,20 @@ sagt das, statt die Stufe wie Production aussehen zu lassen.
 
 ## 5. Offen
 
-1. **Data-Protection-Schlüssel** sind flüchtig und unverschlüsselt. Der heutige
-   Anmeldefluss benutzt sie nicht; für Cookie-Authentifizierung oder
-   Rücksetz-Token wäre es ein echtes Risiko.
+1. ~~**Data-Protection-Schlüssel** sind flüchtig und unverschlüsselt.~~
+   In 5.2.0 behoben: `UseDataProtection(applicationName)` legt den Ring durch
+   `IDistributedCacheService` ab und verschlüsselt ihn mit
+   `IDataEncryptionService` — beides Noelia-Ports, also kein neues Paket. Der
+   Check `noelia.dataprotection.key-ring` meldet den unversorgten Zustand.
 2. **Keine zweite `ISovereignAuditSink`.** Die Prüfspur liegt in jeder Stufe im
-   Prozess, also je Replik eine Kette. Für Noelia eine offene Aufgabe, nicht
-   für die Demo.
+   Prozess, also je Replik eine Kette. In 5.2.0 **sichtbar gemacht**, nicht
+   behoben: `noelia.audit.chain-scope` meldet `Warning`, solange eine läuft.
+   Eine zweite Senke allein genügt nicht — `AuditTrailService` schreibt die
+   Kette aus einem eigenen Feld fort, zwei Repliken erzeugen also zwei
+   verschränkte Ketten in einem Speicher, die schlechter sind als zwei
+   getrennte. Die Security-Prüfspur in `Noelia.Redis` löst dasselbe bereits mit
+   Compare-and-Set auf einem gemeinsamen Kopf; die Form der Antwort ist damit
+   bekannt, die Arbeit steht aus.
 3. **`--profile all` misst 15 Container.** Auf einer kleineren Maschine ist
    `staging` der erste Kandidat zum Weglassen.
 4. **`InProduction` ist eine Verhaltensänderung in einer Nebenversion.** Nach

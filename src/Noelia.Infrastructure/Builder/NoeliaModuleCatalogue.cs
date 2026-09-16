@@ -32,9 +32,13 @@ internal static class NoeliaModuleCatalogue
         {
             LoggingConfiguration.ConfigureSerilog(noelia.Configuration, noelia.Environment, noelia.ServiceName);
             noelia.Services.AddSerilog();
-        }),
+        }, contract => contract.Provides<Microsoft.Extensions.Logging.ILoggerFactory>(
+            "Noelia.Infrastructure", "Use(NoeliaModule.Logging)")),
 
-        Entry(NoeliaModule.HttpContextAccess, noelia => noelia.Services.AddHttpContextAccessor()),
+        Entry(NoeliaModule.HttpContextAccess,
+            noelia => noelia.Services.AddHttpContextAccessor(),
+            contract => contract.Provides<Microsoft.AspNetCore.Http.IHttpContextAccessor>(
+                "Noelia.Infrastructure", "Use(NoeliaModule.HttpContextAccess)")),
 
         Entry(NoeliaModule.JsonOptions, noelia =>
         {
@@ -42,7 +46,8 @@ internal static class NoeliaModuleCatalogue
 
             noelia.Services.ConfigureHttpJsonOptions(options => Camel(options.SerializerOptions, indented));
             noelia.Services.Configure<JsonOptions>(options => Camel(options.SerializerOptions, indented));
-        }),
+        }, contract => contract.Provides<Microsoft.Extensions.Options.IConfigureOptions<JsonOptions>>(
+            "Noelia.Infrastructure", "Use(NoeliaModule.JsonOptions)")),
 
         Entry(NoeliaModule.Jwt, noelia =>
         {
@@ -89,7 +94,10 @@ internal static class NoeliaModuleCatalogue
             noelia => Infrastructure(noelia).AddDistributedRateLimiting(),
             contract => contract.Provides<Noelia.Abstractions.Caching.IDistributedRateLimitStore>(
                 "Noelia.Infrastructure", "Use(NoeliaModule.RateLimiting)")),
-        Entry(NoeliaModule.HealthChecks, noelia => Infrastructure(noelia).AddHealthChecks()),
+        Entry(NoeliaModule.HealthChecks,
+            noelia => Infrastructure(noelia).AddHealthChecks(),
+            contract => contract.Provides<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckService>(
+                "Noelia.Infrastructure", "Use(NoeliaModule.HealthChecks)")),
         Entry(NoeliaModule.Caching, noelia =>
         {
             // Both in-process, and neither needs a decision from anyone: the
@@ -123,17 +131,27 @@ internal static class NoeliaModuleCatalogue
         // exactly that separation: the provider answers [RequirePermission] on the
         // endpoints that carry it, the middleware refuses everything it was not
         // told about.
-        Entry(NoeliaModule.PermissionEnforcement, _ => { }),
+        Entry(NoeliaModule.PermissionEnforcement, _ => { },
+            contract => contract.RegistersNothing(
+                "it is the pipeline step UsePermissions() and nothing else; the policies it "
+                + "enforces come from Authorization")),
 
-        Entry(NoeliaModule.CorrelationPropagation, noelia => noelia.Services.AddCorrelationIdPropagation()),
+        Entry(NoeliaModule.CorrelationPropagation,
+            noelia => noelia.Services.AddCorrelationIdPropagation(),
+            contract => contract.Provides<CorrelationIdHandler>(
+                "Noelia.Infrastructure", "Use(NoeliaModule.CorrelationPropagation)")),
 
         Entry(NoeliaModule.ApiDocumentation, noelia =>
         {
             noelia.Services.AddEndpointsApiExplorer();
             noelia.Services.AddSwaggerDocumentation(noelia.ServiceName);
-        }),
+        }, contract => contract.Provides<Swashbuckle.AspNetCore.Swagger.ISwaggerProvider>(
+            "Noelia.Infrastructure", "Use(NoeliaModule.ApiDocumentation)")),
 
-        Entry(NoeliaModule.Cors, noelia => noelia.Services.AddNoeliaCors(noelia.Configuration, noelia.Environment)),
+        Entry(NoeliaModule.Cors,
+            noelia => noelia.Services.AddNoeliaCors(noelia.Configuration, noelia.Environment),
+            contract => contract.Provides<Microsoft.AspNetCore.Cors.Infrastructure.ICorsService>(
+                "Noelia.Infrastructure", "Use(NoeliaModule.Cors)")),
 
         // Below the default line: each needs something the service must supply,
         // and a default that refuses to start is not a default.

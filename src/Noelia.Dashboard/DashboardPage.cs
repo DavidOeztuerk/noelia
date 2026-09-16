@@ -89,7 +89,15 @@ internal static class DashboardPage
 
             if (contract.Requirements.Count == 0 && contract.Provisions.Count == 0)
             {
-                output.Append("<p class=\"warning\">Running, but its contract declares no requirement or provided effect.</p>");
+                // Three states, and only one of them is a finding. A module can
+                // register nothing on purpose — a pipeline step has no service
+                // to offer — and until 5.1.0 that read exactly like a contract
+                // nobody had written. An operator cannot act on a warning that
+                // turns out to be the design.
+                output.Append(contract.RegistersNothingBecause is { } reason
+                    ? "<p>Registers nothing, by design: " + H(reason) + "</p>"
+                    : "<p class=\"warning\">Running, but its contract declares no requirement "
+                      + "or provided effect.</p>");
                 continue;
             }
 

@@ -1,3 +1,69 @@
+# Noelia 5.1.0 → 5.2.0
+
+Additiv. Nichts, was du aufrufst, ändert seine Form — aber zwei neue Prüfungen
+können einen Bericht, der gestern grün war, heute rot machen. Das ist die
+Absicht: Sie melden zwei Zustände, die vorher niemand gemeldet hat.
+
+## Der Schlüsselring von ASP.NET liegt nicht mehr im Container
+
+Neu: `UseDataProtection(applicationName)` in der Zusammensetzung.
+
+ASP.NET schreibt seinen Data-Protection-Schlüsselring sonst in ein Verzeichnis
+im Container und warnt bei jedem Start zweimal darüber. Beides stimmt und
+keines ist harmlos: Was mit diesem Ring geschützt ist — ein
+Authentifizierungs-Cookie, ein Antiforgery-Token, ein Rücksetz-Link — verifiziert
+nicht mehr, sobald der Container ersetzt wird, und eine zweite Replik verifiziert
+nie, was die erste ausgestellt hat. `DataProtectionSecretProvider` gab es, und
+registriert hat ihn niemand.
+
+Der Ring geht jetzt durch `IDistributedCacheService` und wird mit
+`IDataEncryptionService` verschlüsselt — beides Noelia-Ports, also **kein neues
+Paket**. Welcher Server das ist, entscheidet wie überall der Betrieb:
+
+```csharp
+noelia.UseRedisCache(serviceName)
+      .UseRedisEncryption()
+      .UseDataProtection(serviceName);
+```
+
+Der neue Check `noelia.dataprotection.key-ring` meldet `Fail`, solange der Ring
+im Dateisystem des Containers liegt oder unverschlüsselt abgelegt wird.
+
+## Die Prüfspur sagt, wie weit sie reicht
+
+Neu: `noelia.audit.chain-scope`, und er meldet `Warning`, solange eine souveräne
+Prüfspur läuft.
+
+`AuditTrailService` schreibt seine Kette aus einem Feld fort, das es selbst
+hält. Für eine Replik ist das richtig und für zwei still falsch: Beide beginnen
+bei ihrem eigenen Kopf, und ein Prüfer findet hinterher eine gebrochene Kette
+auf einem System, an dem niemand manipuliert hat.
+
+**Eine zweite Senke allein behebt das nicht** — zwei verschränkte Ketten in
+einem Speicher sind schlechter als zwei getrennte. Die Security-Prüfspur in
+`Noelia.Redis` löst dasselbe Problem bereits mit Compare-and-Set auf einem
+gemeinsamen Kopf; die souveräne bekommt das noch. Bis dahin steht im Dashboard,
+welche der beiden du fährst.
+
+## Ein Modul darf sagen, dass es nichts registriert
+
+Neu: `NoeliaModuleContractBuilder.RegistersNothing(reason)`.
+
+Acht eingebaute Module hatten keinen Vertrag, und das Dashboard schrieb für
+jedes denselben Satz: *„Running, but its contract declares no requirement or
+provided effect."* Für `PermissionEnforcement` war das die Wahrheit — es ist ein
+Pipeline-Schritt und registriert nichts —, für die anderen sieben eine
+Auslassung. Beides las sich gleich.
+
+Sieben erklären jetzt, was sie liefern; eines erklärt, dass es nichts liefert,
+und warum. Der Aufruf widerspricht `Provides<T>`: wer beides deklariert,
+bekommt eine Ausnahme statt einer stillen Entscheidung.
+
+**Was du tun musst:** nichts, es sei denn, du hast eigene Module. Dann lohnt der
+Blick ins Dashboard — der Satz steht dort für jedes Modul ohne Vertrag.
+
+---
+
 # Noelia 5.0.0 → 5.1.0
 
 **Neun Stellen behaupteten etwas, das nicht stattfand.** Sechs sind entfernt,

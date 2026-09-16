@@ -40,12 +40,14 @@ public sealed class SecurityHeadersPackageTests
 
         var report = app.Services.GetRequiredService<ISecurityCheckReport>();
 
+        // Composition-category checks run in every host, whether or not the
+        // module they report on is composed — a probe that exposes no readiness
+        // endpoint and keeps no audit trail gets NotApplicable, not a finding.
         report.Latest.Select(result => result.Id).Should().Equal(
+            "noelia.audit.chain-scope",
             "noelia.composition.providers",
+            "noelia.dataprotection.key-ring",
             "noelia.headers.browser-baseline",
-            // 5.1.0. Composition-category, so it runs everywhere: a probe host
-            // that exposes no readiness endpoint gets NotApplicable rather than
-            // a finding.
             "noelia.health.readiness-coverage");
         report.Latest.Should().OnlyContain(result =>
             result.Module == NoeliaModule.Composition
