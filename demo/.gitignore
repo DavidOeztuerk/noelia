@@ -29,7 +29,6 @@ logs/
 artifacts/
 .packages/
 .local-feed/
-NuGet.Local.Config
 
 # Playwright
 test-results/
