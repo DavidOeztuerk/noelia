@@ -72,16 +72,3 @@ public class CachedResponse<T> where T : class
     /// </summary>
     public bool IsValid => !ExpiresAt.HasValue || DateTime.UtcNow < ExpiresAt.Value;
 }
-
-/// <summary>
-/// Cache statistics
-/// </summary>
-public class CacheStatistics
-{
-    public long TotalRequests { get; set; }
-    public long CacheHits { get; set; }
-    public long CacheMisses { get; set; }
-    public long CacheEvictions { get; set; }
-    public double HitRate => TotalRequests > 0 ? (double)CacheHits / TotalRequests * 100 : 0;
-    public DateTime LastReset { get; set; } = DateTime.UtcNow;
-}

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -23,6 +24,19 @@ internal sealed class NoeliaDashboardMiddleware(
 {
     private const string CssResource = "Noelia.Dashboard.Assets.dashboard.css";
     private const string JsResource = "Noelia.Dashboard.Assets.dashboard.js";
+
+    /// <summary>
+    /// How the machine-readable report is written.
+    /// </summary>
+    /// <remarks>
+    /// camelCase because the readers are not all .NET, and unindented because
+    /// the reader is a program. A consumer that wants the official types
+    /// deserialises with these same settings.
+    /// </remarks>
+    private static readonly JsonSerializerOptions ReportJson = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = false
+    };
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -51,7 +65,21 @@ internal sealed class NoeliaDashboardMiddleware(
         var isPage = !remaining.HasValue || remaining == "/";
         var isCss = remaining == "/assets/dashboard.css";
         var isScript = remaining == "/assets/dashboard.js";
-        if (!isPage && !isCss && !isScript)
+
+        // The same reading the page shows, for a reader that is not a person.
+        // It sits inside this middleware rather than beside it so that it
+        // inherits the authentication, the visibility rule and the audit entry
+        // above: a report path that were easier to reach than the page would be
+        // a way around the access rule, not a second view of it.
+        var isReport = remaining == "/report.json";
+
+        // Verification is a separate request because it is a separate kind of
+        // act. Recomputing a chain of millions of entries on every page load
+        // would turn opening the dashboard into an attack on the store it
+        // reports about, so this is asked for deliberately.
+        var isChain = remaining == "/audit-chain.json";
+
+        if (!isPage && !isCss && !isScript && !isReport && !isChain)
         {
             await NotFound(context).ConfigureAwait(false);
             return;
@@ -76,14 +104,49 @@ internal sealed class NoeliaDashboardMiddleware(
         }
 
         context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.ContentType = isReport || isChain
+            ? "application/json; charset=utf-8"
+            : "text/html; charset=utf-8";
 
-        if (!HttpMethods.IsHead(context.Request.Method))
+        // Before collecting, not after: inspecting every provider to then throw
+        // the answer away would let a HEAD request cost what a GET costs.
+        if (HttpMethods.IsHead(context.Request.Method))
+        {
+            return;
+        }
+
+        if (isChain)
+        {
+            var verifier = context.RequestServices.GetService<IAuditChainVerifier>();
+            var verification = verifier is null
+                ? AuditChainVerification.Unsupported(
+                    "No audit chain verifier is registered. AddSovereignAuditTrail() registers one.")
+                : await verifier.VerifyAsync(cancellationToken: context.RequestAborted)
+                    .ConfigureAwait(false);
+
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(verification, ReportJson),
+                context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
+        var report = await OperatorReportCollector.CollectAsync(
+            context,
+            options,
+            context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System)
+            .ConfigureAwait(false);
+
+        if (isReport)
         {
             await context.Response.WriteAsync(
-                await DashboardPage.RenderAsync(context, options).ConfigureAwait(false),
+                JsonSerializer.Serialize(report, ReportJson),
                 context.RequestAborted).ConfigureAwait(false);
+            return;
         }
+
+        await context.Response.WriteAsync(
+            DashboardPage.Render(report, options),
+            context.RequestAborted).ConfigureAwait(false);
     }
 
     private static async Task<bool> AuthenticateIfAvailable(HttpContext context)

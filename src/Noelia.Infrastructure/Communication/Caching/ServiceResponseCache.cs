@@ -157,12 +157,14 @@ public class ServiceResponseCache : IServiceResponseCache
     {
         lock (_statsLock)
         {
+            // Hits and misses rather than hits and a total: the total is
+            // their sum, and carrying it separately invites the two to
+            // disagree after a counter is missed somewhere.
             return new CacheStatistics
             {
-                TotalRequests = _totalRequests,
-                CacheHits = _cacheHits,
-                CacheMisses = _cacheMisses,
-                CacheEvictions = _cacheEvictions
+                Hits = _cacheHits,
+                Misses = _cacheMisses,
+                Evictions = _cacheEvictions
             };
         }
     }

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Noelia is a set of 13 NuGet packages that form a shared foundation for .NET
 microservices (CQRS pipeline, security/identity, caching, messaging, health,
-resilience, observability). Targets `net10.0`; version `5.3.0`.
+resilience, observability). Targets `net10.0`; version `6.0.0`.
 
 The library itself has nothing to run but its tests. `demo/` holds a consumer:
 one todo application built twice (microservices behind a gateway, and a

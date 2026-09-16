@@ -111,6 +111,7 @@ services:
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Dashboard__Fleet: micro-dev
     networks:
       dev:
         aliases: [gateway]
@@ -128,6 +129,7 @@ services:
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Dashboard__Fleet: micro-dev
       Database__Path: /data/user-service.db
     secrets: *issuer-secrets
     volumes:
@@ -148,6 +150,7 @@ services:
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Dashboard__Fleet: micro-dev
     secrets: *verifier-secrets
     networks:
       dev:
@@ -165,6 +168,7 @@ services:
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Dashboard__Fleet: mono-dev
       Database__Path: /data/monolith.db
     secrets: *issuer-secrets
     volumes:
@@ -203,6 +207,7 @@ services:
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
+      Dashboard__Fleet: micro-staging
       Demo__Providers__Redis: valkey-staging:6379
     depends_on:
       valkey-staging:
@@ -224,6 +229,7 @@ services:
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
+      Dashboard__Fleet: micro-staging
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *issuer-secrets
@@ -248,6 +254,7 @@ services:
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
+      Dashboard__Fleet: micro-staging
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *verifier-secrets
     depends_on:
@@ -269,6 +276,7 @@ services:
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
+      Dashboard__Fleet: mono-staging
       Database__Path: /data/monolith.db
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *issuer-secrets
@@ -306,6 +314,7 @@ services:
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Dashboard__Fleet: micro-prod
       Demo__Providers__Redis: valkey-prod:6379
     depends_on:
       valkey-prod:
@@ -327,6 +336,7 @@ services:
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Dashboard__Fleet: micro-prod
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *issuer-secrets
@@ -351,6 +361,7 @@ services:
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Dashboard__Fleet: micro-prod
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *verifier-secrets
     depends_on:
@@ -372,6 +383,7 @@ services:
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Dashboard__Fleet: mono-prod
       Database__Path: /data/monolith.db
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *issuer-secrets

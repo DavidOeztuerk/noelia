@@ -1,3 +1,4 @@
+using Noelia.Abstractions.Caching;
 using Noelia.Infrastructure.Communication.Caching;
 using Noelia.Infrastructure.Communication.Configuration;
 using Microsoft.Extensions.Caching.Distributed;
@@ -244,10 +245,10 @@ public class ServiceResponseCacheTests
 
         var stats = cache.GetStatistics();
 
-        stats.TotalRequests.Should().Be(0);
-        stats.CacheHits.Should().Be(0);
-        stats.CacheMisses.Should().Be(0);
-        stats.CacheEvictions.Should().Be(0);
+        stats.Hits.Should().Be(0);
+        stats.Misses.Should().Be(0);
+        stats.Evictions.Should().Be(0);
+        stats.HitRatio.Should().Be(0);
     }
 
     [Fact]
@@ -258,9 +259,9 @@ public class ServiceResponseCacheTests
         await cache.GetAsync<TestData>("miss-key");
 
         var stats = cache.GetStatistics();
-        stats.TotalRequests.Should().Be(1);
-        stats.CacheMisses.Should().Be(1);
-        stats.CacheHits.Should().Be(0);
+        stats.Misses.Should().Be(1);
+        stats.Hits.Should().Be(0);
+        stats.HitRatio.Should().Be(0);
     }
 
     [Fact]
@@ -272,7 +273,7 @@ public class ServiceResponseCacheTests
         await cache.GetAsync<TestData>("hit-key");
 
         var stats = cache.GetStatistics();
-        stats.CacheHits.Should().Be(1);
+        stats.Hits.Should().Be(1);
     }
 
     [Fact]
@@ -284,7 +285,7 @@ public class ServiceResponseCacheTests
         await cache.RemoveAsync("evict-key");
 
         var stats = cache.GetStatistics();
-        stats.CacheEvictions.Should().Be(1);
+        stats.Evictions.Should().Be(1);
     }
 
     #endregion
@@ -334,23 +335,27 @@ public class ServiceResponseCacheTests
 
     #region CacheStatistics DTO
 
+    /// <summary>
+    /// A ratio, not a percentage.
+    /// </summary>
+    /// <remarks>
+    /// The type this replaced in 6.0.0 had the same name and reported the same
+    /// quantity a hundred times larger. Anything reading it that was not
+    /// recompiled — a dashboard, an alert threshold — now sees 0.75 where it
+    /// used to see 75, so the difference is worth a test that states the scale.
+    /// </remarks>
     [Fact]
-    public void CacheStatistics_HitRate_CalculatesCorrectly()
+    public void CacheStatistics_HitRatio_is_a_fraction_of_one()
     {
-        var stats = new CacheStatistics
-        {
-            TotalRequests = 100,
-            CacheHits = 75
-        };
+        var stats = new CacheStatistics { Hits = 75, Misses = 25 };
 
-        stats.HitRate.Should().Be(75);
+        stats.HitRatio.Should().Be(0.75);
     }
 
     [Fact]
-    public void CacheStatistics_HitRate_ZeroRequests_ReturnsZero()
+    public void CacheStatistics_HitRatio_ZeroRequests_ReturnsZero()
     {
-        var stats = new CacheStatistics();
-        stats.HitRate.Should().Be(0);
+        new CacheStatistics().HitRatio.Should().Be(0);
     }
 
     #endregion

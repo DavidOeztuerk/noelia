@@ -1277,6 +1277,65 @@ directly, a rendered key is obvious immediately; a sentence in a language the
 user did not choose never is, which is how the German wording survived four
 major versions unnoticed.
 
+## Reading a service with a program
+
+The dashboard is a page for a person. The same reading is available as data at
+`GET {dashboard path}/report.json`, deserialising into `OperatorReport` from
+`Noelia.Abstractions.Operator`.
+
+```bash
+curl -s https://ops.internal/noelia/report.json | jq '.sovereignty.dependencies'
+```
+
+Both come from one collection, so they cannot disagree: the page renders the
+report, and the endpoint serialises it. It sits in the same middleware, behind
+the same authentication, the same visibility rule and the same audit entry — a
+report path that were easier to reach than the page would be a way around the
+access rule rather than a second view of it. Configuration values, tokens and
+keys are absent from both.
+
+Each section carries one of four states rather than an empty list —
+`Absent`, `Unavailable`, `Faulted`, `Present`. A service with no rate-limit
+store and a service whose store stopped answering are not the same finding: one
+is a composition decision and the other is an outage.
+
+Set `Dashboard:Fleet` to say which deployment a service belongs to. Noelia
+never invents one; a guessed name would group unrelated services and look
+authoritative doing it.
+
+### Verifying the audit chain
+
+`IAuditTrailService` chains every entry to its predecessor's hash. Reading that
+chain back and recomputing it is a separate request:
+
+```bash
+curl -s https://ops.internal/noelia/audit-chain.json
+```
+
+```json
+{ "isSupported": true, "isIntact": true, "entriesVerified": 1284402,
+  "head": "aU5niZ…", "firstBreak": null }
+```
+
+Two things are checked per entry, and they catch different edits. Recomputing
+the entry's own hash catches a record rewritten in place. Comparing its
+`previousHash` against the entry before it catches a record removed, inserted or
+moved — where every record is individually intact and only the sequence is a
+lie. A break is **named**, not merely counted: a verdict of "invalid" without a
+location sends an investigator back to the manual work they wanted a machine
+for.
+
+It is deliberately not part of the report. Recomputing millions of entries on
+every page load would make opening the dashboard an attack on the store it
+reports about, so the report carries only `audit.canBeVerified`.
+
+A sink says it can be read back by implementing `IReadableSovereignAuditSink`;
+`Noelia.Redis` and the in-process sink do. One that only writes is still a valid
+sink — an append-only log, or a foreign system you write into and not out of —
+and the verifier then answers `isSupported: false` with what would make it
+possible. That is not a failed verification, and a report that showed the two
+alike would let "we never checked" read as "we checked and it was fine".
+
 ## Telemetry
 
 ```csharp
@@ -1625,22 +1684,19 @@ integration suite is indistinguishable from a passing one.
   by two of them and refused by the third. One attribute now drives the first
   two; the third has no attribute and is reachable only as
   `[Authorize(Policy = "users:read")]`. Which one survives is still open.
-- **Duplicate type names.** Three areas carry two or three types of the same
-  name, which the package split made visible: `CacheStatistics`
-  (`Noelia.Abstractions.Caching` and `Noelia.Infrastructure.Communication.Caching`),
-  `RateLimitResult` (`Noelia.Abstractions.Security.RateLimiting` and
-  `Noelia.Infrastructure.Models`), and a whole second audit system —
-  `ISecurityAuditLogger` with its own `SecurityAuditEvent` and
-  `SecurityEventSeverity` beside `ISecurityAuditService`. Where they collide
-  the code now names them in full; merging them is separate work.
+- **Duplicate type names** — resolved in 6.0.0, and two of the three had
+  already gone. `RateLimitResult` and `IDomainEvent` existed once by the time
+  anyone looked. `CacheStatistics` was real and dangerous: same name, and one
+  reported a ratio of 1 where the other reported a percentage of 100. The
+  second audit system was worse — `SecurityEventSeverity` put `Critical` at 3
+  on one scale and 4 on the other, so a stored value changed meaning depending
+  on who read it. One of each survives; see MIGRATION.md.
 - **German error messages** — done in 5.3.0. The shipped wording is English,
   which is the language of this package and no claim about the user's, and
   `IErrorTextProvider` replaces every sentence of it.
 - **`ISecretProvider` implementations still sit in `Noelia.Infrastructure`.**
   The port moved to `Noelia.Abstractions`, the OpenBao and file-based
   implementations did not. They belong in `Noelia.Secrets.*` packages.
-- **Duplicate `IDomainEvent`.** One lives in `Noelia.Cqrs.Interfaces`, a second
-  in `Noelia.Infrastructure.Caching`, because of the layering above.
 - **Password entries from another system.** `IPasswordHasher` is a port and
   entries say what they are, so a reader for bcrypt or Argon2id can be layered
   in front — but Noelia ships neither, and a migration that has to re-hash
@@ -1971,18 +2027,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 5.3.0. Consumers install anonymously from NuGet.org:
+version is 6.0.0. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 5.3.0
+dotnet add package Noelia.Infrastructure --version 6.0.0
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="5.3.0" />
-  <PackageReference Include="Noelia.Redis" Version="5.3.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="5.3.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="6.0.0" />
+  <PackageReference Include="Noelia.Redis" Version="6.0.0" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="6.0.0" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`

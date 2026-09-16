@@ -1,3 +1,140 @@
+# Noelia 5.3.0 → 6.0.0
+
+**Noelia wird maschinell auskunftsfähig.** Bisher konnte ein Dienst einem
+*Menschen* Auskunft geben: Er rendert eine Seite, jemand liest sie, und was
+dort steht, gilt für diesen Prozess in diesem Augenblick. Einem zweiten
+Programm — einer Flottenansicht, einem Prüfer, einem nächtlichen Lauf — konnte
+er nichts sagen.
+
+## Ein Modell hinter dem Dashboard
+
+Neu: `OperatorReport` in `Noelia.Abstractions.Operator`, abrufbar unter
+`GET {Dashboard-Pfad}/report.json`.
+
+`DashboardPage` schrieb HTML direkt aus den registrierten Diensten. Zwischen
+Daten und Darstellung lag nichts, also hätte ein zweiter Leser dieselben
+Dienste über einen zweiten Codepfad abfragen müssen — und zwei Pfade für eine
+Aussage driften lautlos auseinander.
+
+Jetzt erhebt ein Sammler den Bericht einmal; die Seite rendert ihn, der
+Endpunkt gibt ihn heraus. Beides in derselben Middleware, hinter derselben
+Authentifizierung, derselben Sichtbarkeitsregel und demselben
+Prüfspur-Eintrag.
+
+Jeder Abschnitt trägt einen von vier Zuständen statt einer leeren Liste:
+`Absent`, `Unavailable`, `Faulted`, `Present`. Ein Dienst ohne Bremse und ein
+Dienst, dessen Bremse nicht mehr antwortet, sahen bisher gleich aus.
+
+**Was du tun musst:** nichts. Die Seite sieht aus wie vorher. Wer den Bericht
+nutzen will, setzt `Dashboard:Fleet`, damit ein Sammler mehrere Dienste einer
+Anlage zuordnen kann — Noelia erfindet keinen Namen.
+
+## Die Prüfspur lässt sich nachrechnen
+
+Neu: `IReadableSovereignAuditSink`, `IAuditChainVerifier` und
+`GET {Dashboard-Pfad}/audit-chain.json`.
+
+`ISovereignAuditSink` hatte genau eine Methode: `WriteAsync`. Die Spur war
+hashverkettet, eine Änderung brach alle folgenden Hashes — und nichts in
+Noelia konnte das prüfen. „Die Kette ist unversehrt" war eine Behauptung,
+solange sie niemand nachrechnete.
+
+Der Prüfer fängt zwei verschiedene Eingriffe: der eigene Hash eines Eintrags
+fängt einen überschriebenen Datensatz, der Vergleich mit dem Vorgänger fängt
+einen entfernten, eingefügten oder verschobenen — wo jeder Datensatz für sich
+stimmt und nur die Reihenfolge lügt. Das Ergebnis benennt die Stelle.
+
+Verifikation ist ein eigener Pfad und läuft **nicht** bei jedem Seitenaufruf:
+Eine Kette aus Millionen Einträgen bei jedem Aufruf nachzurechnen machte das
+Öffnen des Dashboards zum Angriff auf den Speicher, über den es berichtet.
+`OperatorReport.Audit.CanBeVerified` sagt, ob Fragen sich lohnt.
+
+**Was du tun musst:** nichts, wenn deine Senke nur schreibt — dann meldet der
+Prüfer `IsSupported = false` und sagt, was ihn möglich machte. `Noelia.Redis`
+und die In-Memory-Senke können ab 6.0.0 zurücklesen.
+
+### Speicherformat: der Redis-Index trägt eine Folgenummer
+
+Der sortierte Satz `{prefix}:audit:index` war nach Zeitstempel sortiert. Die
+Reihenfolge einer Kette ist aber die der Anhänge, die das Compare-and-Set
+entscheidet, nicht die der Uhren: Zwei Repliken können in derselben
+Millisekunde anhängen, und ein Prüfer bekäme die beiden in beliebiger
+Reihenfolge — falscher Alarm an einer Kette, die niemand angefasst hat.
+
+**Keine Migration nötig.** Die Folgenummer setzt am vorhandenen Höchstwert an,
+nicht bei null. Eine vor 6.0.0 nach Zeitstempeln indizierte Kette behält ihre
+Reihenfolge, und der nächste Eintrag landet darüber.
+
+## Brechend: `CacheStatistics` gab es zweimal
+
+`Noelia.Abstractions.Caching.CacheStatistics` und
+`Noelia.Infrastructure.Communication.Caching.CacheStatistics` — gleicher Name,
+verschiedene Felder, und **verschiedene Maßstäbe**: das eine meldete `HitRatio`
+als Bruch (0…1), das andere `HitRate` als Prozent (0…100).
+
+Die Variante aus `Noelia.Abstractions` überlebt, weil dort der Port liegt.
+
+**Was du tun musst,** wenn du `IServiceResponseCache.GetStatistics()` liest:
+
+| vorher | jetzt |
+|---|---|
+| `TotalRequests` | `Hits + Misses` |
+| `CacheHits` | `Hits` |
+| `CacheMisses` | `Misses` |
+| `CacheEvictions` | `Evictions` |
+| `LastReset` | `LastUpdated` |
+| `HitRate` — **0…100** | `HitRatio` — **0…1** |
+
+Die letzte Zeile ist die gefährliche. Ein Schwellwert, der bei `> 80` Alarm
+schlug, schlägt jetzt nie wieder Alarm. Der Compiler fängt den Feldnamen; den
+Maßstab fängt er nicht.
+
+## Brechend: zwei Prüfspur-Systeme, eines bleibt
+
+`Noelia.Infrastructure.Security` führte ein eigenes `SecurityAuditEvent` und
+`SecurityEventSeverity` neben den gleichnamigen Typen in
+`Noelia.Abstractions.Security.Audit`. **Die Schweregrade stimmten nicht
+überein:**
+
+| Wert | alte Infrastructure-Skala | überlebende Skala |
+|---|---|---|
+| 0 | Information | Information |
+| 1 | Warning | Low |
+| 2 | Error | Medium |
+| 3 | **Critical** | High |
+| 4 | — | **Critical** |
+
+Ein auf einer Skala geschriebener und auf der anderen gelesener Wert wechselte
+lautlos die Bedeutung. Die Typen aus `Noelia.Abstractions` überleben.
+
+**Was du tun musst:** `SecurityEventSeverity.Warning` → `Low` oder `Medium`,
+`SecurityEventSeverity.Error` → `High`. Wer die Zahlenwerte gespeichert hat,
+muss `3` als `Critical` gelesene Einträge auf `4` heben.
+
+### Und: `ISecurityAuditLogger` hat nie gespeichert
+
+Der Fund dahinter ist der eigentliche Grund für die Zusammenführung.
+`SecurityAuditLogger` schrieb ein Ereignis in den Logstrom und hörte dort auf —
+mit einem Kommentar im Code, dass eine *richtige* Implementierung es auch
+speichern würde. `Audit` ist in `UseDefaults()`, also betraf das **jeden**
+Noelia-Dienst.
+
+Die Lesehälfte war schlimmer: `GetSecurityEventsAsync` gab bedingungslos eine
+leere Folge zurück. Wer fragte, welche Sicherheitsereignisse aufgetreten sind,
+bekam „keine" — was wie eine Antwort klingt und keine war. Ein Test nagelte das
+sogar als Sollverhalten fest.
+
+Jetzt schreibt der Logger immer in den Logstrom **und** an einen registrierten
+`ISecurityAuditService`, wenn es einen gibt. Das Lesen ohne Speicher wirft und
+nennt die Pakete, die einen brächten, statt Leere zu melden.
+
+**Was du tun musst:** nichts zum Schreiben. Wenn du
+`GetSecurityEventsAsync` aufrufst, registriere einen `ISecurityAuditService`
+(`AddRedisSecurity(...)` oder `AddInMemorySecurity()`) — vorher bekamst du dort
+ohnehin nie etwas.
+
+---
+
 # Noelia 5.2.0 → 5.3.0
 
 ## Transactional Outbox
