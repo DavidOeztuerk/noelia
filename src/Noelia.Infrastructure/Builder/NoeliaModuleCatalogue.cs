@@ -56,7 +56,10 @@ internal static class NoeliaModuleCatalogue
             // would put a consumer in the container whose dependency nothing
             // supplies. These two need no key.
             noelia.Services.AddSingleton<ITotpService, TotpService>();
-            noelia.Services.AddSingleton<IErrorMessageService, ErrorMessageService>();
+            // Resolved, not constructed: an application that registered its own
+            // wording gets it, and one that did not gets the built-in English.
+            noelia.Services.AddSingleton<IErrorMessageService>(p =>
+                new ErrorMessageService(text: p.GetService<IErrorTextProvider>()));
         }, contract => contract
             .Provides<ITotpService>("Noelia.Infrastructure", "Use(NoeliaModule.Jwt)")
             .Provides<IErrorMessageService>("Noelia.Infrastructure", "Use(NoeliaModule.Jwt)")),

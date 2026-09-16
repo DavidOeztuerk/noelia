@@ -29,17 +29,28 @@ class DashboardPage extends Page {
   }
 
   /**
-   * Withdraws the token, then forgets it. The local session is cleared even
-   * when the call fails: leaving someone signed in because the network was
-   * down is the worse of the two outcomes.
+   * Withdraws the token on the server, and only then forgets it here.
+   *
+   * It used to clear the local session in a `finally`, on the argument that
+   * leaving someone signed in because the network was down is the worse
+   * outcome. The argument does not hold: the refresh cookie is HttpOnly, so
+   * clearing local state signs nobody out — it hides that they are still
+   * signed in, and the next visit renews the session and lets them straight
+   * back in. Saying "you are signed out" while the server disagrees is the
+   * worse outcome, because it is the one nobody checks.
    */
   async #signOut() {
     try {
       await this.auth.signOut();
-    } finally {
-      Session.clear();
-      Page.redirectToLogin();
+    } catch (error) {
+      this.notice.error(
+        "Abmelden fehlgeschlagen — du bist weiterhin angemeldet. Bitte erneut versuchen."
+      );
+      return;
     }
+
+    Session.clear();
+    Page.redirectToLogin();
   }
 
   async start() {

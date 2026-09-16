@@ -17,7 +17,8 @@ public sealed class TokenSessionService(
     IRefreshTokenStore store,
     IOptions<TokenSessionOptions> options,
     TimeProvider clock,
-    ILogger<TokenSessionService> logger) : ITokenSessionService
+    ILogger<TokenSessionService> logger,
+    SessionObservations observed) : ITokenSessionService
 {
     /// <summary>
     /// 32 bytes of randomness. Not a JWT: nothing reads anything out of a
@@ -26,7 +27,6 @@ public sealed class TokenSessionService(
     private const int TokenBytes = 32;
 
     private readonly TokenSessionOptions _options = options.Value;
-    private readonly ConcurrentDictionary<SubjectId, byte> _observedSubjects = new();
 
     /// <inheritdoc />
     public async Task<SignInResult> SignInAsync(
@@ -54,7 +54,7 @@ public sealed class TokenSessionService(
                 clientFingerprint),
             cancellationToken);
 
-        _observedSubjects.TryAdd(subject, 0);
+        observed.Add(subject);
 
         logger.LogInformation("Session {Session} started", session);
 
@@ -119,7 +119,7 @@ public sealed class TokenSessionService(
             return new RefreshResult(result.Outcome, null, null, null, null);
         }
 
-        _observedSubjects.TryAdd(issued.Subject, 0);
+        observed.Add(issued.Subject);
         return new RefreshResult(
             result.Outcome, issued.Session, issued.Subject, successorToken, issued.ExpiresAt);
     }
@@ -137,7 +137,7 @@ public sealed class TokenSessionService(
         CancellationToken cancellationToken = default)
     {
         var closed = await store.CloseAllSessionsAsync(subject, clock.GetUtcNow(), cancellationToken);
-        _observedSubjects.TryRemove(subject, out _);
+        observed.Remove(subject);
         logger.LogInformation("All sessions ended, {Count} token(s) closed", closed);
     }
 
@@ -146,7 +146,7 @@ public sealed class TokenSessionService(
         SubjectId subject,
         CancellationToken cancellationToken = default)
     {
-        _observedSubjects.TryAdd(subject, 0);
+        observed.Add(subject);
         return store.ActiveSessionsAsync(subject, clock.GetUtcNow(), cancellationToken);
     }
 
@@ -157,7 +157,7 @@ public sealed class TokenSessionService(
         var now = clock.GetUtcNow();
         var entries = new List<TokenSessionEntry>();
 
-        foreach (var subject in _observedSubjects.Keys.OrderBy(subject => subject.ToString(), StringComparer.Ordinal))
+        foreach (var subject in observed.Subjects)
         {
             var sessions = await store.ActiveSessionsAsync(subject, now, cancellationToken)
                 .ConfigureAwait(false);

@@ -50,7 +50,8 @@ public class TransactionBracketTests : IDisposable
             new EntityFrameworkRefreshTokenStore<SessionTestContext>(_context),
             Options.Create(new TokenSessionOptions()),
             _clock,
-            NullLogger<TokenSessionService>.Instance);
+            NullLogger<TokenSessionService>.Instance,
+            new SessionObservations());
     }
 
     /// <summary>

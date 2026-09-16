@@ -69,7 +69,8 @@ public static class ServiceCollectionExtensions
     services.AddSingleton<ITotpService, TotpService>();
 
     // Error Handling Services
-    services.AddSingleton<IErrorMessageService, ErrorMessageService>();
+    services.AddSingleton<IErrorMessageService>(p =>
+      new ErrorMessageService(text: p.GetService<IErrorTextProvider>()));
 
     // Token revocation is opt-in: register a store (Noelia.Redis, Noelia.InMemory)
     // or AddNoTokenRevocation(rationale). UseTokenRevocation() refuses to build

@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Playwright-Schnappschüsse aus Browser-Sitzungen
+.playwright-mcp/
+test-results/
+playwright-report/

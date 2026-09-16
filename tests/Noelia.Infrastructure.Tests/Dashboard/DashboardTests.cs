@@ -330,6 +330,7 @@ public sealed class DashboardTests
                 services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton(Options.Create(new TokenSessionOptions()));
+                services.AddSingleton<SessionObservations>();
                 services.AddSingleton<ITokenSessionService, TokenSessionService>();
                 services.AddMemoryCache();
                 services.AddSingleton<IDistributedRateLimitStore, InProcessRateLimitStore>();

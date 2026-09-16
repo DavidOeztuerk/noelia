@@ -15,7 +15,7 @@ public class ErrorMessageServiceTests
         var message = _sut.GetUserMessage(ErrorCodes.ResourceNotFound);
 
         message.Should().NotBeNullOrEmpty();
-        message.Should().Contain("nicht gefunden");
+        message.Should().Contain("could not be found");
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public class ErrorMessageServiceTests
     {
         var message = _sut.GetUserMessage("ERR_UNKNOWN");
 
-        message.Should().Be("Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.");
+        message.Should().Be("Something went wrong.");
     }
 
     [Fact]

@@ -1529,9 +1529,9 @@ integration suite is indistinguishable from a passing one.
   `ISecurityAuditLogger` with its own `SecurityAuditEvent` and
   `SecurityEventSeverity` beside `ISecurityAuditService`. Where they collide
   the code now names them in full; merging them is separate work.
-- **German error messages.** `Noelia.Core/Exceptions/ErrorMessageService.cs`
-  returns user-facing text in German. It should either be neutral or come from
-  a resource file.
+- **German error messages** — done in 5.3.0. The shipped wording is English,
+  which is the language of this package and no claim about the user's, and
+  `IErrorTextProvider` replaces every sentence of it.
 - **`ISecretProvider` implementations still sit in `Noelia.Infrastructure`.**
   The port moved to `Noelia.Abstractions`, the OpenBao and file-based
   implementations did not. They belong in `Noelia.Secrets.*` packages.
@@ -1548,10 +1548,9 @@ integration suite is indistinguishable from a passing one.
 - **`ILogSanitizer` has no consumer inside Noelia** since logging moved to
   shapes. It stays as a tool for an application that logs a payload of its own,
   and whether that is enough reason to keep it is an open question.
-- **No transactional outbox.** Recording an intent in the same transaction as
-  the change that caused it is infrastructure and belongs here; the dispatcher
-  that delivers it is a background loop and belongs to the application, the same
-  split as `PurgeAsync`. Nothing is built yet.
+- **Transactional outbox** — done in 5.3.0. `IOutbox` records the intent in the
+  transaction that caused it; `UseOutboxDispatcher()` runs the loop that
+  delivers it. Delivery is at-least-once and says so.
 
 ## Security notice — 4.4.2: encryption envelope metadata was not authenticated
 

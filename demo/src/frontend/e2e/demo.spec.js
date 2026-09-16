@@ -90,6 +90,29 @@ test("signing out sends the next visit back to the login page", async ({ page })
   expect(noise).toEqual([]);
 });
 
+test("a failed sign-out says so instead of pretending", async ({ page }) => {
+  const noise = watchConsole(page);
+  await register(page, credentials());
+
+  // The refresh cookie is HttpOnly. Clearing local state signs nobody out — it
+  // hides that they are still signed in, and the next visit renews and lets
+  // them back in. That was the behaviour until 5.3.0.
+  await page.route("**/api/auth/sign-out", (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
+  );
+
+  await page.getByRole("button", { name: "Abmelden" }).click();
+
+  await expect(page.getByText(/weiterhin angemeldet/)).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login$/);
+
+  await page.unroute("**/api/auth/sign-out");
+  await page.getByRole("button", { name: "Abmelden" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+
+  expect(noise).toEqual([]);
+});
+
 test("the completion button comes back when the request fails", async ({ page }) => {
   const noise = watchConsole(page);
   await register(page, credentials());

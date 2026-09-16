@@ -1,3 +1,107 @@
+# Noelia 5.2.0 → 5.3.0
+
+## Transactional Outbox
+
+Neu: `IOutbox`, `IOutboxReader` und `OutboxMessage` in `Noelia.Abstractions`,
+`AddEntityFrameworkOutbox<TContext>()` in `Noelia.Data.EntityFrameworkCore`,
+`UseOutboxDispatcher()` in `Noelia.Infrastructure`.
+
+`IEventBus` sagt seit jeher ausdrücklich, dass er **keinen** Outbox garantiert:
+Zwischen dem Commit einer Änderung und dem Veröffentlichen des Ereignisses
+darüber liegt eine Lücke, und ein Prozess, der darin stirbt, hinterlässt ein
+System, in dem die Änderung geschah und niemand davon erfuhr. Es andersherum zu
+versuchen verschiebt die Lücke nur: Dann kann die Veröffentlichung gelingen und
+der Commit scheitern, und Zuhörer erfahren von etwas, das nie passiert ist.
+
+`RecordAsync` schreibt die Absicht in **dieselbe** Transaktion und ruft
+absichtlich kein `SaveChangesAsync`. Das Speichern des Aufrufers entscheidet, ob
+beides passiert ist — oder keines.
+
+```csharp
+context.Jobs.Add(job);
+await outbox.RecordAsync(new JobFinished(job.Id));
+await context.SaveChangesAsync();          // beides, oder nichts
+```
+
+Zustellung ist **at-least-once**, und der Dispatcher tut nicht so, als wäre sie
+etwas anderes: Er veröffentlicht zuerst und markiert danach, weil ein Absturz
+dazwischen die Nachricht zweimal zustellt — die Alternative verliert sie.
+`OutboxMessage.Id` reist deshalb mit.
+
+Das Zustellen ist ein eigener Prozess mit eigenem Takt: `UseOutboxDispatcher()`
+richtet ihn ein. Ein Dienst im Verbund braucht ihn, nicht jeder. Zwei
+Dispatcher an einem Speicher sind sicher — das Beanspruchen ist ein bedingtes
+Update —, aber unnötig.
+
+**Was du tun musst:** `MapNoeliaOutbox()` in `OnModelCreating` aufrufen und eine
+Migration erzeugen. Eine Tabelle, die niemand anlegt, ist eine Nachricht, die
+niemand aufschreibt.
+
+## Fehlermeldungen sind nicht mehr deutsch
+
+`ErrorMessageService` lieferte deutsche Sätze aus einem Paket, dessen API,
+Dokumentation und README englisch sind. Jede Anwendung, die nicht für ein
+deutschsprachiges Publikum geschrieben war, zeigte ihren Nutzern eine Sprache,
+die sie nicht gewählt hatten — und konnte daran nichts ändern, ohne den ganzen
+Dienst zu ersetzen.
+
+Neu: `IErrorTextProvider`. Noelia entscheidet weiter die **Struktur** — welcher
+Code existiert, ob er überhaupt gezeigt werden darf, welche Hilfeseite ihn
+erklärt, welche Handlungen ihn lösen könnten. Den **Wortlaut** entscheidet die
+Anwendung.
+
+`GetSuggestedActions` liefert jetzt Schlüssel aus `ErrorActions`
+(`check-input`, `contact-support`) statt Sätze. Ein Schlüssel ist etwas zum
+Nachschlagen; ein Satz ist etwas zum Überschreiben.
+
+**Was du tun musst:**
+
+- Wenn dir Englisch recht ist: nichts.
+- Wenn du deutsche Meldungen willst: registriere einen `IErrorTextProvider` —
+  die bisherigen Texte stehen in der Versionsgeschichte dieser Datei.
+- **Wenn du `GetSuggestedActions` direkt anzeigst, prüfe das.** Dort stehen
+  jetzt Schlüssel. Ein angezeigter Schlüssel fällt sofort auf; ein Satz in einer
+  ungewählten Sprache fällt nie auf, und genau darum geht es.
+
+## Die Sitzungsübersicht konnte nie etwas anzeigen
+
+`TokenSessionService` ist `AddScoped` registriert, und die Menge der
+beobachteten Subjekte war ein Instanzfeld — bei jeder Anfrage ein neues, leeres
+Wörterbuch. Das Dashboard meldete deshalb `0 active sessions observed by this
+instance`, in jedem Einsatz, dauerhaft. Die Formulierung ließ die Leere wie eine
+Antwort klingen statt wie einen Defekt, und genau das ist die Fehlerklasse, für
+die die 5.0-Linie existiert: registriert, vorhanden, ohne Wirkung, und niemand
+merkt es.
+
+Die Menge liegt jetzt in `SessionObservations`, einem Singleton, das
+`NoeliaModule.TokenSessions` mitregistriert. Über die Komposition ändert sich
+für dich nichts.
+
+**Brechend, wenn du `TokenSessionService` selbst baust** — in eigenen Tests
+etwa. Der Konstruktor hat einen fünften Parameter:
+
+```csharp
+// vorher
+new TokenSessionService(store, options, clock, logger);
+
+// jetzt
+new TokenSessionService(store, options, clock, logger, new SessionObservations());
+```
+
+Es gibt bewusst **keine** Überladung mit vier Parametern. Sie müsste sich ihre
+eigene Beobachtungsmenge anlegen — also genau den Defekt wiederherstellen, den
+diese Änderung behebt, und zwar lautlos. Ein `[Obsolete]`-Pfad, der weiter das
+Falsche tut, ist schlechter als ein Compilerfehler, der eine Zeile kostet.
+
+Wer den Dienst aus dem Container auflöst, ist nicht betroffen.
+
+Eine Nebenwirkung, mit der zu rechnen ist: Dashboards, die hier immer `0`
+zeigten, zeigen ab jetzt echte Zahlen. Das ist keine neue Last — die Menge hält
+nur Subjekt-Bezeichner dieses Prozesses —, aber es ist eine Zahl, die vorher
+niemand gesehen hat.
+
+---
+
 # Noelia 5.1.0 → 5.2.0
 
 ## Ein Port lag im Motor: `ISovereignAuditSink` ist umgezogen

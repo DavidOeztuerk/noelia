@@ -31,6 +31,9 @@ public static class TokenSessionModule
             builder.Configuration.GetSection(TokenSessionOptions.SectionName));
 
         builder.Services.TryAddSingletonTimeProvider();
+        // Singleton: the scoped service writes here, the dashboard reads here.
+        // A set on the scoped service itself was empty on every request.
+        builder.Services.AddSingleton<SessionObservations>();
         builder.Services.AddScoped<ITokenSessionService, TokenSessionService>();
 
         return builder;

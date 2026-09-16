@@ -23,8 +23,56 @@ public class TokenSessionServiceTests
     private readonly InMemoryRefreshTokenStore _store = new();
     private readonly TokenSessionOptions _options = new();
 
+    /// <summary>
+    /// One observation set for the whole test, as the container gives the
+    /// application: it is a singleton, and a per-call one would be empty every
+    /// time — which is exactly the defect this parameter exists to have fixed.
+    /// </summary>
+    private readonly SessionObservations _observed = new();
+
     private TokenSessionService Service() =>
-        new(_store, Options.Create(_options), _clock, NullLogger<TokenSessionService>.Instance);
+        new(_store, Options.Create(_options), _clock,
+            NullLogger<TokenSessionService>.Instance, _observed);
+
+    /// <summary>
+    /// A sign-in has to be visible to a later reader in the same process.
+    /// </summary>
+    /// <remarks>
+    /// Until 5.3.0 the observation set was a field on this service, which is
+    /// registered scoped — a fresh, empty dictionary on every request. The
+    /// dashboard's session panel therefore reported "0 active sessions observed
+    /// by this instance" in every deployment, forever, and the wording made the
+    /// emptiness sound like an answer rather than a defect.
+    /// <para>
+    /// Two service instances over one observation set is exactly what the
+    /// container produces: the request that signs in and the request that reads
+    /// the dashboard are different scopes.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_sign_in_is_visible_to_the_next_request()
+    {
+        var subject = SubjectId.New();
+
+        await Service().SignInAsync(subject);
+
+        var inspection = await Service().InspectAsync();
+
+        inspection.IsAvailable.Should().BeTrue();
+        inspection.Sessions.Should().ContainSingle()
+            .Which.Subject.Should().Be(subject.ToString());
+    }
+
+    [Fact]
+    public async Task Signing_out_everywhere_takes_the_subject_out_of_the_view()
+    {
+        var subject = SubjectId.New();
+        await Service().SignInAsync(subject);
+
+        await Service().SignOutEverywhereAsync(subject);
+
+        (await Service().InspectAsync()).Sessions.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task Signing_in_issues_a_token_that_refreshes()
