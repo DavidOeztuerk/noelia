@@ -89,6 +89,33 @@ public static class RedisNoeliaModule
                     "Noelia.Redis", "UseRedisTokenRevocation(maxTokenLifetime)"));
     }
 
+    /// <summary>The module id for the shared sovereign audit chain.</summary>
+    public static NoeliaModule SovereignAudit => new("Redis.SovereignAudit");
+
+    /// <summary>
+    /// Puts the sovereign audit chain on the RESP server, so every replica
+    /// extends one sequence instead of starting its own.
+    /// </summary>
+    /// <param name="noelia">The composition.</param>
+    /// <param name="keyPrefix">Separates one system's chain from another's.</param>
+    public static NoeliaBuilder UseRedisSovereignAudit(
+        this NoeliaBuilder noelia,
+        string keyPrefix = "noelia")
+    {
+        ArgumentNullException.ThrowIfNull(noelia);
+
+        return noelia.Use(
+            SovereignAudit,
+            builder => builder.Services.AddRedisSovereignAudit(keyPrefix),
+            contract => contract
+                .Requires<IConnectionMultiplexer>(new NoeliaProviderHint(
+                    "Noelia.Redis", "AddRedisConnection(connectionString, instanceName)"))
+                .Provides<Noelia.Abstractions.Audit.ISovereignAuditSink>(
+                    "Noelia.Redis", "UseRedisSovereignAudit()")
+                .Provides<Noelia.Abstractions.Audit.IChainedSovereignAuditSink>(
+                    "Noelia.Redis", "UseRedisSovereignAudit()"));
+    }
+
     /// <summary>Writes the security audit trail to the RESP server.</summary>
     /// <param name="noelia">The composition.</param>
     public static NoeliaBuilder UseRedisSecurityAudit(this NoeliaBuilder noelia)

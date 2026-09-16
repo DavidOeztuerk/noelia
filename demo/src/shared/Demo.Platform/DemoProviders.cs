@@ -3,7 +3,10 @@ using Microsoft.Extensions.Hosting;
 using Noelia.Abstractions.Hosting;
 using Noelia.Dashboard;
 using Noelia.InMemory.Hosting;
+using Noelia.InMemory.Security;
 using Noelia.Infrastructure.Audit;
+using Noelia.Infrastructure.Security.Encryption;
+using Noelia.Infrastructure.Security.Keys;
 using Noelia.Redis;
 using Noelia.Redis.Caching;
 using Noelia.Redis.Security;
@@ -61,9 +64,28 @@ public static class DemoProviders
         // which is exactly the limitation AuditTrailService documents.
         noelia.Services.AddSovereignAuditTrail();
 
+        // The key ring needs a master key and somewhere to put the result, and
+        // every stage has both. Requiring a whole encryption provider — which
+        // in practice meant Redis — left Development unable to protect it at
+        // all, and a stage that cannot is a stage that reports Fail forever.
+        noelia.Services.AddConfiguredMasterKey();
+
         if (!environment.UsesRedis)
         {
-            return noelia.UseInMemoryCache(serviceName);
+            noelia.UseInMemoryCache(serviceName);
+            noelia.UseDataProtection(serviceName);
+
+            // Development got no revocation store at all, and the dashboard
+            // said so: "Token revocation is not registered." A signed-out
+            // access token stayed valid until it expired — in the one stage
+            // where a developer is most likely to test signing out. In process
+            // and per replica, which is what Development is, but registered.
+            if (readsTokens)
+            {
+                noelia.Services.AddInMemoryTokenRevocation();
+            }
+
+            return noelia;
         }
 
         // The connection itself is not a module: it is the thing the modules
@@ -79,10 +101,26 @@ public static class DemoProviders
         noelia.UseRedisCache(serviceName);
         noelia.UseRedisSecurityAudit();
 
+        // One chain for every replica writing to this server, instead of one
+        // per process. Without it two replicas both start from their own head
+        // and a verifier reading the store back finds a break on a system where
+        // nothing was tampered with.
+        noelia.UseRedisSovereignAudit();
+
         if (readsTokens)
         {
             noelia.UseRedisTokenRevocation(MaxTokenLifetime);
         }
+
+        // The chain that ends the two data-protection warnings ASP.NET writes at
+        // every start: a master key opens the encryption provider, the
+        // encryption provider protects the key ring, and the cache provider
+        // keeps it where the next container can read it. Without all three the
+        // ring lives in one container's filesystem in the clear, and every
+        // cookie or antiforgery token protected with it stops verifying when
+        // that container is replaced.
+        noelia.UseRedisEncryption();
+        noelia.UseDataProtection(serviceName);
 
         return noelia;
     }

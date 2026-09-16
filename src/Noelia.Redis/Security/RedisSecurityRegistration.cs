@@ -5,6 +5,8 @@ using Noelia.Abstractions.Security.Encryption;
 using Noelia.Redis.Security.Audit;
 using Noelia.Redis.Security.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Noelia.Abstractions.Audit;
 using StackExchange.Redis;
 using System.Security.Cryptography;
 using System.Text;
@@ -115,6 +117,42 @@ public static class RedisSecurityRegistration
             provider => provider.GetRequiredService<RedisTokenRevocationStore>());
         services.AddSingleton<ITokenRevocationWriter>(
             provider => provider.GetRequiredService<RedisTokenRevocationStore>());
+
+        return services;
+    }
+}
+
+/// <summary>Registers the shared sovereign audit chain.</summary>
+public static class RedisSovereignAuditRegistration
+{
+    /// <summary>
+    /// Puts the sovereign audit chain on the RESP server, where every replica
+    /// extends one sequence instead of starting its own.
+    /// </summary>
+    /// <param name="services">The container.</param>
+    /// <param name="keyPrefix">
+    /// Separates one system's chain from another's on a shared server. Two
+    /// deployments that should share a chain share this; two that should not,
+    /// must not.
+    /// </param>
+    public static IServiceCollection AddRedisSovereignAudit(
+        this IServiceCollection services,
+        string keyPrefix = "noelia")
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var sink = new Func<IServiceProvider, RedisSovereignAuditSink>(provider =>
+            new RedisSovereignAuditSink(
+                provider.GetRequiredService<IConnectionMultiplexer>(),
+                provider.GetRequiredService<ILogger<RedisSovereignAuditSink>>(),
+                keyPrefix));
+
+        // Registered under both: AuditTrailService resolves the sink by the base
+        // port and asks whether it also owns the chain, and the security check
+        // asks the same question. One instance answers both.
+        services.AddSingleton(sink);
+        services.AddSingleton<ISovereignAuditSink>(p => p.GetRequiredService<RedisSovereignAuditSink>());
+        services.AddSingleton<IChainedSovereignAuditSink>(p => p.GetRequiredService<RedisSovereignAuditSink>());
 
         return services;
     }

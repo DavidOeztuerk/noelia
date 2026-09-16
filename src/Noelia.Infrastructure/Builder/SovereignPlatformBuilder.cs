@@ -1,4 +1,5 @@
 using Noelia.Abstractions.Hosting;
+using Noelia.Abstractions.Audit;
 using Noelia.Infrastructure.Audit;
 using Noelia.Infrastructure.Sovereignty;
 using Microsoft.Extensions.DependencyInjection;

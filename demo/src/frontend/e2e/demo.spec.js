@@ -175,3 +175,24 @@ test("api responses carry exactly one of each security header", async ({ page })
     expect(values.length, `${header} appears ${values.length} times`).toBe(1);
   }
 });
+
+test("the login endpoint refuses a caller who keeps guessing", async ({ page }) => {
+  // The interesting limit is not the global one. Ten attempts a minute from one
+  // address is generous for a person and useless for a script, and it is
+  // configured on /api/auth/login alone so that nothing else in the demo is
+  // braked by someone else's brute force.
+  const statuses = [];
+  for (let attempt = 0; attempt < 14; attempt += 1) {
+    const response = await page.request.post("/api/auth/login", {
+      data: { email: `nobody.${attempt}@example.com`, password: "wrong-but-long-enough" },
+      failOnStatusCode: false
+    });
+    statuses.push(response.status());
+    if (response.status() === 429) break;
+  }
+
+  expect(statuses, "the brake has to close before the fourteenth guess").toContain(429);
+
+  // 401 before that: the limit refuses the caller, it does not accept them.
+  expect(statuses.filter((status) => status === 200)).toHaveLength(0);
+});

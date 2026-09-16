@@ -16,7 +16,7 @@ RUN apk add --no-cache openssl \
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY snippets /etc/nginx/snippets
-COPY index.html login.html register.html favicon.png /usr/share/nginx/html/
+COPY index.html login.html register.html noelia.html favicon.png /usr/share/nginx/html/
 COPY css /usr/share/nginx/html/css
 COPY js /usr/share/nginx/html/js
 

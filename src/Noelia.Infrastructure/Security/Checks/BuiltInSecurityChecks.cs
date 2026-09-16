@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -138,6 +139,121 @@ internal sealed class ReadinessCoverageSecurityCheck(
             : Result(
                 SecurityCheckStatus.Pass,
                 $"Readiness covers {ready} registered check(s)."));
+    }
+}
+
+internal sealed class DataProtectionKeyRingSecurityCheck(
+    IServiceProvider services) : SecurityCheckBase
+{
+    public override string Id => "noelia.dataprotection.key-ring";
+    public override NoeliaModule Module => NoeliaModule.Composition;
+    public override SecurityCheckCategory Category => SecurityCheckCategory.Composition;
+    public override SecurityCheckSeverity Severity => SecurityCheckSeverity.Medium;
+    public override string Remediation =>
+        "Call UseDataProtection(applicationName) to keep the key ring in the registered "
+        + "cache provider and encrypt it with the registered encryption provider.";
+
+    /// <summary>
+    /// Reports a key ring that does not outlive the process or is stored in the
+    /// clear.
+    /// </summary>
+    /// <remarks>
+    /// ASP.NET writes two warnings about this at every start and then carries
+    /// on, which is the shape of a problem nobody acts on. What it costs is
+    /// invisible until it is not: anything protected with the ring — an
+    /// authentication cookie, an antiforgery token, a reset link — stops
+    /// verifying when the container is replaced, and a second replica never
+    /// verifies what the first one issued.
+    /// </remarks>
+    public override Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default)
+    {
+        var probe = services.GetService<IServiceProviderIsService>();
+        if (probe?.IsService(typeof(IDataProtectionProvider)) != true)
+        {
+            return Task.FromResult(Result(
+                SecurityCheckStatus.NotApplicable,
+                "This composition has no data protection key ring."));
+        }
+
+        var options = services
+            .GetService<IOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>>();
+
+        var persisted = options?.Value.XmlRepository is not null;
+        var encrypted = options?.Value.XmlEncryptor is not null;
+
+        return Task.FromResult((persisted, encrypted) switch
+        {
+            // "through the registered provider", not "outside the process":
+            // whether that provider is durable is the provider's property and
+            // is already visible in the composition. Claiming durability here
+            // would pass an in-process cache off as a shared store.
+            (true, true) => Result(
+                SecurityCheckStatus.Pass,
+                "The key ring is stored through the registered cache provider and encrypted "
+                + "with the registered encryption provider."),
+            (false, _) => Result(
+                SecurityCheckStatus.Fail,
+                "The key ring is written to this container's filesystem; anything protected "
+                + "with it stops verifying when the container is replaced."),
+            _ => Result(
+                SecurityCheckStatus.Fail,
+                "The key ring is stored through a provider but is not encrypted at rest.")
+        });
+    }
+}
+
+internal sealed class AuditChainScopeSecurityCheck(
+    IServiceProvider services) : SecurityCheckBase
+{
+    public override string Id => "noelia.audit.chain-scope";
+    public override NoeliaModule Module => NoeliaModule.Composition;
+    public override SecurityCheckCategory Category => SecurityCheckCategory.Composition;
+    public override SecurityCheckSeverity Severity => SecurityCheckSeverity.Medium;
+    public override string Remediation =>
+        "Register a sink that owns the chain head — AddRedisSovereignAudit() from Noelia.Redis "
+        + "— or run one replica and treat its chain as its own sequence when verifying.";
+
+    /// <summary>
+    /// Says out loud that the sovereign audit chain belongs to this process.
+    /// </summary>
+    /// <remarks>
+    /// <c>AuditTrailService</c> advances its chain from a field
+    /// it holds itself. That is correct for one replica and silently wrong for
+    /// two: both start from their own head, and a verifier reading the store
+    /// back finds a broken chain on a system where nothing was tampered with.
+    /// <para>
+    /// The security audit trail in <c>Noelia.Redis</c> already solves this with
+    /// a compare-and-set on a shared head, so the shape of the answer is known.
+    /// Until the sovereign trail has the same, an operator should be told which
+    /// of the two they are running rather than discovering it during an
+    /// investigation.
+    /// </para>
+    /// </remarks>
+    public override Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default)
+    {
+        var probe = services.GetService<IServiceProviderIsService>();
+        if (probe?.IsService(typeof(Noelia.Abstractions.Audit.IAuditTrailService)) != true)
+        {
+            return Task.FromResult(Result(
+                SecurityCheckStatus.NotApplicable,
+                "This composition keeps no sovereign audit trail."));
+        }
+
+        // The sink, not the trail service: whether replicas share one sequence
+        // is decided by what owns the head, and only a sink that stores the
+        // event and advances the head in one operation can own it.
+        var shared = services.GetService<Noelia.Abstractions.Audit.ISovereignAuditSink>()
+            is Noelia.Abstractions.Audit.IChainedSovereignAuditSink;
+
+        return Task.FromResult(shared
+            ? Result(
+                SecurityCheckStatus.Pass,
+                "The sovereign audit chain is held by the sink, so every replica writing to "
+                + "it extends one sequence.")
+            : Result(
+                SecurityCheckStatus.Warning,
+                "The sovereign audit chain is advanced in this process, so each replica keeps "
+                + "a chain of its own."));
     }
 }
 

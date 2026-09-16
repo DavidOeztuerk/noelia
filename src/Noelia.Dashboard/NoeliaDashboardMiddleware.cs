@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Noelia.Abstractions.Audit;
+using Noelia.Abstractions.Observability;
 
 namespace Noelia.Dashboard;
 
@@ -158,7 +159,7 @@ internal sealed class NoeliaDashboardMiddleware(
                 "operator",
                 "Viewed",
                 "Noelia.Dashboard",
-                correlationId: context.TraceIdentifier,
+                correlationId: CorrelationOf(context),
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
             return true;
         }
@@ -172,6 +173,36 @@ internal sealed class NoeliaDashboardMiddleware(
             // reveal the operational inventory it was meant to account for.
             return false;
         }
+    }
+
+    /// <summary>
+    /// The id that ties this view to the rest of its request, across services.
+    /// </summary>
+    /// <remarks>
+    /// Until 5.2.0 this recorded <see cref="HttpContext.TraceIdentifier"/> — a
+    /// per-connection request id that is local to this process. Under the name
+    /// <c>correlationId</c> it correlated nothing: an investigator holding an
+    /// audit entry could not find the request that produced it in any other
+    /// service's log.
+    /// <para>
+    /// The header is read directly because this middleware runs ahead of the
+    /// application's own pipeline — the dashboard is installed by a startup
+    /// filter so that it is reachable whatever the application configures, and
+    /// that puts it in front of <c>UseCorrelationId()</c>. Where the ambient id
+    /// has already been established it wins; the trace identifier stays as the
+    /// last resort, because an entry with some id beats an entry with none.
+    /// </para>
+    /// </remarks>
+    private static string CorrelationOf(HttpContext context)
+    {
+        if (CorrelationId.Current is { Length: > 0 } ambient)
+        {
+            return ambient;
+        }
+
+        var header = context.Request.Headers[CorrelationId.HeaderName].ToString();
+
+        return string.IsNullOrWhiteSpace(header) ? context.TraceIdentifier : header;
     }
 
     private static void ApplySecurityHeaders(HttpResponse response)

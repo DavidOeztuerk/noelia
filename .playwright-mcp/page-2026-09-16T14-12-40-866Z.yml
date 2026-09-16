@@ -1,0 +1,21 @@
+- main [ref=f3e2]:
+  - heading "Operator dashboards" [level=1] [ref=f3e3]
+  - paragraph [ref=f3e4]: A microservice stack has no single dashboard. Each service composes its own, reports its own modules and answers for its own readiness — which is the point of running them separately. The monolith has one because it is one process.
+  - list [ref=f3e5]:
+    - listitem [ref=f3e6]:
+      - link "Gateway — gateway-dev.localhost" [ref=f3e7] [cursor=pointer]:
+        - /url: http://gateway-dev.localhost:8080/noelia
+      - text: · routes API traffic; reads no token
+    - listitem [ref=f3e8]:
+      - link "User service — user-dev.localhost" [ref=f3e9] [cursor=pointer]:
+        - /url: http://user-dev.localhost:8080/noelia
+      - text: · registration, sign-in, sessions
+    - listitem [ref=f3e10]:
+      - link "Todo service — todo-dev.localhost" [ref=f3e11] [cursor=pointer]:
+        - /url: http://todo-dev.localhost:8080/noelia
+      - text: · todos; verifies signatures only
+    - listitem [ref=f3e12]:
+      - link "Monolith — mono-dev.localhost" [ref=f3e13] [cursor=pointer]:
+        - /url: http://mono-dev.localhost:8080/noelia
+      - text: · the same application in one process
+  - paragraph [ref=f3e14]: "Development: every dashboard is open."

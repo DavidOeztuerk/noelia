@@ -155,12 +155,24 @@ sagt das, statt die Stufe wie Production aussehen zu lassen.
 
 ## 5. Offen
 
-1. **Data-Protection-Schlüssel** sind flüchtig und unverschlüsselt. Der heutige
-   Anmeldefluss benutzt sie nicht; für Cookie-Authentifizierung oder
-   Rücksetz-Token wäre es ein echtes Risiko.
-2. **Keine zweite `ISovereignAuditSink`.** Die Prüfspur liegt in jeder Stufe im
-   Prozess, also je Replik eine Kette. Für Noelia eine offene Aufgabe, nicht
-   für die Demo.
+1. ~~**Data-Protection-Schlüssel** sind flüchtig und unverschlüsselt.~~
+   In 5.2.0 behoben, und beim zweiten Anlauf besser: Der Ring braucht einen
+   **Hauptschlüssel**, keinen ganzen Verschlüsselungsdienst. AES-256-GCM unter
+   einem je Element per HKDF abgeleiteten Schlüssel, Version und Salz und
+   Vektor im Tag. Die erste Fassung verlangte `IDataEncryptionService` und
+   damit faktisch Redis — jede Stufe ohne Redis konnte ihren Ring dann gar
+   nicht schützen.
+2. ~~**Keine zweite `ISovereignAuditSink`.**~~ In 5.2.0 behoben.
+   `IChainedSovereignAuditSink` lässt eine Senke den Kettenkopf mitbesitzen;
+   `RedisSovereignAuditSink` speichert und schreibt fort in einem Lua-Skript
+   mit Compare-and-Set. Speichern und Fortschreiben **müssen** ein Aufruf sein:
+   zuerst fortschreiben hinterlässt bei einem Absturz einen Kopf ohne Eintrag,
+   zuerst speichern lässt einen zweiten Schreiber denselben Vorgänger benutzen.
+   Eine Konformitätssuite hält die Zusagen für jede künftige Senke fest, und
+   sie läuft gegen einen echten Server, weil kein prozessinternes Double
+   beantworten kann, wer ein Rennen gewinnt.
+   Dabei kam heraus, dass der Port im Motor lag statt im Portpaket — kein
+   Anbieter konnte ihn umsetzen. Er ist umgezogen.
 3. **`--profile all` misst 15 Container.** Auf einer kleineren Maschine ist
    `staging` der erste Kandidat zum Weglassen.
 4. **`InProduction` ist eine Verhaltensänderung in einer Nebenversion.** Nach

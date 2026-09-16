@@ -59,6 +59,7 @@ because a gateway that can be walked around is not a boundary.
 | Rate counters | in the process, per replica | Valkey, across replicas |
 | Token revocation | in the process, per replica | Valkey |
 | Refresh tokens | SQLite | SQLite |
+| Data protection key ring | this container's filesystem | Valkey, encrypted with the master key |
 
 One line in `appsettings.{Environment}.json` — `Demo:Providers:Redis` — decides
 it. Nothing above the composition root knows which of the two it got, which is
@@ -109,6 +110,10 @@ NOELIA_JWT_PUBLIC_KEY=
 
 # openssl rand -base64 32
 NOELIA_DASHBOARD_OPERATOR_SECRET=
+
+# The master key the encryption provider opens, and with it the data protection
+# key ring. openssl rand -base64 32
+NOELIA_MASTER_KEY=
 ```
 
 They reach the containers as **Docker secrets**, not as environment entries, and
@@ -135,6 +140,17 @@ DEMO_BASE_URL=https://micro-prod.localhost:8443 npm run e2e
 # A Fail nobody allowed exits non-zero.
 python3 eng/security-checks.py
 python3 eng/security-checks.py --profile dev
+```
+
+**The brake is real, and a repeated suite will find it.** The E2E run makes a
+few dozen requests per host, and `/api/auth/login` is limited to ten a minute
+from one address on purpose — that is where brute force goes. Running all six
+hosts back to back several times within a minute trips it, and the next run
+fails on something that is not a defect. Clear the counters between rounds:
+
+```bash
+docker compose exec valkey-prod    valkey-cli FLUSHALL
+docker compose exec valkey-staging valkey-cli FLUSHALL
 ```
 
 `eng/security-checks.py` exists because a release gate can be green next to a

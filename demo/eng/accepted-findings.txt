@@ -1,0 +1,15 @@
+# Security check failures this demo accepts, and why.
+#
+# One per line: <check id> <tab or two spaces> <reason>. A failure that is not
+# in here fails the run. The point of the file is that an accepted finding is a
+# decision somebody wrote down and signed, not a red line everyone has learned
+# to scroll past — which is how the release gate came to be green next to
+# noelia.headers.browser-baseline: Fail in the first place.
+#
+# A reason has to say why it is acceptable *here*. "Known issue" is not a reason.
+
+# Empty, and that is the point. The one entry that used to live here —
+# Development cannot protect its key ring — stopped being true in 5.2.0, when
+# the key ring started needing only a master key instead of a whole encryption
+# provider. An acceptance that outlives its reason is worse than none: it
+# teaches the next reader that the list is decoration.
