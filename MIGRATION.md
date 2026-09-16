@@ -1,3 +1,72 @@
+# Noelia 5.3.0 → 6.0.0
+
+**Noelia wird maschinell auskunftsfähig.** Bisher konnte ein Dienst einem
+*Menschen* Auskunft geben: Er rendert eine Seite, jemand liest sie, und was
+dort steht, gilt für diesen Prozess in diesem Augenblick. Einem zweiten
+Programm — einer Flottenansicht, einem Prüfer, einem nächtlichen Lauf — konnte
+er nichts sagen.
+
+## Ein Modell hinter dem Dashboard
+
+Neu: `OperatorReport` in `Noelia.Abstractions.Operator`, abrufbar unter
+`GET {Dashboard-Pfad}/report.json`.
+
+`DashboardPage` schrieb HTML direkt aus den registrierten Diensten. Zwischen
+Daten und Darstellung lag nichts, also hätte ein zweiter Leser dieselben
+Dienste über einen zweiten Codepfad abfragen müssen — und zwei Pfade für eine
+Aussage driften lautlos auseinander.
+
+Jetzt erhebt ein Sammler den Bericht einmal; die Seite rendert ihn, der
+Endpunkt gibt ihn heraus. Beides in derselben Middleware, hinter derselben
+Authentifizierung, derselben Sichtbarkeitsregel und demselben
+Prüfspur-Eintrag.
+
+Jeder Abschnitt trägt einen von vier Zuständen statt einer leeren Liste:
+`Absent`, `Unavailable`, `Faulted`, `Present`. Ein Dienst ohne Bremse und ein
+Dienst, dessen Bremse nicht mehr antwortet, sahen bisher gleich aus.
+
+**Was du tun musst:** nichts. Die Seite sieht aus wie vorher. Wer den Bericht
+nutzen will, setzt `Dashboard:Fleet`, damit ein Sammler mehrere Dienste einer
+Anlage zuordnen kann — Noelia erfindet keinen Namen.
+
+## Die Prüfspur lässt sich nachrechnen
+
+Neu: `IReadableSovereignAuditSink`, `IAuditChainVerifier` und
+`GET {Dashboard-Pfad}/audit-chain.json`.
+
+`ISovereignAuditSink` hatte genau eine Methode: `WriteAsync`. Die Spur war
+hashverkettet, eine Änderung brach alle folgenden Hashes — und nichts in
+Noelia konnte das prüfen. „Die Kette ist unversehrt" war eine Behauptung,
+solange sie niemand nachrechnete.
+
+Der Prüfer fängt zwei verschiedene Eingriffe: der eigene Hash eines Eintrags
+fängt einen überschriebenen Datensatz, der Vergleich mit dem Vorgänger fängt
+einen entfernten, eingefügten oder verschobenen — wo jeder Datensatz für sich
+stimmt und nur die Reihenfolge lügt. Das Ergebnis benennt die Stelle.
+
+Verifikation ist ein eigener Pfad und läuft **nicht** bei jedem Seitenaufruf:
+Eine Kette aus Millionen Einträgen bei jedem Aufruf nachzurechnen machte das
+Öffnen des Dashboards zum Angriff auf den Speicher, über den es berichtet.
+`OperatorReport.Audit.CanBeVerified` sagt, ob Fragen sich lohnt.
+
+**Was du tun musst:** nichts, wenn deine Senke nur schreibt — dann meldet der
+Prüfer `IsSupported = false` und sagt, was ihn möglich machte. `Noelia.Redis`
+und die In-Memory-Senke können ab 6.0.0 zurücklesen.
+
+### Speicherformat: der Redis-Index trägt eine Folgenummer
+
+Der sortierte Satz `{prefix}:audit:index` war nach Zeitstempel sortiert. Die
+Reihenfolge einer Kette ist aber die der Anhänge, die das Compare-and-Set
+entscheidet, nicht die der Uhren: Zwei Repliken können in derselben
+Millisekunde anhängen, und ein Prüfer bekäme die beiden in beliebiger
+Reihenfolge — falscher Alarm an einer Kette, die niemand angefasst hat.
+
+**Keine Migration nötig.** Die Folgenummer setzt am vorhandenen Höchstwert an,
+nicht bei null. Eine vor 6.0.0 nach Zeitstempeln indizierte Kette behält ihre
+Reihenfolge, und der nächste Eintrag landet darüber.
+
+---
+
 # Noelia 5.2.0 → 5.3.0
 
 ## Transactional Outbox
