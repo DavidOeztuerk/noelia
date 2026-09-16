@@ -174,6 +174,28 @@ public sealed class AuditChainVerifierTests
         result.EntriesVerified.Should().Be(2);
     }
 
+    /// <summary>
+    /// The finding travels by name, not by ordinal.
+    /// </summary>
+    /// <remarks>
+    /// A control plane stores these. As a number, reordering the enum one day
+    /// would turn every stored "contents changed" into "link broken" without a
+    /// single file changing.
+    /// </remarks>
+    [Fact]
+    public async Task A_break_serialises_its_kind_by_name()
+    {
+        var entries = (await ChainOf(3)).Entries.ToList();
+        entries[1] = entries[1] with { Resource = "something-else" };
+
+        var result = await Verify(new ProbeSink(entries));
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            result, new System.Text.Json.JsonSerializerOptions(
+                System.Text.Json.JsonSerializerDefaults.Web));
+
+        json.Should().Contain("\"kind\":\"ContentsChanged\"");
+    }
+
     private static async Task<AuditChainVerification> Verify(
         IReadableSovereignAuditSink sink,
         DateTimeOffset? since = null)

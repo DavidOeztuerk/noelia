@@ -89,11 +89,18 @@ public sealed record AuditChainBreak(
 
 /// <summary>The two ways a chain can fail to add up.</summary>
 /// <remarks>
-/// They are different findings. A rewritten entry is one record that no longer
-/// matches its own hash; a removed or reordered entry leaves the records intact
-/// and the links dangling. Telling an investigator which one happened is most
-/// of the investigation.
+/// <para>They are different findings. A rewritten entry is one record that no
+/// longer matches its own hash; a removed or reordered entry leaves the records
+/// intact and the links dangling. Telling an investigator which one happened is
+/// most of the investigation.</para>
+///
+/// <para>Written out by name rather than as its ordinal. This travels to
+/// readers that are not this assembly, and a number would let somebody reorder
+/// the members one day and silently turn every stored finding into the other
+/// kind.</para>
 /// </remarks>
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<AuditChainBreakKind>))]
 public enum AuditChainBreakKind
 {
     /// <summary>The entry's contents no longer produce the hash stored with it.</summary>
