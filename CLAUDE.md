@@ -6,8 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Noelia is a set of 13 NuGet packages that form a shared foundation for .NET
 microservices (CQRS pipeline, security/identity, caching, messaging, health,
-resilience, observability). It is a library, not an application — there is
-nothing to run locally except the tests. Targets `net10.0`; version `5.0.0`.
+resilience, observability). Targets `net10.0`; version `5.1.0`.
+
+The library itself has nothing to run but its tests. `demo/` holds a consumer:
+one todo application built twice (microservices behind a gateway, and a
+monolith) and run three times (Development, Staging, Production) from one
+`docker compose`. It installs Noelia **as packages**, never as project
+references — see the guard below.
 
 `README.md` (~1900 lines) is the consumer-facing manual and the authority on
 public behaviour. `MIGRATION.md` records every breaking change per version.
@@ -31,6 +36,18 @@ dotnet test tests/Noelia.Infrastructure.Tests --filter "Category=Unit"      # or
 dotnet test tests/Noelia.Infrastructure.Tests --settings tests/Noelia.Infrastructure.Tests/coverage.runsettings
 
 dotnet pack Noelia.slnx -c Release -o packages
+
+# the demo, against a candidate that is not published yet
+dotnet pack Noelia.slnx -c Release -o demo/.local-feed
+rm -rf ~/.nuget/packages/noelia.*          # a candidate keeps its version
+cd demo
+dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
+dotnet build Noelia.TodoDemo.sln --no-restore -c Release
+dotnet test  Noelia.TodoDemo.sln --no-build  -c Release
+
+NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
+python3 eng/security-checks.py             # fails on an unallowed security Fail
+cd src/frontend && npm test && npm run e2e
 ```
 
 Two things about the test suite:
@@ -117,7 +134,10 @@ and new work is expected to extend them:
   — an executable assertion that a promised property actually holds, returning a
   `SecurityCheckResult`. Summaries and remediations describe *shapes and
   actions only*: never copy configuration values, keys, tokens, connection
-  strings or raw exception text into them.
+  strings or raw exception text into them. A check with
+  `Category == Composition` runs whether or not its module is composed; every
+  other check runs only for modules in the composition
+  (`SecurityCheckRunner.RunAsync`).
 - **`Noelia.Dashboard`** — a read-only, server-rendered view of the composition
   that actually happened and the latest check run.
 
@@ -132,6 +152,7 @@ Breaking any of these fails CI, usually with a message explaining why:
 | `Architecture/HttpPackageStaysThinTests`, `DashboardPackageStaysThinTests` | `Noelia.Http` and `Noelia.Dashboard` declare **zero** `PackageReference`s; that is their entire reason to exist as separate packages |
 | `Architecture/ProviderIndependenceTests` | no driver assembly reachable from the engine |
 | `Architecture/OptionsConsumptionTests` | every registered `*Options` type has a reader — an option nobody reads is a false claim, not a stub |
+| `Architecture/DemoStaysAForeignConsumerTests` | no project under `demo/` takes a `ProjectReference` out of `demo/`, and `Noelia.slnx` does not build it — a release gate that compiles against the working tree it was cut from proves nothing about the packages |
 | `Directory.Build.props` | `TreatWarningsAsErrors`, plus the XML-documentation diagnostics (`CS1570` … `CS1734`) as errors. `CS1591` (missing comment) is the only one suppressed |
 
 Package versions are managed centrally in `Directory.Packages.props` with
@@ -163,6 +184,23 @@ last Apache-2.0 releases — upgrading them is a licensing decision, not a chore
   `noelia.*` meter names and cryptographic domain separators. Anything new
   follows that; a domain separator or storage prefix is data-format surface, so
   changing one is a migration, not a rename.
+
+## When adding anything to the library
+
+The recurring defect in this codebase is a registration that is *present* but
+not *effective*, with nothing noticing — `docs/MASTERPLAN-5.0.md` §1 lists
+eleven, and `MIGRATION.md`'s 5.1.0 section lists nine more found afterwards. Two
+habits keep it out:
+
+- **A provider registers through `noelia.Use(module, register, contract)`**, not
+  by calling an `IServiceCollection` extension beside `AddNoelia`. The built-in
+  modules register when the composition is *built*, so an eager call is
+  overwritten by them and nothing says so. This is what `UseRedisCache(prefix)`
+  exists for next to `AddRedisCache(prefix)`.
+- **A test asserts the effect, never the fluent return.** Three
+  `HealthCheckBuilder` methods had commented-out bodies and passing
+  `…_ReturnsSelf` tests. If the test would still pass with the body deleted, it
+  is not testing anything.
 
 ## Releasing
 
