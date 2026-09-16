@@ -8,4 +8,8 @@
 #
 # A reason has to say why it is acceptable *here*. "Known issue" is not a reason.
 
-noelia.dataprotection.key-ring  Development cannot protect a key ring: Noelia ships no in-process IDataEncryptionService, so without Redis there is nothing to encrypt it with. The ring therefore stays in the container, which is the honest state for a stage that keeps every other piece of state in the process too — and nothing in the demo is protected with it across a restart. Staging and Production store it in Valkey, encrypted, and this check passes there.
+# Empty, and that is the point. The one entry that used to live here —
+# Development cannot protect its key ring — stopped being true in 5.2.0, when
+# the key ring started needing only a master key instead of a whole encryption
+# provider. An acceptance that outlives its reason is worse than none: it
+# teaches the next reader that the list is decoration.

@@ -37,6 +37,11 @@ public sealed class ServiceFactory<TEntryPoint>(
         builder.UseSetting("Jwt:KeyId", keys.Kid);
         builder.UseSetting("Jwt:PublicKey", keys.PublicKey);
         builder.UseSetting("GateCanary:Secret", GateCanary.Value);
+        // The key ring is protected under this, in every stage — so a test host
+        // needs one too. Generated per run: a fixed key in a test project is a
+        // key somebody eventually copies into a deployment.
+        builder.UseSetting("Encryption:MasterKey", TestMasterKey.Value);
+
 
         if (mayIssue)
         {
@@ -48,6 +53,13 @@ public sealed class ServiceFactory<TEntryPoint>(
             builder.UseSetting("Database:Path", databasePath);
         }
     }
+}
+
+/// <summary>A master key for this test run, and no longer.</summary>
+internal static class TestMasterKey
+{
+    internal static string Value { get; } =
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 }
 
 internal static class GateCanary

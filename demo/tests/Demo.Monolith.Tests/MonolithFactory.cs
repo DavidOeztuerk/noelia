@@ -13,6 +13,13 @@ public sealed class MonolithFactory(GeneratedKeyPair keys, string databasePath)
         builder.UseSetting("JwtSettings:Issuer", "noelia-monolith-tests");
         builder.UseSetting("JwtSettings:Audience", "noelia-monolith-tests");
         builder.UseSetting("Jwt:KeyId", keys.Kid);
+
+        // The key ring is protected under this, in every stage — so a test host
+        // needs one too. Generated per run: a fixed key in a test project is a
+        // key somebody eventually copies into a deployment.
+        builder.UseSetting(
+            "Encryption:MasterKey",
+            Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
         builder.UseSetting("Jwt:PrivateKey", keys.PrivateKey);
         builder.UseSetting("Jwt:PublicKey", keys.PublicKey);
         builder.UseSetting("Database:Path", databasePath);

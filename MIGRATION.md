@@ -1,5 +1,87 @@
 # Noelia 5.1.0 → 5.2.0
 
+## Ein Port lag im Motor: `ISovereignAuditSink` ist umgezogen
+
+`Noelia.Infrastructure.Audit.ISovereignAuditSink` → `Noelia.Abstractions.Audit.ISovereignAuditSink`.
+
+Er war als Port gedacht und lag im Motor, wo ihn **kein Anbieterpaket umsetzen
+konnte**: Anbieter hängen an `Noelia.Abstractions`, nicht an
+`Noelia.Infrastructure`. Die README sagt seit 5.0 „Noelia.Abstractions | *Every
+port*"; hier stimmte das nicht.
+
+**Was du tun musst:** `using Noelia.Abstractions.Audit;` ergänzen. Der Typ ist
+derselbe, der Namensraum nicht. Wer den Port nie selbst umgesetzt hat, merkt
+nichts.
+
+## Eine Prüfspur, die alle Repliken teilen
+
+Neu: `IChainedSovereignAuditSink` und `UseRedisSovereignAudit()`.
+
+`AuditTrailService` schrieb seine Kette aus einem Feld fort, das es selbst
+hält. Für eine Replik richtig, für zwei still falsch: Beide beginnen bei ihrem
+eigenen Kopf, und ein Prüfer findet hinterher einen Bruch auf einem System, an
+dem niemand manipuliert hat.
+
+Eine Senke, die den Kettenkopf **mitbesitzt**, löst das. Speichern und
+Fortschreiben sind dabei **ein** Aufruf, weil sie keine zwei sein können:
+Zuerst fortschreiben und ein Absturz hinterlässt einen Kopf, der auf nichts
+zeigt; zuerst speichern und ein zweiter Schreiber hängt sich an denselben
+Vorgänger. `RedisSovereignAuditSink` macht beides in einem Lua-Skript, mit
+Compare-and-Set auf dem Kopf — dasselbe Muster, das die Security-Prüfspur in
+diesem Paket seit 4.4.3 benutzt.
+
+Transparenzprotokolle lösen es andersherum: Trillian lässt nie zwei Schreiber
+an einen Merkle-Baum, sondern sequenziert je Baum aus einem einzigen Prozess.
+Compare-and-Set erreicht dieselbe Zusage von der anderen Seite — die Schreiber
+rennen, genau einer gewinnt, der Verlierer baut auf dem Kopf neu auf, der
+gewonnen hat.
+
+`noelia.audit.chain-scope` meldet jetzt `Pass`, wo die Senke den Kopf hält, und
+bleibt `Warning`, wo die Kette im Prozess fortgeschrieben wird.
+
+**Was du tun musst:** nichts. Ohne eine kettenführende Senke bleibt das
+bisherige Verhalten. Mit `UseRedisSovereignAudit()` teilen sich alle Repliken
+eine Kette — und die vorhandenen Ketten je Prozess sind dann Vorgeschichte,
+die getrennt geprüft werden muss.
+
+## Der Schlüsselring braucht keinen Verschlüsselungsdienst mehr
+
+`UseDataProtection(applicationName)` verlangte `IDataEncryptionService`. In der
+Praxis hieß das Redis — und jede Stufe ohne Redis konnte ihren Schlüsselring
+**gar nicht** schützen und meldete auf Dauer `Fail`.
+
+Jetzt verlangt es `IMasterKeyProvider`: AES-256-GCM unter einem je Element
+abgeleiteten Schlüssel, `HKDF-SHA256(master, salt, "noelia.dataprotection.keyring.v1")`
+mit frischem 16-Byte-Salz. Ableiten statt speichern heißt, dass jede Replik mit
+dem Hauptschlüssel lesen kann, was eine andere geschrieben hat — geteilt wird
+nur der Schlüssel, den der Betrieb ohnehin hält.
+
+**Version, Salz und Vektor liegen im GCM-Tag**, als Associated Data. Das ist
+der Befund 4.4.2 als Bauvorschrift: Steuerdaten außerhalb des Tags ließen einen
+Angreifer mit Schreibzugriff ändern, wie authentifizierte Bytes gelesen werden,
+während die Entschlüsselung weiter Integrität meldete. Vier Gegenproben ändern
+je ein Byte von Version, Salz, Vektor und Tag und verlangen eine Ablehnung.
+
+**Was du tun musst:** Wenn du `UseDataProtection` schon aufrufst, ersetze die
+Anforderung `UseRedisEncryption()` durch `AddConfiguredMasterKey()` oder
+`AddSecretStoreMasterKey()`. **Ein bestehender Schlüsselring aus 5.2.0-preview
+ist nicht lesbar** — das Format hat sich geändert; lösche ihn, bevor du
+umstellst.
+
+## Das Dashboard trägt die richtige Korrelations-ID
+
+Der Prüfspur-Eintrag zu einem Dashboard-Aufruf enthielt
+`HttpContext.TraceIdentifier` — eine Anfrage-ID je Verbindung, lokal zu diesem
+Prozess. Unter dem Namen `correlationId` korrelierte sie nichts: Wer einen
+Eintrag in der Hand hielt, fand die zugehörige Anfrage im Protokoll keines
+anderen Dienstes.
+
+Jetzt gilt `CorrelationId.Current`, sonst die Kopfzeile `X-Correlation-ID` der
+Anfrage, und erst zuletzt der Trace-Identifier. Die Kopfzeile wird direkt
+gelesen, weil das Dashboard über einen `IStartupFilter` **vor** der Pipeline der
+Anwendung hängt — also vor `UseCorrelationId()`.
+
+
 Additiv. Nichts, was du aufrufst, ändert seine Form — aber zwei neue Prüfungen
 können einen Bericht, der gestern grün war, heute rot machen. Das ist die
 Absicht: Sie melden zwei Zustände, die vorher niemand gemeldet hat.

@@ -64,9 +64,16 @@ public static class DemoProviders
         // which is exactly the limitation AuditTrailService documents.
         noelia.Services.AddSovereignAuditTrail();
 
+        // The key ring needs a master key and somewhere to put the result, and
+        // every stage has both. Requiring a whole encryption provider — which
+        // in practice meant Redis — left Development unable to protect it at
+        // all, and a stage that cannot is a stage that reports Fail forever.
+        noelia.Services.AddConfiguredMasterKey();
+
         if (!environment.UsesRedis)
         {
             noelia.UseInMemoryCache(serviceName);
+            noelia.UseDataProtection(serviceName);
 
             // Development got no revocation store at all, and the dashboard
             // said so: "Token revocation is not registered." A signed-out
@@ -94,6 +101,12 @@ public static class DemoProviders
         noelia.UseRedisCache(serviceName);
         noelia.UseRedisSecurityAudit();
 
+        // One chain for every replica writing to this server, instead of one
+        // per process. Without it two replicas both start from their own head
+        // and a verifier reading the store back finds a break on a system where
+        // nothing was tampered with.
+        noelia.UseRedisSovereignAudit();
+
         if (readsTokens)
         {
             noelia.UseRedisTokenRevocation(MaxTokenLifetime);
@@ -106,7 +119,6 @@ public static class DemoProviders
         // ring lives in one container's filesystem in the clear, and every
         // cookie or antiforgery token protected with it stops verifying when
         // that container is replaced.
-        noelia.Services.AddConfiguredMasterKey();
         noelia.UseRedisEncryption();
         noelia.UseDataProtection(serviceName);
 

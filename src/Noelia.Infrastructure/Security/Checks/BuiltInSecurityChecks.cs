@@ -210,8 +210,8 @@ internal sealed class AuditChainScopeSecurityCheck(
     public override SecurityCheckCategory Category => SecurityCheckCategory.Composition;
     public override SecurityCheckSeverity Severity => SecurityCheckSeverity.Medium;
     public override string Remediation =>
-        "Run one replica, or treat each replica's chain as its own sequence when verifying. "
-        + "A shared sovereign chain across replicas is not available yet.";
+        "Register a sink that owns the chain head — AddRedisSovereignAudit() from Noelia.Redis "
+        + "— or run one replica and treat its chain as its own sequence when verifying.";
 
     /// <summary>
     /// Says out loud that the sovereign audit chain belongs to this process.
@@ -239,10 +239,21 @@ internal sealed class AuditChainScopeSecurityCheck(
                 "This composition keeps no sovereign audit trail."));
         }
 
-        return Task.FromResult(Result(
-            SecurityCheckStatus.Warning,
-            "The sovereign audit chain is advanced in this process, so each replica keeps "
-            + "a chain of its own."));
+        // The sink, not the trail service: whether replicas share one sequence
+        // is decided by what owns the head, and only a sink that stores the
+        // event and advances the head in one operation can own it.
+        var shared = services.GetService<Noelia.Abstractions.Audit.ISovereignAuditSink>()
+            is Noelia.Abstractions.Audit.IChainedSovereignAuditSink;
+
+        return Task.FromResult(shared
+            ? Result(
+                SecurityCheckStatus.Pass,
+                "The sovereign audit chain is held by the sink, so every replica writing to "
+                + "it extends one sequence.")
+            : Result(
+                SecurityCheckStatus.Warning,
+                "The sovereign audit chain is advanced in this process, so each replica keeps "
+                + "a chain of its own."));
     }
 }
 

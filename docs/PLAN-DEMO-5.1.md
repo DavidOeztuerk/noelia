@@ -156,19 +156,23 @@ sagt das, statt die Stufe wie Production aussehen zu lassen.
 ## 5. Offen
 
 1. ~~**Data-Protection-Schlüssel** sind flüchtig und unverschlüsselt.~~
-   In 5.2.0 behoben: `UseDataProtection(applicationName)` legt den Ring durch
-   `IDistributedCacheService` ab und verschlüsselt ihn mit
-   `IDataEncryptionService` — beides Noelia-Ports, also kein neues Paket. Der
-   Check `noelia.dataprotection.key-ring` meldet den unversorgten Zustand.
-2. **Keine zweite `ISovereignAuditSink`.** Die Prüfspur liegt in jeder Stufe im
-   Prozess, also je Replik eine Kette. In 5.2.0 **sichtbar gemacht**, nicht
-   behoben: `noelia.audit.chain-scope` meldet `Warning`, solange eine läuft.
-   Eine zweite Senke allein genügt nicht — `AuditTrailService` schreibt die
-   Kette aus einem eigenen Feld fort, zwei Repliken erzeugen also zwei
-   verschränkte Ketten in einem Speicher, die schlechter sind als zwei
-   getrennte. Die Security-Prüfspur in `Noelia.Redis` löst dasselbe bereits mit
-   Compare-and-Set auf einem gemeinsamen Kopf; die Form der Antwort ist damit
-   bekannt, die Arbeit steht aus.
+   In 5.2.0 behoben, und beim zweiten Anlauf besser: Der Ring braucht einen
+   **Hauptschlüssel**, keinen ganzen Verschlüsselungsdienst. AES-256-GCM unter
+   einem je Element per HKDF abgeleiteten Schlüssel, Version und Salz und
+   Vektor im Tag. Die erste Fassung verlangte `IDataEncryptionService` und
+   damit faktisch Redis — jede Stufe ohne Redis konnte ihren Ring dann gar
+   nicht schützen.
+2. ~~**Keine zweite `ISovereignAuditSink`.**~~ In 5.2.0 behoben.
+   `IChainedSovereignAuditSink` lässt eine Senke den Kettenkopf mitbesitzen;
+   `RedisSovereignAuditSink` speichert und schreibt fort in einem Lua-Skript
+   mit Compare-and-Set. Speichern und Fortschreiben **müssen** ein Aufruf sein:
+   zuerst fortschreiben hinterlässt bei einem Absturz einen Kopf ohne Eintrag,
+   zuerst speichern lässt einen zweiten Schreiber denselben Vorgänger benutzen.
+   Eine Konformitätssuite hält die Zusagen für jede künftige Senke fest, und
+   sie läuft gegen einen echten Server, weil kein prozessinternes Double
+   beantworten kann, wer ein Rennen gewinnt.
+   Dabei kam heraus, dass der Port im Motor lag statt im Portpaket — kein
+   Anbieter konnte ihn umsetzen. Er ist umgezogen.
 3. **`--profile all` misst 15 Container.** Auf einer kleineren Maschine ist
    `staging` der erste Kandidat zum Weglassen.
 4. **`InProduction` ist eine Verhaltensänderung in einer Nebenversion.** Nach

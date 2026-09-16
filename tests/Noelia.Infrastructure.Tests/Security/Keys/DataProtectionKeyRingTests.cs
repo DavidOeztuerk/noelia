@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.DataProtection.XmlEncryption;
@@ -77,27 +78,107 @@ public sealed class DataProtectionKeyRingTests
     [Fact]
     public void What_reaches_the_store_is_not_the_key()
     {
-        var encryptor = new NoeliaXmlEncryptor(new ReversingEncryption());
-
-        var info = encryptor.Encrypt(new XElement("key", Canary));
+        var info = new MasterKeyXmlEncryptor(Key()).Encrypt(new XElement("key", Canary));
 
         info.EncryptedElement.ToString().Should().NotContain(Canary);
-        info.DecryptorType.Should().Be(typeof(NoeliaXmlDecryptor));
+        info.DecryptorType.Should().Be(typeof(MasterKeyXmlDecryptor));
     }
 
     [Fact]
     public void And_it_comes_back_out_again()
     {
-        var services = new ServiceCollection();
-        services.AddSingleton<IDataEncryptionService>(new ReversingEncryption());
-        using var provider = services.BuildServiceProvider();
+        var original = new XElement("key", new XElement("payload", Canary));
 
-        var original = new XElement("key", Canary);
-        var info = new NoeliaXmlEncryptor(new ReversingEncryption()).Encrypt(original);
-
-        var round = new NoeliaXmlDecryptor(provider).Decrypt(info.EncryptedElement);
+        var info = new MasterKeyXmlEncryptor(Key()).Encrypt(original);
+        var round = new MasterKeyXmlDecryptor(Provider(Key())).Decrypt(info.EncryptedElement);
 
         round.ToString().Should().Be(original.ToString());
+    }
+
+    /// <summary>
+    /// A second replica holding the same master key reads what the first wrote.
+    /// </summary>
+    /// <remarks>
+    /// The property that makes deriving better than storing here: nothing is
+    /// shared between the two but the key the operator already has.
+    /// </remarks>
+    [Fact]
+    public void Another_process_with_the_same_master_key_can_read_it()
+    {
+        var master = RandomNumberGenerator.GetBytes(32);
+
+        var info = new MasterKeyXmlEncryptor(Key(master)).Encrypt(new XElement("key", Canary));
+        var round = new MasterKeyXmlDecryptor(Provider(Key(master))).Decrypt(info.EncryptedElement);
+
+        round.Value.Should().Be(Canary);
+    }
+
+    [Fact]
+    public void Another_master_key_does_not_open_it()
+    {
+        var mine = RandomNumberGenerator.GetBytes(32);
+        var theirs = RandomNumberGenerator.GetBytes(32);
+
+        var info = new MasterKeyXmlEncryptor(Key(mine)).Encrypt(new XElement("key", Canary));
+
+        var decrypt = () => new MasterKeyXmlDecryptor(Provider(Key(theirs)))
+            .Decrypt(info.EncryptedElement);
+
+        decrypt.Should().Throw<InvalidOperationException>().WithMessage("*different master key*");
+    }
+
+    /// <summary>
+    /// Every byte of the envelope is inside the tag.
+    /// </summary>
+    /// <remarks>
+    /// This is the 4.4.2 finding written as a test. Metadata outside the GCM
+    /// tag let an attacker with write access change how the authenticated bytes
+    /// were interpreted while decryption still reported integrity.
+    /// </remarks>
+    [Theory]
+    [InlineData(0, "version")]
+    [InlineData(3, "salt")]
+    [InlineData(20, "nonce")]
+    [InlineData(40, "tag or ciphertext")]
+    public void A_changed_envelope_byte_is_refused(int index, string part)
+    {
+        var info = new MasterKeyXmlEncryptor(Key()).Encrypt(new XElement("key", Canary));
+        var envelope = Convert.FromBase64String(info.EncryptedElement.Value);
+        envelope[index] ^= 0xFF;
+
+        var tampered = new XElement(MasterKeyXmlEncryptor.Element, Convert.ToBase64String(envelope));
+        var decrypt = () => new MasterKeyXmlDecryptor(Provider(Key())).Decrypt(tampered);
+
+        decrypt.Should().Throw<InvalidOperationException>($"a changed {part} must not decrypt");
+    }
+
+    [Fact]
+    public void Two_encryptions_of_the_same_key_differ()
+    {
+        var encryptor = new MasterKeyXmlEncryptor(Key());
+        var element = new XElement("key", Canary);
+
+        var first = encryptor.Encrypt(element).EncryptedElement.Value;
+        var second = encryptor.Encrypt(element).EncryptedElement.Value;
+
+        first.Should().NotBe(second, "a fresh salt and nonce per element is what keeps "
+            + "one nonce collision from reaching another entry");
+    }
+
+    private static readonly byte[] SharedMaster = RandomNumberGenerator.GetBytes(32);
+
+    private static IMasterKeyProvider Key(byte[]? master = null)
+    {
+        var provider = Substitute.For<IMasterKeyProvider>();
+        provider.GetMasterKey().Returns(_ => (byte[])(master ?? SharedMaster).Clone());
+        return provider;
+    }
+
+    private static IServiceProvider Provider(IMasterKeyProvider keys)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(keys);
+        return services.BuildServiceProvider();
     }
 
     /// <summary>
@@ -136,60 +217,16 @@ public sealed class DataProtectionKeyRingTests
     }
 
     [Fact]
-    public void A_refused_decryption_is_not_parsed_as_xml()
+    public void Nonsense_in_the_store_is_not_parsed_as_xml()
     {
-        var services = new ServiceCollection();
-        services.AddSingleton<IDataEncryptionService>(new RefusingEncryption());
-        using var provider = services.BuildServiceProvider();
-
-        var decrypt = () => new NoeliaXmlDecryptor(provider)
-            .Decrypt(new XElement("noeliaProtectedKey", "not-the-right-ciphertext"));
+        var decrypt = () => new MasterKeyXmlDecryptor(Provider(Key()))
+            .Decrypt(new XElement(MasterKeyXmlEncryptor.Element,
+                Convert.ToBase64String("far too short to be an envelope"u8.ToArray())));
 
         decrypt.Should().Throw<InvalidOperationException>()
-            .WithMessage("*master key*",
-                "handing an empty result to XElement.Parse reports 'Root element is missing' "
-                + "three frames from the cause");
-    }
-
-    /// <summary>Refuses, the way the shipped provider refuses: by saying so.</summary>
-    private sealed class RefusingEncryption : ReversingEncryption
-    {
-        public override Task<DecryptionResult> DecryptAsync(
-            string encryptedData, EncryptionContext context, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new DecryptionResult { Success = false, Data = string.Empty });
-    }
-
-    /// <summary>
-    /// Stands in for a provider. Reversing is not encryption, and that is the
-    /// point: these tests assert that the repository and the encryptor are
-    /// wired to each other, not that AES works.
-    /// </summary>
-    private class ReversingEncryption : IDataEncryptionService
-    {
-        public Task<EncryptionResult> EncryptAsync(
-            string data, EncryptionContext context, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EncryptionResult { EncryptedData = Reverse(data) });
-
-        public virtual Task<DecryptionResult> DecryptAsync(
-            string encryptedData, EncryptionContext context, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new DecryptionResult { Success = true, Data = Reverse(encryptedData) });
-
-        private static string Reverse(string value)
-        {
-            var characters = value.ToCharArray();
-            Array.Reverse(characters);
-            return new string(characters);
-        }
-
-        public Task<EncryptionResult> EncryptWithKeyAsync(string data, string keyId, EncryptionOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<DecryptionResult> DecryptWithKeyAsync(string encryptedData, string keyId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<HashResult> HashAsync(string data, HashingOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> VerifyHashAsync(string data, string hashedData, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<KeyGenerationResult> GenerateKeyAsync(KeyType keyType, KeyGenerationOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<KeyRotationResult> RotateKeyAsync(string keyId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<KeyMetadata?> GetKeyMetadataAsync(string keyId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<EncryptionResult> ReEncryptAsync(string encryptedData, string oldKeyId, string newKeyId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task SecureDeleteAsync(string keyId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            .WithMessage("*shape this version wrote*",
+                "handing a short buffer to the cipher would report something about "
+                + "block sizes, three frames from the cause");
     }
 
     /// <summary>

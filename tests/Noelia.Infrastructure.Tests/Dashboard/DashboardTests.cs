@@ -12,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Noelia.Abstractions.Audit;
+using Noelia.Abstractions.Observability;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Hosting;
 using Noelia.Abstractions.Security.Checks;
@@ -143,6 +144,41 @@ public sealed class DashboardTests
         var html = await app.Client.GetStringAsync("/noelia");
 
         html.Should().NotContain("Production exposure reason");
+    }
+
+    [Fact]
+    public async Task The_audit_entry_carries_the_caller_s_correlation_id()
+    {
+        var trail = new RecordingAuditTrail();
+
+        await using var app = await DashboardHost.Start(
+            options => options.VisibleTo(_ => true),
+            additionalServices: services => services.AddSingleton<IAuditTrailService>(trail));
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/noelia");
+        request.Headers.Add(CorrelationId.HeaderName, "TRACE-ME-ACROSS-SERVICES");
+        await app.Client.SendAsync(request);
+
+        trail.Correlations.Should().ContainSingle()
+            .Which.Should().Be("TRACE-ME-ACROSS-SERVICES",
+                "until 5.2.0 this recorded HttpContext.TraceIdentifier — a per-connection id "
+                + "local to this process, under a name that promised it correlated across them");
+    }
+
+    [Fact]
+    public async Task Without_one_the_entry_still_gets_an_identifier()
+    {
+        var trail = new RecordingAuditTrail();
+
+        await using var app = await DashboardHost.Start(
+            options => options.VisibleTo(_ => true),
+            additionalServices: services => services.AddSingleton<IAuditTrailService>(trail));
+
+        await app.Client.GetAsync("/noelia");
+
+        trail.Correlations.Should().ContainSingle()
+            .Which.Should().NotBeNullOrWhiteSpace(
+                "an entry with some identifier beats an entry with none");
     }
 
     [Fact]
@@ -348,6 +384,31 @@ public sealed class DashboardTests
                 NoeliaModule.Dashboard]);
         html.Should().Contain("noelia.composition.providers");
         html.Should().Contain("noelia.dashboard.operator-access");
+    }
+
+    private sealed class RecordingAuditTrail : IAuditTrailService
+    {
+        public List<string?> Correlations { get; } = [];
+
+        public Task<AuditEvent<T>> RecordAsync<T>(
+            string actorId, string capacity, string action, string resource,
+            T? before = default, T? after = default, string? correlationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            Correlations.Add(correlationId);
+            return Task.FromResult(new AuditEvent<T>
+            {
+                ActorId = actorId, Capacity = capacity, Action = action,
+                Resource = resource, CorrelationId = correlationId
+            });
+        }
+
+        public Task<AuditEvent<T>> RecordAsync<T>(
+            string actorId, Capacity capacity, string action, string resource,
+            T? before = default, T? after = default, string? correlationId = null,
+            CancellationToken cancellationToken = default) =>
+            RecordAsync(actorId, capacity.ToString()!, action, resource,
+                before, after, correlationId, cancellationToken);
     }
 
     private static SecurityCheckResult Finding(string id, NoeliaModule module) => new(

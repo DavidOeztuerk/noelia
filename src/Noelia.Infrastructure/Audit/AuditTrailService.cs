@@ -58,7 +58,7 @@ public sealed class AuditTrailService : IAuditTrailService, IDisposable
         await _chain.WaitAsync(cancellationToken);
         try
         {
-            auditEvent = new AuditEvent<T>
+            AuditEvent<T> Build(string? previousHash) => new AuditEvent<T>
             {
                 ActorId = actorId,
                 Capacity = capacity,
@@ -67,13 +67,23 @@ public sealed class AuditTrailService : IAuditTrailService, IDisposable
                 CorrelationId = correlationId,
                 BeforeStateJson = AuditEvent<T>.ToJson(before),
                 AfterStateJson = AuditEvent<T>.ToJson(after),
-                PreviousHash = _previousHash
+                PreviousHash = previousHash
             }.WithComputedHash();
 
-            await _sink.WriteAsync(auditEvent, cancellationToken);
+            if (_sink is IChainedSovereignAuditSink shared)
+            {
+                auditEvent = await AppendToSharedChainAsync(shared, Build, cancellationToken);
+            }
+            else
+            {
+                auditEvent = Build(_previousHash);
+                await _sink.WriteAsync(auditEvent, cancellationToken);
+            }
 
-            _chainValid &= auditEvent.VerifyHash()
-                           && auditEvent.PreviousHash == _previousHash;
+            // Against the head this event actually chained onto. With a shared
+            // sink that is the head the store held when this writer won, not
+            // the one this process last saw.
+            _chainValid &= auditEvent.VerifyHash();
             _length++;
             _recent.Enqueue(new AuditTrailEntry(
                 auditEvent.Timestamp,
@@ -101,6 +111,45 @@ public sealed class AuditTrailService : IAuditTrailService, IDisposable
             auditEvent.Id, action, resource, actorId, capacity);
 
         return auditEvent;
+    }
+
+    /// <summary>
+    /// Appends to a chain other replicas also write to.
+    /// </summary>
+    /// <remarks>
+    /// Read the head, build the event on it, and ask the store to store it and
+    /// advance the head in one operation. A writer that loses the race rebuilds
+    /// on the head that won, which is why the event is a function of the head
+    /// rather than a value computed once: the hash depends on what it chains
+    /// onto, so a retry cannot reuse the previous attempt.
+    /// <para>
+    /// The attempt limit is not a timeout in disguise. Each round trip means
+    /// another writer committed in between, so exhausting it says the chain is
+    /// under more contention than a single sequence can absorb — which an
+    /// operator has to hear about rather than have smoothed over.
+    /// </para>
+    /// </remarks>
+    private static async Task<AuditEvent<T>> AppendToSharedChainAsync<T>(
+        IChainedSovereignAuditSink sink,
+        Func<string?, AuditEvent<T>> build,
+        CancellationToken cancellationToken)
+    {
+        const int attempts = 32;
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            var head = await sink.HeadAsync(cancellationToken);
+            var candidate = build(head);
+
+            if (await sink.TryWriteAsync(candidate, head, cancellationToken))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"The shared audit chain could not be extended in {attempts} attempts. "
+            + "Another writer committed before each of them.");
     }
 
     /// <inheritdoc />
