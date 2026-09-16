@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpenTelemetry.Metrics;
 using AuditSecurityAuditMiddleware = Noelia.Infrastructure.Security.Audit.SecurityAuditMiddleware;
 using RootSecurityAuditMiddleware = Noelia.Infrastructure.Security.SecurityAuditMiddleware;
-using RootSecurityAuditEvent = Noelia.Infrastructure.Security.SecurityAuditEvent;
+using RootSecurityAuditEvent = Noelia.Abstractions.Security.Audit.SecurityAuditEvent;
 
 namespace Noelia.Infrastructure.Tests.Builder;
 

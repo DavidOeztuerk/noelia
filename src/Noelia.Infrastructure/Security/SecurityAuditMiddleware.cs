@@ -84,8 +84,11 @@ public class SecurityAuditMiddleware
     {
         return statusCode switch
         {
-            >= 500 => SecurityEventSeverity.Error,
-            401 or 403 => SecurityEventSeverity.Warning,
+            // On the surviving scale. The scale this replaced had Warning and
+            // Error where this has Low through High, and put Critical at a
+            // different number — so these two lines are a mapping, not a rename.
+            >= 500 => SecurityEventSeverity.High,
+            401 or 403 => SecurityEventSeverity.Medium,
             _ => SecurityEventSeverity.Information
         };
     }

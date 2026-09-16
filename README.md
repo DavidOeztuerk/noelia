@@ -1684,22 +1684,19 @@ integration suite is indistinguishable from a passing one.
   by two of them and refused by the third. One attribute now drives the first
   two; the third has no attribute and is reachable only as
   `[Authorize(Policy = "users:read")]`. Which one survives is still open.
-- **Duplicate type names.** Three areas carry two or three types of the same
-  name, which the package split made visible: `CacheStatistics`
-  (`Noelia.Abstractions.Caching` and `Noelia.Infrastructure.Communication.Caching`),
-  `RateLimitResult` (`Noelia.Abstractions.Security.RateLimiting` and
-  `Noelia.Infrastructure.Models`), and a whole second audit system —
-  `ISecurityAuditLogger` with its own `SecurityAuditEvent` and
-  `SecurityEventSeverity` beside `ISecurityAuditService`. Where they collide
-  the code now names them in full; merging them is separate work.
+- **Duplicate type names** — resolved in 6.0.0, and two of the three had
+  already gone. `RateLimitResult` and `IDomainEvent` existed once by the time
+  anyone looked. `CacheStatistics` was real and dangerous: same name, and one
+  reported a ratio of 1 where the other reported a percentage of 100. The
+  second audit system was worse — `SecurityEventSeverity` put `Critical` at 3
+  on one scale and 4 on the other, so a stored value changed meaning depending
+  on who read it. One of each survives; see MIGRATION.md.
 - **German error messages** — done in 5.3.0. The shipped wording is English,
   which is the language of this package and no claim about the user's, and
   `IErrorTextProvider` replaces every sentence of it.
 - **`ISecretProvider` implementations still sit in `Noelia.Infrastructure`.**
   The port moved to `Noelia.Abstractions`, the OpenBao and file-based
   implementations did not. They belong in `Noelia.Secrets.*` packages.
-- **Duplicate `IDomainEvent`.** One lives in `Noelia.Cqrs.Interfaces`, a second
-  in `Noelia.Infrastructure.Caching`, because of the layering above.
 - **Password entries from another system.** `IPasswordHasher` is a port and
   entries say what they are, so a reader for bcrypt or Argon2id can be layered
   in front — but Noelia ships neither, and a migration that has to re-hash
