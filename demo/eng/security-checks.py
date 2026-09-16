@@ -24,6 +24,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 from collections import defaultdict
 
 # Development renders the template, Staging and Production emit JSON. Reading
@@ -84,6 +85,24 @@ def parse(rest: str) -> dict[str, str] | None:
     return match.groupdict() if match else None
 
 
+def read_accepted(path: Path) -> dict[str, str]:
+    """The findings this demo has written down, with the reason for each."""
+    if not path.exists():
+        return {}
+
+    accepted: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        identifier, _, reason = line.partition(" ")
+        if reason.strip():
+            accepted[identifier] = reason.strip()
+
+    return accepted
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", default="all",
@@ -95,9 +114,15 @@ def main() -> int:
         metavar="ID=REASON",
         help="Accept one failing check, with the reason it is acceptable here.",
     )
+    parser.add_argument(
+        "--accepted",
+        default=str(Path(__file__).with_name("accepted-findings.txt")),
+        help="File of findings this demo accepts. Default: eng/accepted-findings.txt.",
+    )
     arguments = parser.parse_args()
 
-    allowed: dict[str, str] = {}
+    allowed: dict[str, str] = read_accepted(Path(arguments.accepted))
+
     for entry in arguments.allow:
         identifier, separator, reason = entry.partition("=")
         if not separator or not reason.strip():

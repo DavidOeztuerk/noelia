@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Operator dashboards · Noelia demo</title>
+<link rel="icon" href="/favicon.png" />
+<link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+<main class="page">
+  <h1>Operator dashboards</h1>
+  <p>
+    A microservice stack has no single dashboard. Each service composes its own,
+    reports its own modules and answers for its own readiness — which is the
+    point of running them separately. The monolith has one because it is one
+    process.
+  </p>
+  <ul data-dashboards></ul>
+  <p data-note></p>
+</main>
+<script type="module" src="/js/dashboards.js"></script>
+</body>
+</html>

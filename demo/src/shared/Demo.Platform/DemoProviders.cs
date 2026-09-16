@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Noelia.Abstractions.Hosting;
 using Noelia.Dashboard;
 using Noelia.InMemory.Hosting;
+using Noelia.InMemory.Security;
 using Noelia.Infrastructure.Audit;
 using Noelia.Infrastructure.Security.Encryption;
 using Noelia.Infrastructure.Security.Keys;
@@ -65,7 +66,19 @@ public static class DemoProviders
 
         if (!environment.UsesRedis)
         {
-            return noelia.UseInMemoryCache(serviceName);
+            noelia.UseInMemoryCache(serviceName);
+
+            // Development got no revocation store at all, and the dashboard
+            // said so: "Token revocation is not registered." A signed-out
+            // access token stayed valid until it expired — in the one stage
+            // where a developer is most likely to test signing out. In process
+            // and per replica, which is what Development is, but registered.
+            if (readsTokens)
+            {
+                noelia.Services.AddInMemoryTokenRevocation();
+            }
+
+            return noelia;
         }
 
         // The connection itself is not a module: it is the thing the modules
