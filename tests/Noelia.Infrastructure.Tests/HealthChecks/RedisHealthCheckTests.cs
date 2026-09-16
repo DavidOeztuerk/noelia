@@ -50,7 +50,11 @@ public class RedisHealthCheckTests
         var result = await check.CheckHealthAsync(context);
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Exception.Should().NotBeNull();
+        // Deliberately not attached. A writer that serialises the exception —
+        // and Noelia's own did until 5.1.0 — puts the driver's endpoint into an
+        // anonymous response. The detail is in the log, which has a reader who
+        // is allowed to see it.
+        result.Exception.Should().BeNull();
     }
 
     [Fact]
@@ -101,7 +105,7 @@ public class RedisHealthCheckTests
         var result = await check.CheckHealthAsync(context);
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("read/write test failed");
+        result.Description.Should().Contain("returned something else");
     }
 
     [Fact]
@@ -140,115 +144,75 @@ public class RedisHealthCheckTests
         var result = await check.CheckHealthAsync(context);
 
         result.Status.Should().Be(HealthStatus.Healthy);
-        result.Description.Should().Contain("healthy");
+        result.Description.Should().Contain("accepted a write and returned it");
     }
 }
 
+/// <summary>
+/// Pins what the RESP readiness check may and may not do.
+/// </summary>
+/// <remarks>
+/// Both of these were real. The check asked for <c>INFO</c>, which
+/// <c>AddRedisConnection</c> permits in Development only, so outside
+/// Development it reported every reachable server as unhealthy — which is why
+/// nothing ever registered it. And it copied the driver's exception message
+/// into the description, which <c>/health</c> serves anonymously; a
+/// StackExchange.Redis failure names the endpoint it was talking to.
+/// </remarks>
 [Trait("Category", "Unit")]
-public class RedisPerformanceHealthCheckTests
+public class RedisHealthCheckStaysUsableTests
 {
-    private static HealthCheckContext CreateContext(IHealthCheck check) =>
-        new HealthCheckContext
+    private const string Canary = "redis://admin:hunter2@cache.internal.example:6379";
+
+    [Fact]
+    public async Task A_driver_failure_does_not_reach_the_response_body()
+    {
+        var multiplexer = Substitute.For<IConnectionMultiplexer>();
+        multiplexer.IsConnected.Returns(true);
+        multiplexer.GetDatabase().Returns(_ => throw new InvalidOperationException(
+            $"No connection is available to service this operation: {Canary}"));
+
+        var check = new RedisHealthCheck(
+            multiplexer, Substitute.For<ILogger<RedisHealthCheck>>());
+
+        var result = await check.CheckHealthAsync(new HealthCheckContext
         {
-            Registration = new HealthCheckRegistration("redis-performance", check, null, null)
-        };
+            Registration = new HealthCheckRegistration("redis", check, null, null)
+        });
 
-    [Fact]
-    public async Task CheckHealthAsync_WhenGetDatabaseThrows_ReturnsDegraded()
-    {
-        var multiplexer = Substitute.For<IConnectionMultiplexer>();
-        var endPoints = new EndPointCollection { new System.Net.DnsEndPoint("localhost", 6379) };
-        multiplexer.GetEndPoints().Returns(endPoints.ToArray());
-        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>())
-            .Throws(RedisFailures.Unreachable("Failed"));
-
-        var logger = Substitute.For<ILogger<RedisPerformanceHealthCheck>>();
-        var check = new RedisPerformanceHealthCheck(multiplexer, logger);
-        var context = CreateContext(check);
-
-        var result = await check.CheckHealthAsync(context);
-
-        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().NotContain("cache.internal.example");
+        result.Description.Should().NotContain("hunter2");
+        result.Description.Should().NotContain(Canary);
     }
 
     [Fact]
-    public async Task CheckHealthAsync_WhenServerThrows_ReturnsDegraded()
+    public void The_check_names_no_admin_command()
     {
-        var multiplexer = Substitute.For<IConnectionMultiplexer>();
-        var database = Substitute.For<IDatabase>();
-        var endPoints = new EndPointCollection { new System.Net.DnsEndPoint("localhost", 6379) };
+        var source = File.ReadAllText(SourceFile());
 
-        multiplexer.GetEndPoints().Returns(endPoints.ToArray());
-        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
-        multiplexer.GetServer(Arg.Any<System.Net.EndPoint>(), Arg.Any<object?>())
-            .Throws(new RedisException("Server unavailable"));
-
-        var logger = Substitute.For<ILogger<RedisPerformanceHealthCheck>>();
-        var check = new RedisPerformanceHealthCheck(multiplexer, logger);
-        var context = CreateContext(check);
-
-        var result = await check.CheckHealthAsync(context);
-
-        result.Status.Should().Be(HealthStatus.Degraded);
+        source.Should().NotContain("InfoAsync",
+            "INFO is an admin command, and AddRedisConnection enables admin mode in "
+            + "Development only — a readiness check that needs it reports every "
+            + "production server as unhealthy");
     }
 
-    [Fact]
-    public async Task CheckHealthAsync_WhenPingFast_ReturnsHealthyOrDegraded()
+    private static string SourceFile()
     {
-        var multiplexer = Substitute.For<IConnectionMultiplexer>();
-        var database = Substitute.For<IDatabase>();
-        var server = Substitute.For<IServer>();
-        var endPoints = new EndPointCollection { new System.Net.DnsEndPoint("localhost", 6379) };
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(
+                directory.FullName, "src", "Noelia.Redis", "HealthChecks", "RedisHealthCheck.cs");
 
-        multiplexer.GetEndPoints().Returns(endPoints.ToArray());
-        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
-        multiplexer.GetServer(Arg.Any<System.Net.EndPoint>(), Arg.Any<object?>()).Returns(server);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
 
-        // Fast ping
-        database.PingAsync(Arg.Any<CommandFlags>()).Returns(TimeSpan.FromMilliseconds(5));
+            directory = directory.Parent;
+        }
 
-        // Info returns minimal groups — configure using explicit arg matchers to avoid dangling specs
-        IGrouping<string, KeyValuePair<string, string>>[] infoGroups = Array.Empty<IGrouping<string, KeyValuePair<string, string>>>();
-
-        server.InfoAsync(Arg.Any<RedisValue>(), Arg.Any<CommandFlags>()).Returns(infoGroups);
-
-        var logger = Substitute.For<ILogger<RedisPerformanceHealthCheck>>();
-        var check = new RedisPerformanceHealthCheck(multiplexer, logger);
-        var context = CreateContext(check);
-
-        var result = await check.CheckHealthAsync(context);
-
-        // With fast ping (<100ms), low memory (0%), and low clients (5/100), should be Healthy or at worst Degraded
-        result.Status.Should().BeOneOf(HealthStatus.Healthy, HealthStatus.Degraded);
-    }
-
-    [Fact]
-    public async Task CheckHealthAsync_WhenPingSucceeds_DataContainsLatencyKeys()
-    {
-        var multiplexer = Substitute.For<IConnectionMultiplexer>();
-        var database = Substitute.For<IDatabase>();
-        var server = Substitute.For<IServer>();
-        var endPoints = new EndPointCollection { new System.Net.DnsEndPoint("localhost", 6379) };
-
-        multiplexer.GetEndPoints().Returns(endPoints.ToArray());
-        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
-        multiplexer.GetServer(Arg.Any<System.Net.EndPoint>(), Arg.Any<object?>()).Returns(server);
-
-        database.PingAsync(Arg.Any<CommandFlags>()).Returns(TimeSpan.FromMilliseconds(1));
-
-        IGrouping<string, KeyValuePair<string, string>>[] infoGroups = Array.Empty<IGrouping<string, KeyValuePair<string, string>>>();
-        server.InfoAsync(Arg.Any<RedisValue>(), Arg.Any<CommandFlags>()).Returns(infoGroups);
-
-        var logger = Substitute.For<ILogger<RedisPerformanceHealthCheck>>();
-        var check = new RedisPerformanceHealthCheck(multiplexer, logger);
-        var context = CreateContext(check);
-
-        var result = await check.CheckHealthAsync(context);
-
-        // Status is Healthy or Degraded depending on machine speed, but Data always has latency keys
-        result.Data.Should().ContainKey("average_latency_ms");
-        result.Data.Should().ContainKey("max_latency_ms");
-        result.Data.Should().ContainKey("memory_usage_percent");
+        throw new FileNotFoundException("RedisHealthCheck.cs not found above the test output.");
     }
 }
-

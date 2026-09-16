@@ -1,0 +1,86 @@
+body.page {
+  min-height: 100vh;
+  background: var(--colour-bg);
+  color: var(--colour-text);
+  font-family: var(--font);
+  line-height: 1.5;
+}
+
+/* Visible only once it has keyboard focus, which is when it is needed. */
+.skip-link {
+  position: absolute;
+  inset-inline-start: -100vw;
+}
+
+.skip-link:focus {
+  inset-inline-start: var(--space-4);
+  top: var(--space-4);
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--colour-accent);
+  color: var(--colour-accent-text);
+  border-radius: var(--radius);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--colour-border);
+  background: var(--colour-surface);
+}
+
+.topbar__brand {
+  font-weight: 600;
+}
+
+.topbar__session {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.topbar__user {
+  color: var(--colour-text-muted);
+}
+
+.shell {
+  display: grid;
+  gap: var(--space-6);
+  width: min(46rem, 100% - var(--space-8));
+  margin-inline: auto;
+  padding-block: var(--space-8);
+}
+
+.page--auth {
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.auth {
+  width: min(24rem, 100%);
+  padding: var(--space-8);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-surface);
+  box-shadow: var(--shadow);
+}
+
+.auth__title {
+  margin-bottom: var(--space-6);
+  font-size: 1.5rem;
+}
+
+.auth__switch {
+  margin-top: var(--space-6);
+  color: var(--colour-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.auth__switch a {
+  color: var(--colour-accent);
+}

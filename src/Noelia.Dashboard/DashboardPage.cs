@@ -178,9 +178,15 @@ internal static class DashboardPage
 
         if (options.ProductionReason is not null)
         {
-            output.Append("<p>Production exposure reason: recorded (")
-                .Append(options.ProductionReason.Length.ToString(CultureInfo.InvariantCulture))
-                .Append(" characters).</p>");
+            // The wording, not a character count. InProduction(reason) already
+            // gates composition, so the reason is written down in every case —
+            // but until 5.1.0 it was rendered as "recorded (N characters)" and
+            // could therefore say anything at all without anyone reading it.
+            // An operator looking at this page is exactly the person who has to
+            // judge whether the stated reason still holds.
+            output.Append("<p>Production exposure reason: ")
+                .Append(H(options.ProductionReason))
+                .Append("</p>");
         }
 
         output.Append("</section>");

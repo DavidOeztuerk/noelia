@@ -23,7 +23,7 @@ public class PackageDependencyBudgetTests
             ["Noelia.Messaging.MassTransit"] = 4,
             ["Noelia.Passwords.Argon2"] = 10,
             ["Noelia.Passwords.BCrypt"] = 9,
-            ["Noelia.Redis"] = 14
+            ["Noelia.Redis"] = 15
         };
 
     [Fact]

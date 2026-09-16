@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The one place the demo answers "what does this environment run, and who may
+    look at it". Four composition roots asked that question separately before,
+    and three of them answered it with a copy of the same predicate.
+  -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Noelia.Abstractions" />
+    <PackageReference Include="Noelia.Dashboard" />
+    <PackageReference Include="Noelia.InMemory" />
+    <PackageReference Include="Noelia.Infrastructure" />
+    <PackageReference Include="Noelia.Redis" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

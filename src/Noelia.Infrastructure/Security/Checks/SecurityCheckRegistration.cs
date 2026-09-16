@@ -18,6 +18,7 @@ internal static class SecurityCheckRegistration
             ServiceDescriptor.Singleton<IHostedService, SecurityCheckStartupService>());
 
         Add<CompositionSecurityCheck>(services);
+        Add<ReadinessCoverageSecurityCheck>(services);
         Add<JwtSecurityCheck>(services);
         Add<SecurityHeadersSecurityCheck>(services);
         Add<RefreshCookieSecurityCheck>(services);

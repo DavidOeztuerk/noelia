@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../UserService.Application/UserService.Application.csproj" />
+    <ProjectReference Include="../UserService.Domain/UserService.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Noelia.Infrastructure" />
+    <PackageReference Include="Noelia.Data.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+</Project>

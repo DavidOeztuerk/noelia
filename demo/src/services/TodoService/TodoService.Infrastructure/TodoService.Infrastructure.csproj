@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../TodoService.Application/TodoService.Application.csproj" />
+    <ProjectReference Include="../TodoService.Domain/TodoService.Domain.csproj" />
+  </ItemGroup>
+</Project>

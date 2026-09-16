@@ -205,7 +205,10 @@ public static class ServiceCollectionExtensions
   {
     return app.UseNoelia(environment, serviceName, mw =>
     {
-      mw.UseSecurityHeaders()
+      // First: every later step that reads an address or a scheme reads the
+      // values this one establishes.
+      mw.UseForwardedHeaders()
+        .UseSecurityHeaders()
         .UseCorrelationId()
         .UseRequestLogging()
         .UseTelemetry()

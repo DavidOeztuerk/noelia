@@ -104,39 +104,6 @@ public class HealthCheckBuilderTests
     }
 
     [Fact]
-    public void AddDatabaseHealthCheck_ReturnsSelf()
-    {
-        var services = new ServiceCollection();
-        var builder = new HealthCheckBuilder(services);
-
-        var result = builder.AddDatabaseHealthCheck();
-
-        result.Should().BeSameAs(builder);
-    }
-
-    [Fact]
-    public void AddRabbitMqHealthCheck_ReturnsSelf()
-    {
-        var services = new ServiceCollection();
-        var builder = new HealthCheckBuilder(services);
-
-        var result = builder.AddRabbitMqHealthCheck();
-
-        result.Should().BeSameAs(builder);
-    }
-
-    [Fact]
-    public void AddExternalApiHealthChecks_ReturnsSelf()
-    {
-        var services = new ServiceCollection();
-        var builder = new HealthCheckBuilder(services);
-
-        var result = builder.AddExternalApiHealthChecks();
-
-        result.Should().BeSameAs(builder);
-    }
-
-    [Fact]
     public void AddCustomHealthChecks_RegistersApplicationAndCircuitBreakerAndMemoryChecks()
     {
         var services = new ServiceCollection();
@@ -213,22 +180,6 @@ public class HealthCheckBuilderTests
         options.Value.Registrations.Should().Contain(r => r.Name == "memory");
         options.Value.Registrations.Should().Contain(r => r.Name == "circuit_breakers");
         options.Value.Registrations.Should().Contain(r => r.Name == "disk_space");
-    }
-
-    [Fact]
-    public void MultipleAddCalls_ChainReturnsSelf()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        var builder = new HealthCheckBuilder(services);
-
-        var result = builder
-            .AddDatabaseHealthCheck()
-            .AddRabbitMqHealthCheck()
-            .AddExternalApiHealthChecks();
-
-        result.Should().BeSameAs(builder);
     }
 
     #endregion

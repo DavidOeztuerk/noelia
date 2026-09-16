@@ -1,4 +1,9 @@
 using System.Net;
+using Microsoft.Extensions.FileProviders;
+using Noelia.Infrastructure.Builder.Modules;
+using Noelia.Infrastructure.Builder;
+using Noelia.Infrastructure.Extensions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using IPNetwork = System.Net.IPNetwork;
 using Noelia.Infrastructure.Http;
@@ -106,6 +111,117 @@ public class ErklaertesVertrauenTests
             trusted: ["10.99.99.99"], forwardedFor: "203.0.113.9");
 
         gesehen.Should().Be("127.0.0.1");
+    }
+
+    /// <summary>
+    /// Durch Noelias eigene Kette, nicht durch eine selbst gebaute.
+    /// </summary>
+    /// <remarks>
+    /// Die Proben darüber rufen <c>app.UseForwardedHeaders()</c> selbst auf und
+    /// belegen damit nur, dass die Optionen stimmen. Bis 5.1.0 stellte
+    /// <c>UseNoelia(...)</c> diesen Schritt nicht ein: Die Erklärung war im
+    /// Behälter, angewandt hat sie niemand, und jeder Dienst hinter einem
+    /// Vermittler zählte weiterhin den Vermittler.
+    /// </remarks>
+    [Fact]
+    public async Task Die_Noelia_Kette_wendet_die_Erklaerung_selbst_an()
+    {
+        var gesehen = await AddressSeenThroughNoeliaAsync(
+            trusted: ["127.0.0.1"], forwardedFor: "203.0.113.9");
+
+        gesehen.Should().Be("203.0.113.9");
+    }
+
+    /// <summary>
+    /// Und ohne Erklärung stellt dieselbe Kette den Schritt nicht ein.
+    /// </summary>
+    [Fact]
+    public async Task Ohne_Erklaerung_stellt_die_Kette_den_Schritt_nicht_ein()
+    {
+        var gesehen = await AddressSeenThroughNoeliaAsync(
+            trusted: null, forwardedFor: "203.0.113.9");
+
+        gesehen.Should().Be("127.0.0.1");
+    }
+
+    /// <summary>
+    /// Auch das Schema kommt vom Vermittler — daran hängt, ob ein Cookie, das
+    /// <c>Secure</c> verlangt, es auch bekommt.
+    /// </summary>
+    [Fact]
+    public async Task Das_erklaerte_Schema_erreicht_die_Anwendung()
+    {
+        using var host = await NoeliaHostAsync(
+            trusted: ["127.0.0.1"],
+            report: context => context.Request.Scheme);
+
+        var client = host.GetTestClient();
+        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+
+        var schema = await (await client.GetAsync(new Uri("http://localhost/")))
+            .Content.ReadAsStringAsync();
+
+        schema.Should().Be("https");
+    }
+
+    private static async Task<string> AddressSeenThroughNoeliaAsync(
+        string[]? trusted,
+        string forwardedFor)
+    {
+        using var host = await NoeliaHostAsync(trusted, ClientAddress.Of);
+
+        var client = host.GetTestClient();
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", forwardedFor);
+
+        return await (await client.GetAsync(new Uri("http://localhost/")))
+            .Content.ReadAsStringAsync();
+    }
+
+    private static Task<IHost> NoeliaHostAsync(
+        string[]? trusted,
+        Func<HttpContext, string> report) =>
+        new HostBuilder()
+            .ConfigureWebHost(web => web
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.AddNoelia(
+                        new ConfigurationBuilder().Build(),
+                        Produktion,
+                        "forwarded-probe",
+                        _ => { });
+
+                    if (trusted is not null)
+                    {
+                        services.TrustForwardedHeadersFrom(trusted);
+                    }
+                })
+                .Configure(app =>
+                {
+                    app.Use(async (context, next) =>
+                    {
+                        context.Connection.RemoteIpAddress = IPAddress.Loopback;
+                        await next();
+                    });
+
+                    app.UseNoelia(
+                        Produktion,
+                        "forwarded-probe",
+                        mw => mw.UseForwardedHeaders());
+
+                    app.Run(context => context.Response.WriteAsync(report(context)));
+                }))
+            .StartAsync();
+
+    private static readonly IHostEnvironment Produktion = new Umgebung();
+
+    private sealed class Umgebung : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = "forwarded-probe";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public IFileProvider ContentRootFileProvider { get; set; } =
+            new NullFileProvider();
     }
 
     private static ForwardedHeadersOptions Configured(params string[] proxies)

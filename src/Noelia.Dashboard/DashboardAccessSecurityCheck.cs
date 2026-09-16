@@ -32,12 +32,29 @@ internal sealed class DashboardAccessSecurityCheck(
 
         var summary = (policyConfigured, auditConfigured) switch
         {
-            (true, true) => "An explicit operator policy and audit trail protect dashboard access.",
+            (true, true) => ExposureNote(
+                "An explicit operator policy and audit trail protect dashboard access."),
             (false, _) => "No operator policy is configured; dashboard requests remain indistinguishable 404 responses.",
-            _ => "An operator policy is configured, but dashboard access cannot be written to an audit trail."
+            _ => ExposureNote(
+                "An operator policy is configured, but dashboard access cannot be written to an audit trail.")
         };
 
         return Task.FromResult(new SecurityCheckResult(
             Id, Module, Category, status, Severity, summary, Remediation));
     }
+
+    /// <summary>
+    /// Carries the stated Production reason into the check result.
+    /// </summary>
+    /// <remarks>
+    /// Composition already refuses to build a Production dashboard without one,
+    /// so the reason always exists there. What it did not do was reach anybody:
+    /// an operator reading the check learned that access was policed, never
+    /// what the exposure was for. A reason nobody is shown is a reason nobody
+    /// can withdraw.
+    /// </remarks>
+    private string ExposureNote(string summary) =>
+        options.ProductionReason is null
+            ? summary
+            : $"{summary} Production exposure reason: {options.ProductionReason}";
 }

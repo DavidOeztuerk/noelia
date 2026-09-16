@@ -1,0 +1,38 @@
+.DS_Store
+.idea/
+.vscode/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.nuget.secrets
+.nuget.secrets.*
+
+# .NET
+**/bin/
+**/obj/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Frontend
+**/node_modules/
+src/frontend/coverage/
+
+# Local runtime data
+*.db
+*.db-shm
+*.db-wal
+logs/
+artifacts/
+.packages/
+.local-feed/
+NuGet.Local.Config
+
+# Playwright
+test-results/
+playwright-report/
+.playwright-mcp/
+blob-report/

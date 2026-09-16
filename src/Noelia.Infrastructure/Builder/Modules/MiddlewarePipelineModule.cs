@@ -1,3 +1,4 @@
+using Noelia.Infrastructure.Http;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Hosting;
 using Noelia.Infrastructure.Caching.Http;
@@ -10,6 +11,7 @@ using Noelia.Infrastructure.Security.InputSanitization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -115,6 +117,40 @@ public static class MiddlewarePipelineModule
             step.App.UseMiddleware<DistributedRateLimitingMiddleware>();
         });
 
+    /// <summary>
+    /// Rewrites the connection's address and scheme from the headers a named
+    /// proxy set.
+    /// </summary>
+    /// <remarks>
+    /// Added only when <c>TrustForwardedHeadersFrom(...)</c> named at least one
+    /// proxy. Until 5.1.0 that call configured
+    /// <see cref="Microsoft.AspNetCore.Builder.ForwardedHeadersOptions"/> and
+    /// nothing applied them: Noelia's pipeline never ran the middleware, so
+    /// <c>ClientAddress.Of</c> — and with it the rate limiter's buckets, the
+    /// audit trail's addresses and every security alert — kept naming the proxy.
+    /// A service behind TLS termination also kept seeing <c>http</c>, which is
+    /// how a cookie asking for <c>Secure</c> ends up without it.
+    /// <para>
+    /// It must run before anything that reads either value, so it belongs at
+    /// the front of the chain. An application that already called
+    /// <c>UseForwardedHeaders()</c> itself should drop that call: two passes
+    /// consume two entries of <c>X-Forwarded-For</c>.
+    /// </para>
+    /// </remarks>
+    public static InfrastructureMiddlewareBuilder UseForwardedHeaders(
+        this InfrastructureMiddlewareBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.App.ApplicationServices.GetService<ForwardedHeaderTrust>() is null)
+        {
+            return builder;
+        }
+
+        builder.App.UseForwardedHeaders();
+        return builder;
+    }
+
     /// <summary>Liveness and readiness endpoints.</summary>
     public static InfrastructureMiddlewareBuilder UseHealthCheckEndpoints(this InfrastructureMiddlewareBuilder builder) =>
         builder.Step(NoeliaModule.HealthChecks, step =>
@@ -135,7 +171,20 @@ public static class MiddlewarePipelineModule
                         status = e.Value.Status.ToString(),
                         durationMs = e.Value.Duration.TotalMilliseconds,
                         tags = e.Value.Tags,
-                        error = e.Value.Exception?.Message
+
+                        // The check's own words, never the exception's. Until
+                        // 5.1.0 this served e.Value.Exception?.Message to
+                        // whoever asked — and a driver's connection failure
+                        // names the host, the port and sometimes the
+                        // credentials it was using. /health answers anonymously
+                        // wherever it is exposed; a probe that discloses the
+                        // infrastructure behind it on failure is a probe that
+                        // rewards knocking.
+                        //
+                        // A check that wants to say more says it in its own
+                        // description, where its author decided what is safe.
+                        // The exception itself is logged.
+                        description = e.Value.Description
                     })
                 };
                 await context.Response.WriteAsync(

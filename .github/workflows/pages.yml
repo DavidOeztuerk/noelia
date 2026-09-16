@@ -1,0 +1,49 @@
+name: Pages
+
+# Publishes docs/pages as the project's showcase.
+#
+# Static only, and deliberately so: GitHub Pages runs no .NET and no Docker, so
+# nothing here is a live instance of the demo. The screenshots it shows are
+# captured from a real local run by demo/src/frontend/eng/capture-dashboards.mjs
+# and committed — a page that looked like a running system without being one
+# would be the same kind of claim this repository exists to stop making.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/pages/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a queued run waits rather than replacing the
+# one in flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # The page is plain HTML with no build step. Anything that needed one
+      # would belong in the repository as the built artifact, not as a step
+      # nobody can reproduce locally.
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: docs/pages
+
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

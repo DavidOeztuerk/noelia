@@ -1,0 +1,40 @@
+/* The values every other file refers to. Changing a colour happens here once. */
+:root {
+  --colour-bg: #0f1115;
+  --colour-surface: #181b22;
+  --colour-surface-raised: #21252e;
+  --colour-border: #2c313c;
+  --colour-text: #e8eaed;
+  --colour-text-muted: #9aa1ad;
+  --colour-accent: #6ea8fe;
+  --colour-accent-text: #0f1115;
+  --colour-danger: #ff8080;
+  --colour-success: #7bd88f;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --radius: 0.5rem;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+/* Respects the reader's setting rather than forcing one look. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --colour-bg: #f6f7f9;
+    --colour-surface: #ffffff;
+    --colour-surface-raised: #f0f2f5;
+    --colour-border: #d8dce3;
+    --colour-text: #1a1d23;
+    --colour-text-muted: #5b626e;
+    --colour-accent: #1a5fd0;
+    --colour-accent-text: #ffffff;
+    --colour-danger: #b3261e;
+    --colour-success: #1e7c3a;
+  }
+}

@@ -52,6 +52,14 @@ public sealed class NoeliaDashboardBuilder
     /// Explicitly permits the page in Production and records why it is needed.
     /// An empty reason is rejected.
     /// </summary>
+    /// <remarks>
+    /// The reason is shown verbatim on the page and in the
+    /// <c>noelia.dashboard.operator-access</c> check, so that whoever reads
+    /// either can judge whether it still holds. Write it for that reader, and
+    /// put nothing in it that should not be on a screen — it is a
+    /// justification, not a place for a host name, a ticket body or a
+    /// credential.
+    /// </remarks>
     public NoeliaDashboardBuilder InProduction(string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);

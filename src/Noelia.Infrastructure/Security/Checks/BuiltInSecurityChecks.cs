@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Hosting;
@@ -66,6 +67,77 @@ internal sealed class CompositionSecurityCheck(
         return Task.FromResult(unmet == 0
             ? Result(SecurityCheckStatus.Pass, "Every active module requirement has a registered provider.")
             : Result(SecurityCheckStatus.Fail, "One or more active module requirements have no provider."));
+    }
+}
+
+internal sealed class ReadinessCoverageSecurityCheck(
+    IServiceProvider services,
+    NoeliaComposition composition) : SecurityCheckBase
+{
+    public override string Id => "noelia.health.readiness-coverage";
+
+    /// <summary>
+    /// Reported against the composition, not against HealthChecks.
+    /// </summary>
+    /// <remarks>
+    /// The finding is "this composition exposes readiness and registers nothing
+    /// for it", which is a statement about the whole arrangement and has to
+    /// reach an operator whether or not the module is in it. A check filed
+    /// under a module the service does not run would be filtered out of the
+    /// dashboard by the very absence it is reporting.
+    /// </remarks>
+    public override NoeliaModule Module => NoeliaModule.Composition;
+    public override SecurityCheckCategory Category => SecurityCheckCategory.Composition;
+    public override SecurityCheckSeverity Severity => SecurityCheckSeverity.High;
+    public override string Remediation =>
+        "Register a readiness check for every backing service this one cannot serve without: "
+        + "AddDatabase<TContext>(...) from Noelia.Data.EntityFrameworkCore, "
+        + "AddRedisConnection(...) from Noelia.Redis, "
+        + "UseMassTransitMessaging(...) from Noelia.Messaging.MassTransit, "
+        + "or your own through the Checks builder.";
+
+    /// <summary>
+    /// Reports a readiness endpoint that answers for nothing.
+    /// </summary>
+    /// <remarks>
+    /// <c>/health/ready</c> filters the registered checks by the <c>ready</c>
+    /// tag. With none registered the filtered set is empty, an empty report is
+    /// <see cref="HealthStatus.Healthy"/>, and the endpoint answers 200 — over
+    /// an unreachable database, an unreachable cache and an unreachable broker
+    /// alike. Nothing about that response distinguishes "everything this
+    /// service depends on is up" from "this service checks nothing", and an
+    /// orchestrator routing traffic on it cannot tell either.
+    /// </remarks>
+    public override Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default)
+    {
+        // Composition, not resolvability: IOptions<T> resolves to an empty
+        // default whether or not anyone asked for health checks, so asking the
+        // container would report an uncovered readiness endpoint for a service
+        // that exposes none.
+        if (!composition.Included.Contains(NoeliaModule.HealthChecks))
+        {
+            return Task.FromResult(Result(
+                SecurityCheckStatus.NotApplicable,
+                "This composition exposes no readiness endpoint."));
+        }
+
+        // Not GetRequiredService: AddHealthChecks() without a single AddCheck
+        // leaves IOptions<HealthCheckServiceOptions> unregistered, and that is
+        // exactly the composition this check was written for. Demanding the
+        // service would turn the finding into a crash inside the check that
+        // reports it.
+        var options = services.GetService<IOptions<HealthCheckServiceOptions>>();
+
+        var ready = options?.Value.Registrations
+            .Count(registration => registration.Tags.Contains("ready")) ?? 0;
+
+        return Task.FromResult(ready == 0
+            ? Result(
+                SecurityCheckStatus.Fail,
+                "Readiness answers 200 without checking anything; no registration carries the 'ready' tag.")
+            : Result(
+                SecurityCheckStatus.Pass,
+                $"Readiness covers {ready} registered check(s)."));
     }
 }
 

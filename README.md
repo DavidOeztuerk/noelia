@@ -27,7 +27,7 @@ the application's composition root.
 | `Noelia.Infrastructure` | Middleware, builder, telemetry, resilience, headers, input sanitisation, sessions, password hashing | none | 44 |
 | `Noelia.Http` | Correlation, the rate limit, the client address — the pipeline without the engine | **none** (framework only) | 0 |
 | `Noelia.Dashboard` | Read-only operator view, server-rendered HTML and embedded assets | **none** (framework only) | 0 |
-| `Noelia.Redis` | Cache, rate counters, secrets, keys, audit trail, resource permissions | StackExchange.Redis | 14 |
+| `Noelia.Redis` | Cache, rate counters, secrets, keys, audit trail, resource permissions, readiness | StackExchange.Redis | 15 |
 | `Noelia.InMemory` | The same ports, in process | none | 10 |
 | `Noelia.Passwords.BCrypt` | bcrypt, to write or to read what a system already has | BCrypt.Net-Next | 9 |
 | `Noelia.Passwords.Argon2` | Argon2id, where custom hardware is part of the threat | Konscious | 10 |
@@ -95,6 +95,28 @@ through public issues.
 > plaintext and reported `AES256GCM`. If you ever called it, read
 > [Security notice — 4.4.1](#security-notice--441-addencryption-did-not-encrypt)
 > before anything else in this file.
+
+## Seeing it run
+
+`demo/` holds one todo application built twice — as microservices behind a
+gateway, and as a monolith — and run three times, in Development, Staging and
+Production, from a single `docker compose`. The application code is identical
+in all six; what differs is where the state lives and who may open the operator
+dashboard, and both are configuration rather than code.
+
+```bash
+cd demo
+cp .env.example .env
+docker compose --profile all up -d --build --wait
+```
+
+Then `http://mono-dev.localhost:8080` for the application and
+`http://mono-dev.localhost:8080/noelia` for the dashboard. The details, and the
+matrix of what each stage runs, are in [demo/README.md](demo/README.md).
+
+The demo installs Noelia from nuget.org like anyone else would, and an
+architecture test keeps it that way — a gate that builds against the working
+tree it was cut from proves nothing about the packages.
 
 ## Getting started
 

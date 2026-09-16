@@ -21,12 +21,12 @@ public static class EnhancedHealthCheckExtensions
     {
         var builder = new HealthCheckBuilder(services);
 
-        // Add standard health checks
-        builder
-            .AddDatabaseHealthCheck()
-            .AddRabbitMqHealthCheck()
-            .AddExternalApiHealthChecks()
-            .AddCustomHealthChecks();
+        // The checks this package can register without naming a provider. A
+        // database, a broker or a cache is reached by its driver, and the
+        // driver lives in a provider package — so the readiness checks that
+        // matter arrive with AddDatabase<TContext>(...), AddRedisConnection(...)
+        // or UseMassTransitMessaging(...), not from here.
+        builder.AddCustomHealthChecks();
 
         // Allow custom configuration
         configure?.Invoke(builder);
@@ -87,13 +87,13 @@ public static class EnhancedHealthCheckExtensions
                 .ToDictionary(e => e.Key, e => new
                 {
                     status = e.Value.Status.ToString(),
-                    error = e.Value.Exception?.Message
+                    description = e.Value.Description
                 }),
             details = report.Entries.Where(e => e.Value.Status == HealthStatus.Degraded)
                 .ToDictionary(e => e.Key, e => new
                 {
                     status = e.Value.Status.ToString(),
-                    error = e.Value.Exception?.Message
+                    description = e.Value.Description
                 })
         };
 
@@ -119,7 +119,7 @@ public static class EnhancedHealthCheckExtensions
                 {
                     status = e.Value.Status.ToString(),
                     duration = e.Value.Duration.TotalMilliseconds,
-                    error = e.Value.Exception?.Message,
+                    description = e.Value.Description,
                     data = e.Value.Data?.ToDictionary(d => d.Key, d => d.Value)
                 })
         };
@@ -164,7 +164,7 @@ public static class EnhancedHealthCheckExtensions
                     <td>{entry.Key}</td>
                     <td style='color: {color}; font-weight: bold;'>{entry.Value.Status}</td>
                     <td>{entry.Value.Duration.TotalMilliseconds:F1}ms</td>
-                    <td>{entry.Value.Exception?.Message ?? "-"}</td>
+                    <td>{System.Net.WebUtility.HtmlEncode(entry.Value.Description) ?? "-"}</td>
                 </tr>";
         }));
 
@@ -231,58 +231,26 @@ public class HealthCheckBuilder
     }
 
     /// <summary>
-    /// Add database health checks
+    /// The underlying builder, for checks that name a provider.
     /// </summary>
-    public HealthCheckBuilder AddDatabaseHealthCheck()
-    {
-        //_healthChecksBuilder
-        //    .AddCheck<DatabaseHealthCheck>("database",
-        //        HealthStatus.Unhealthy,
-        //        tags: new[] { "ready", "database" })
-        //    .AddCheck<DatabaseConnectionPoolHealthCheck>("database_pool",
-        //        HealthStatus.Degraded,
-        //        tags: new[] { "ready", "database" });
-
-        return this;
-    }
-
-    /// <summary>
-    /// Exposes the underlying builder so provider packages can add their own
-    /// checks — the Redis and RabbitMQ ones live with their drivers.
-    /// </summary>
+    /// <remarks>
+    /// There are deliberately no <c>AddDatabaseHealthCheck</c> or
+    /// <c>AddRabbitMqHealthCheck</c> methods here. A check that reaches a
+    /// database or a broker has to name one, and this package may not — the
+    /// same rule that keeps <c>Noelia.Infrastructure</c> free of drivers
+    /// (ADR-0001). Those checks arrive with their provider:
+    /// <c>AddDatabase&lt;TContext&gt;(...)</c> from
+    /// <c>Noelia.Data.EntityFrameworkCore</c>, <c>AddRedisConnection(...)</c>
+    /// from <c>Noelia.Redis</c>, <c>UseMassTransitMessaging(...)</c> from
+    /// <c>Noelia.Messaging.MassTransit</c>.
+    /// <para>
+    /// The three methods that used to sit here returned <c>this</c> over a
+    /// commented-out body, so a service could call all three and register
+    /// nothing. They were removed in 5.1.0 rather than filled in, because in
+    /// this package they can never be filled in.
+    /// </para>
+    /// </remarks>
     public IHealthChecksBuilder Checks => _healthChecksBuilder;
-
-    /// <summary>
-    /// Add RabbitMQ health checks
-    /// </summary>
-    public HealthCheckBuilder AddRabbitMqHealthCheck()
-    {
-        // _healthChecksBuilder
-        //     .AddCheck<RabbitMqHealthCheck>("rabbitmq",
-        //         HealthStatus.Unhealthy,
-        //         tags: new[] { "ready", "messaging" })
-        //     .AddCheck<RabbitMqQueueHealthCheck>("rabbitmq_queues",
-        //         HealthStatus.Degraded,
-        //         tags: new[] { "messaging" });
-
-        return this;
-    }
-
-    /// <summary>
-    /// Add external API health checks
-    /// </summary>
-    public HealthCheckBuilder AddExternalApiHealthChecks()
-    {
-        // _healthChecksBuilder
-        //     .AddCheck<EmailServiceHealthCheck>("email_service",
-        //         HealthStatus.Degraded,
-        //         tags: new[] { "external", "email" })
-        //     .AddCheck<FileStorageHealthCheck>("file_storage",
-        //         HealthStatus.Degraded,
-        //         tags: new[] { "external", "storage" });
-
-        return this;
-    }
 
     /// <summary>
     /// Add custom application health checks
