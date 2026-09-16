@@ -1056,11 +1056,48 @@ builder.Services.AddMessaging(builder.Configuration, typeof(Program).Assembly);
 the transport accepted the event — **not** a transactional outbox, and not that
 the event survives a crash between the database commit and the publish.
 
-Where that guarantee is needed it belongs to the service that owns the
-transaction: it writes the intent in the same transaction as the domain change
-and publishes from there. A delivery guarantee that appears or disappears
-depending on the configured transport would be worse than none, because callers
-would rely on it.
+A delivery guarantee that appeared or disappeared depending on the configured
+transport would be worse than none, because callers would rely on it. So the
+guarantee is a separate thing you compose, and it belongs to the service that
+owns the transaction.
+
+### The outbox
+
+```csharp
+noelia.UseDefaults().UseOutboxDispatcher();
+builder.Services.AddEntityFrameworkOutbox<OrderContext>();
+```
+
+```csharp
+protected override void OnModelCreating(ModelBuilder model) =>
+    model.MapNoeliaOutbox();          // then generate a migration
+```
+
+`IOutbox.RecordAsync` writes the intent through the same `DbContext` as the
+change that caused it and **deliberately does not save**. Your save decides
+whether both happened, or neither:
+
+```csharp
+context.Orders.Add(order);
+await outbox.RecordAsync(new OrderPlaced(order.Id));
+await context.SaveChangesAsync();     // both, or neither
+```
+
+`UseOutboxDispatcher()` runs the loop that delivers what was recorded. One
+service in a deployment needs it, not every one — several dispatchers against
+one store are safe, because claiming a batch is a conditional update with a
+five-minute lease, but each one is another connection holding messages.
+
+**Delivery is at-least-once and the dispatcher does not pretend otherwise.** It
+publishes first and marks second: a crash in between delivers a message twice,
+where the other order loses it. `OutboxMessage.Id` travels with the message so a
+consumer can decide. A message that has failed `AttemptsBeforeAlarm` times is
+logged as stuck and left in the table — never dropped, because a payload nothing
+will accept is a decision for an operator.
+
+Turning a recorded payload back into an event is yours: `IOutboxPayloadReader`
+is a port, because deserialising an arbitrary named type out of a database row
+is how a row becomes code execution.
 
 ## Persistence
 
@@ -1202,6 +1239,43 @@ the package also exposes `AddNoeliaDashboard(...)`. It creates a composition
 containing exactly `NoeliaModule.Dashboard` and its own access check. An
 application that already uses `AddNoelia` must use `UseDashboard(...)` inside
 that existing composition instead.
+
+## Error messages, in your language and not Noelia's
+
+`IErrorMessageService` turns an error code into something a user can read.
+Noelia decides the **structure** — which code it is, whether it may be shown to
+a user at all, which help page explains it, which actions might resolve it. The
+**wording** is yours: it is your language, your tone, your audience, and in a
+regulated domain sometimes your legal department's.
+
+```csharp
+builder.Services.AddSingleton<IErrorTextProvider, GermanErrorText>();
+```
+
+```csharp
+public sealed class GermanErrorText : IErrorTextProvider
+{
+    public string? Message(string errorCode) => errorCode switch
+    {
+        ErrorCodes.ResourceNotFound => "Das gibt es hier nicht.",
+        _ => null                       // untranslated stays readable
+    };
+
+    public string[]? SuggestedActions(string errorCode) => null;
+}
+```
+
+Returning `null` for a code you have not translated is the point: a
+half-finished translation should leave the untranslated half readable rather
+than blank. Register nothing and the built-in English wording applies, which is
+the language of this package and no claim about the user's.
+
+`GetSuggestedActions` returns **keys** from `ErrorActions` — `check-input`,
+`contact-support` — not sentences. A key is something to look up; a sentence in
+a library is something somebody has to override. If you render those actions
+directly, a rendered key is obvious immediately; a sentence in a language the
+user did not choose never is, which is how the German wording survived four
+major versions unnoticed.
 
 ## Telemetry
 
@@ -1416,6 +1490,14 @@ and Serilog's own properties — and all three read `SensitiveFieldNames` and wr
 edit anywhere breaks every hash after it. Where the entries are stored is your
 decision — `ISovereignAuditSink` is the port.
 
+The chain is advanced **in the process** unless the sink owns the head. Two
+replicas then each start a chain of their own, and a verifier reading the store
+back finds a break on a system where nothing was tampered with. A sink that
+implements `IChainedSovereignAuditSink` — `UseRedisSovereignAudit()` does, with
+a compare-and-set that makes the append atomic — gives one chain for every
+replica writing to that server. The dashboard says which of the two you have,
+so this is not something you have to remember to check.
+
 Both, plus the egress boundary and the report, come in one call:
 
 ```csharp
@@ -1450,6 +1532,28 @@ builder.Services
     .AddOpenBaoSecretProvider(builder.Configuration)
     .AddSecretStoreMasterKey();               // from noelia/master-key in OpenBao
 ```
+
+### The ASP.NET key ring
+
+```csharp
+noelia.UseRedisCache("identity")
+      .UseRedisEncryption()
+      .UseDataProtection("identity-service");
+```
+
+Without this, ASP.NET creates its key ring itself and puts it in one container's
+filesystem in the clear — so every cookie and antiforgery token protected with
+it stops verifying the moment that container is replaced, and ASP.NET writes two
+warnings at every start that most deployments learn to ignore.
+
+`UseDataProtection(applicationName)` stores the ring through the registered
+cache provider and encrypts each element with a key derived from the registered
+master key (HKDF-SHA256, then AES-256-GCM with the envelope metadata as
+associated data). All three parts are required and each is a port: a master key
+opens the encryption provider, the encryption provider protects the ring, the
+cache provider keeps it where the next container can read it. In-process
+providers satisfy them too, which is what lets a development stage protect its
+ring instead of reporting a failure forever.
 
 `ISecretProvider` is the one secret-store seam; `IVersionedSecretProvider` adds
 history where a provider supports it. Redis and InMemory implement both. The old
@@ -1541,10 +1645,11 @@ integration suite is indistinguishable from a passing one.
   entries say what they are, so a reader for bcrypt or Argon2id can be layered
   in front — but Noelia ships neither, and a migration that has to re-hash
   everyone on first sign-in is the state today.
-- **`DataProtectionSecretProvider` has no consumer.** Nothing registers it, so
-  ASP.NET's key ring is created by the framework and used by nothing. Harmless
-  where nothing is protected with it; a service that adds cookie authentication
-  or antiforgery has to persist and protect those keys itself today.
+- **`DataProtectionSecretProvider` has no consumer** — resolved differently in
+  5.2.0. `UseDataProtection(applicationName)` keeps the key ring in the
+  registered cache provider and encrypts it at the master key, so the provider
+  is no longer the answer to that question. Whether it is still worth shipping
+  at all is open.
 - **`ILogSanitizer` has no consumer inside Noelia** since logging moved to
   shapes. It stays as a tool for an application that logs a payload of its own,
   and whether that is enough reason to keep it is an open question.
@@ -1865,19 +1970,19 @@ are pinned to prereleases.
 
 ## Consuming Noelia
 
-Noelia 5.0.0 is prepared as the first stable release under the Noelia identity.
-After it has been published, consumers install it anonymously from NuGet.org:
+5.0.0 was the first stable release under the Noelia identity; the current
+version is 5.3.0. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 5.0.0
+dotnet add package Noelia.Infrastructure --version 5.3.0
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="5.0.0" />
-  <PackageReference Include="Noelia.Redis" Version="5.0.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="5.0.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="5.3.0" />
+  <PackageReference Include="Noelia.Redis" Version="5.3.0" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="5.3.0" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`
