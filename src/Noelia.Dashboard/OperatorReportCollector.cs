@@ -18,7 +18,7 @@ namespace Noelia.Dashboard;
 /// <remarks>
 /// <para>Everything the operator view knows passes through here. The page
 /// renders the result and so does the JSON endpoint, which is what keeps the
-/// two from disagreeing: they are one erhebung, drawn twice.</para>
+/// two from disagreeing: they are one reading, drawn twice.</para>
 ///
 /// <para>Every section is defensive in the same way and for the same reason. A
 /// provider that throws while being inspected must not take the whole report
@@ -49,7 +49,10 @@ internal static class OperatorReportCollector
             Configuration = Configuration(composition, options),
             SecurityChecks = SecurityChecks(composition, services.GetService<ISecurityCheckReport>()),
             Sovereignty = Sovereignty(services.GetService<ISovereigntyReport>()),
-            Audit = await Audit(services.GetService<IAuditTrailService>(), cancellationToken)
+            Audit = await Audit(
+                services.GetService<IAuditTrailService>(),
+                services.GetService<ISovereignAuditSink>() is IReadableSovereignAuditSink,
+                cancellationToken)
                 .ConfigureAwait(false),
             Sessions = await Sessions(services.GetService<ITokenSessionService>(), cancellationToken)
                 .ConfigureAwait(false),
@@ -241,6 +244,7 @@ internal static class OperatorReportCollector
 
     private static async Task<AuditView> Audit(
         IAuditTrailService? audit,
+        bool canBeVerified,
         CancellationToken cancellationToken)
     {
         if (audit is null)
@@ -286,6 +290,7 @@ internal static class OperatorReportCollector
             IsChainValidAtWriteTime = inspection.IsChainValidAtWriteTime,
             VerifiesPersistedSink = inspection.VerifiesPersistedSink,
             Length = inspection.Length,
+            CanBeVerified = canBeVerified,
             Latest = [.. inspection.Latest.Select(entry => new AuditEntryView(
                 entry.Timestamp, entry.ActorId, entry.Capacity, entry.Action, entry.Resource))]
         };

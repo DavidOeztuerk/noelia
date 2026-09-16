@@ -276,6 +276,18 @@ public sealed record AuditView
     /// <summary>How many entries this instance accounts for.</summary>
     public long Length { get; init; }
 
+    /// <summary>
+    /// Whether the stored chain can be read back and recomputed.
+    /// </summary>
+    /// <remarks>
+    /// Only whether, never the result. Recomputing a trail of millions of
+    /// entries on every page load would make opening the dashboard an attack on
+    /// the store it reports about — so verification is its own request, at
+    /// <c>{dashboard}/audit-chain.json</c>, and this flag is what tells a reader
+    /// that asking is worthwhile.
+    /// </remarks>
+    public bool CanBeVerified { get; init; }
+
     /// <summary>The most recent entries.</summary>
     public IReadOnlyList<AuditEntryView> Latest { get; init; } = [];
 }

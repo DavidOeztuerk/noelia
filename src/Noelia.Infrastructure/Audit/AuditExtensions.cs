@@ -21,6 +21,12 @@ public static class AuditExtensions
         services.TryAddSingleton<ISovereignAuditSink, InMemorySovereignAuditSink>();
         services.TryAddSingleton<IAuditTrailService, AuditTrailService>();
 
+        // Always registered, never conditional on the sink. A verifier that
+        // only appeared when the sink happened to support reading would make
+        // "no verifier" and "nothing to verify" indistinguishable from the
+        // outside; this one answers either way, and says which it is.
+        services.TryAddSingleton<IAuditChainVerifier, AuditChainVerifier>();
+
         return services;
     }
 
@@ -35,6 +41,12 @@ public static class AuditExtensions
 
         services.AddSingleton<ISovereignAuditSink, TSink>();
         services.TryAddSingleton<IAuditTrailService, AuditTrailService>();
+
+        // Always registered, never conditional on the sink. A verifier that
+        // only appeared when the sink happened to support reading would make
+        // "no verifier" and "nothing to verify" indistinguishable from the
+        // outside; this one answers either way, and says which it is.
+        services.TryAddSingleton<IAuditChainVerifier, AuditChainVerifier>();
 
         return services;
     }

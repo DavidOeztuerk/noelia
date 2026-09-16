@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Noelia.Abstractions.Audit;
@@ -26,8 +27,11 @@ namespace Noelia.Redis.Security.Audit;
 /// writer that also judged them would be the same party doing both, which is
 /// what a hash chain exists to avoid.</para>
 /// </remarks>
-public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink
+public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReadableSovereignAuditSink
 {
+    /// <summary>How many ids to take out of the index at a time.</summary>
+    private const int ReadPageSize = 500;
+
     /// <summary>
     /// Store the event, advance the head, index it — or refuse, having changed
     /// nothing.
@@ -43,9 +47,8 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink
         local chainKey = KEYS[3]
         local payload = ARGV[1]
         local eventId = ARGV[2]
-        local timestamp = ARGV[3]
-        local expectedHead = ARGV[4]
-        local newHead = ARGV[5]
+        local expectedHead = ARGV[3]
+        local newHead = ARGV[4]
 
         if redis.call('EXISTS', eventKey) == 1 then
             return -1
@@ -58,8 +61,46 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink
         end
 
         redis.call('SET', eventKey, payload)
-        redis.call('ZADD', indexKey, timestamp, eventId)
+        redis.call('ZADD', indexKey, NextSequence(indexKey), eventId)
         redis.call('SET', chainKey, newHead)
+        return 1";
+
+    /// <summary>
+    /// The index score, and why it is not the timestamp.
+    /// </summary>
+    /// <remarks>
+    /// <para>The order of a chain is the order the entries were appended, which
+    /// the compare-and-set decides — not the order of the clocks that stamped
+    /// them. Two replicas can append inside the same millisecond, and indexing
+    /// by timestamp would hand a verifier those two entries in whichever order
+    /// the store happened to break the tie. It would then report a broken link
+    /// in a chain nobody had touched, which is worse than not checking at
+    /// all.</para>
+    ///
+    /// <para>It continues from the highest score present rather than from the
+    /// count, so a chain indexed by timestamps before 6.0.0 keeps its order and
+    /// needs no migration: the next entry simply lands above the largest
+    /// timestamp already there, and every entry after it above that.</para>
+    /// </remarks>
+    private const string NextSequenceFunction = @"
+        local function NextSequence(indexKey)
+            local last = redis.call('ZRANGE', indexKey, -1, -1, 'WITHSCORES')
+            if last[2] then
+                return tonumber(last[2]) + 1
+            end
+            return 0
+        end
+        ";
+
+    /// <summary>The unchained store, kept atomic for the same ordering reason.</summary>
+    private const string WriteScript = @"
+        local eventKey = KEYS[1]
+        local indexKey = KEYS[2]
+        local payload = ARGV[1]
+        local eventId = ARGV[2]
+
+        redis.call('SET', eventKey, payload)
+        redis.call('ZADD', indexKey, NextSequence(indexKey), eventId)
         return 1";
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -116,12 +157,11 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink
         cancellationToken.ThrowIfCancellationRequested();
 
         var result = (int)await _connection.GetDatabase().ScriptEvaluateAsync(
-            AppendScript,
+            NextSequenceFunction + AppendScript,
             [EventKey(auditEvent.Id), IndexKey, ChainKey],
             [
                 JsonSerializer.Serialize(auditEvent, Json),
                 auditEvent.Id,
-                auditEvent.Timestamp.ToUnixTimeMilliseconds(),
                 expectedHead ?? string.Empty,
                 auditEvent.Hash
             ]);
@@ -154,13 +194,74 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink
         ArgumentNullException.ThrowIfNull(auditEvent);
         cancellationToken.ThrowIfCancellationRequested();
 
+        await _connection.GetDatabase().ScriptEvaluateAsync(
+            NextSequenceFunction + WriteScript,
+            [EventKey(auditEvent.Id), IndexKey],
+            [JsonSerializer.Serialize(auditEvent, Json), auditEvent.Id]);
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<StoredAuditEntry> ReadAsync(
+        DateTimeOffset? since = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
         var database = _connection.GetDatabase();
+        var started = since is null;
 
-        await database.StringSetAsync(
-            EventKey(auditEvent.Id), JsonSerializer.Serialize(auditEvent, Json));
+        for (var page = 0L; ; page += ReadPageSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
-        await database.SortedSetAddAsync(
-            IndexKey, auditEvent.Id, auditEvent.Timestamp.ToUnixTimeMilliseconds());
+            var ids = await database.SortedSetRangeByRankAsync(
+                IndexKey, page, page + ReadPageSize - 1);
+
+            if (ids.Length == 0)
+            {
+                yield break;
+            }
+
+            var payloads = await database.StringGetAsync(
+                [.. ids.Select(id => (RedisKey)EventKey(id.ToString()))]);
+
+            foreach (var payload in payloads)
+            {
+                if (payload.IsNullOrEmpty)
+                {
+                    // Indexed but not stored. The append is atomic, so this is
+                    // an entry somebody removed — and skipping it silently
+                    // would hide exactly the edit the chain exists to expose.
+                    // The next entry's link will not match, and the verifier
+                    // will say so.
+                    continue;
+                }
+
+                var entry = JsonSerializer.Deserialize<StoredAuditEntry>((string)payload!, Json);
+                if (entry is null)
+                {
+                    continue;
+                }
+
+                // A contiguous suffix, not a filter. Dropping individual
+                // entries by timestamp would leave gaps wherever two replicas'
+                // clocks disagree, and every gap reads as a broken link.
+                if (!started)
+                {
+                    if (entry.Timestamp < since)
+                    {
+                        continue;
+                    }
+
+                    started = true;
+                }
+
+                yield return entry;
+            }
+
+            if (ids.Length < ReadPageSize)
+            {
+                yield break;
+            }
+        }
     }
 
     private bool Duplicate(string id)

@@ -73,7 +73,13 @@ internal sealed class NoeliaDashboardMiddleware(
         // a way around the access rule, not a second view of it.
         var isReport = remaining == "/report.json";
 
-        if (!isPage && !isCss && !isScript && !isReport)
+        // Verification is a separate request because it is a separate kind of
+        // act. Recomputing a chain of millions of entries on every page load
+        // would turn opening the dashboard into an attack on the store it
+        // reports about, so this is asked for deliberately.
+        var isChain = remaining == "/audit-chain.json";
+
+        if (!isPage && !isCss && !isScript && !isReport && !isChain)
         {
             await NotFound(context).ConfigureAwait(false);
             return;
@@ -98,7 +104,7 @@ internal sealed class NoeliaDashboardMiddleware(
         }
 
         context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = isReport
+        context.Response.ContentType = isReport || isChain
             ? "application/json; charset=utf-8"
             : "text/html; charset=utf-8";
 
@@ -106,6 +112,21 @@ internal sealed class NoeliaDashboardMiddleware(
         // the answer away would let a HEAD request cost what a GET costs.
         if (HttpMethods.IsHead(context.Request.Method))
         {
+            return;
+        }
+
+        if (isChain)
+        {
+            var verifier = context.RequestServices.GetService<IAuditChainVerifier>();
+            var verification = verifier is null
+                ? AuditChainVerification.Unsupported(
+                    "No audit chain verifier is registered. AddSovereignAuditTrail() registers one.")
+                : await verifier.VerifyAsync(cancellationToken: context.RequestAborted)
+                    .ConfigureAwait(false);
+
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(verification, ReportJson),
+                context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
