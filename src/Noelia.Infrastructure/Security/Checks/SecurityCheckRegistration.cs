@@ -20,6 +20,7 @@ internal static class SecurityCheckRegistration
         Add<CompositionSecurityCheck>(services);
         Add<AuditChainScopeSecurityCheck>(services);
         Add<DataProtectionKeyRingSecurityCheck>(services);
+        Add<EgressGuardSecurityCheck>(services);
         Add<ReadinessCoverageSecurityCheck>(services);
         Add<JwtSecurityCheck>(services);
         Add<SecurityHeadersSecurityCheck>(services);

@@ -374,10 +374,11 @@ public sealed class DashboardTests
 
         composition.Included.Should().Equal(NoeliaModule.Dashboard);
         report.Latest.Select(result => result.Module).Should()
-            // Four Composition-category checks run everywhere: providers,
-            // readiness coverage, the data protection key ring and the scope of
-            // the audit chain.
+            // Five Composition-category checks run everywhere: providers,
+            // readiness coverage, the data protection key ring, the scope of
+            // the audit chain, and the egress guard.
             .BeEquivalentTo([
+                NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,
