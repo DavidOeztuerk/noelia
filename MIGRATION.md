@@ -1,3 +1,70 @@
+# Noelia 5.2.0 → 5.3.0
+
+## Transactional Outbox
+
+Neu: `IOutbox`, `IOutboxReader` und `OutboxMessage` in `Noelia.Abstractions`,
+`AddEntityFrameworkOutbox<TContext>()` in `Noelia.Data.EntityFrameworkCore`,
+`UseOutboxDispatcher()` in `Noelia.Infrastructure`.
+
+`IEventBus` sagt seit jeher ausdrücklich, dass er **keinen** Outbox garantiert:
+Zwischen dem Commit einer Änderung und dem Veröffentlichen des Ereignisses
+darüber liegt eine Lücke, und ein Prozess, der darin stirbt, hinterlässt ein
+System, in dem die Änderung geschah und niemand davon erfuhr. Es andersherum zu
+versuchen verschiebt die Lücke nur: Dann kann die Veröffentlichung gelingen und
+der Commit scheitern, und Zuhörer erfahren von etwas, das nie passiert ist.
+
+`RecordAsync` schreibt die Absicht in **dieselbe** Transaktion und ruft
+absichtlich kein `SaveChangesAsync`. Das Speichern des Aufrufers entscheidet, ob
+beides passiert ist — oder keines.
+
+```csharp
+context.Jobs.Add(job);
+await outbox.RecordAsync(new JobFinished(job.Id));
+await context.SaveChangesAsync();          // beides, oder nichts
+```
+
+Zustellung ist **at-least-once**, und der Dispatcher tut nicht so, als wäre sie
+etwas anderes: Er veröffentlicht zuerst und markiert danach, weil ein Absturz
+dazwischen die Nachricht zweimal zustellt — die Alternative verliert sie.
+`OutboxMessage.Id` reist deshalb mit.
+
+Das Zustellen ist ein eigener Prozess mit eigenem Takt: `UseOutboxDispatcher()`
+richtet ihn ein. Ein Dienst im Verbund braucht ihn, nicht jeder. Zwei
+Dispatcher an einem Speicher sind sicher — das Beanspruchen ist ein bedingtes
+Update —, aber unnötig.
+
+**Was du tun musst:** `MapNoeliaOutbox()` in `OnModelCreating` aufrufen und eine
+Migration erzeugen. Eine Tabelle, die niemand anlegt, ist eine Nachricht, die
+niemand aufschreibt.
+
+## Fehlermeldungen sind nicht mehr deutsch
+
+`ErrorMessageService` lieferte deutsche Sätze aus einem Paket, dessen API,
+Dokumentation und README englisch sind. Jede Anwendung, die nicht für ein
+deutschsprachiges Publikum geschrieben war, zeigte ihren Nutzern eine Sprache,
+die sie nicht gewählt hatten — und konnte daran nichts ändern, ohne den ganzen
+Dienst zu ersetzen.
+
+Neu: `IErrorTextProvider`. Noelia entscheidet weiter die **Struktur** — welcher
+Code existiert, ob er überhaupt gezeigt werden darf, welche Hilfeseite ihn
+erklärt, welche Handlungen ihn lösen könnten. Den **Wortlaut** entscheidet die
+Anwendung.
+
+`GetSuggestedActions` liefert jetzt Schlüssel aus `ErrorActions`
+(`check-input`, `contact-support`) statt Sätze. Ein Schlüssel ist etwas zum
+Nachschlagen; ein Satz ist etwas zum Überschreiben.
+
+**Was du tun musst:**
+
+- Wenn dir Englisch recht ist: nichts.
+- Wenn du deutsche Meldungen willst: registriere einen `IErrorTextProvider` —
+  die bisherigen Texte stehen in der Versionsgeschichte dieser Datei.
+- **Wenn du `GetSuggestedActions` direkt anzeigst, prüfe das.** Dort stehen
+  jetzt Schlüssel. Ein angezeigter Schlüssel fällt sofort auf; ein Satz in einer
+  ungewählten Sprache fällt nie auf, und genau darum geht es.
+
+---
+
 # Noelia 5.1.0 → 5.2.0
 
 ## Ein Port lag im Motor: `ISovereignAuditSink` ist umgezogen

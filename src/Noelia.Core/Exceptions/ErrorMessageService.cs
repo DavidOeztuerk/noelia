@@ -10,25 +10,48 @@ public class ErrorMessageService : IErrorMessageService
 
   private readonly Dictionary<string, ErrorInfo> _errorMappings;
   private readonly string _baseHelpUrl;
+  private readonly IErrorTextProvider? _text;
 
   /// <param name="baseHelpUrl">
   /// Where help pages live. Passed in rather than read from configuration, so
   /// that this layer needs no configuration provider.
   /// </param>
-  public ErrorMessageService(string? baseHelpUrl = null)
+  /// <param name="text">
+  /// Supplies the application's own wording. Without one the built-in English
+  /// applies — see <see cref="IErrorTextProvider"/> for why that is a fallback
+  /// and not a decision about the user's language.
+  /// </param>
+  public ErrorMessageService(string? baseHelpUrl = null, IErrorTextProvider? text = null)
   {
     _baseHelpUrl = string.IsNullOrWhiteSpace(baseHelpUrl) ? DefaultHelpUrl : baseHelpUrl;
+    _text = text;
     _errorMappings = InitializeErrorMappings();
   }
 
+  /// <summary>
+  /// The application's wording where it has one, then Noelia's, then the
+  /// caller's own default.
+  /// </summary>
+  /// <remarks>
+  /// A provider returning <c>null</c> for one code and not another is not a
+  /// mistake — it is a half-finished translation, and the untranslated half
+  /// stays readable instead of going blank.
+  /// </remarks>
+  /// <param name="errorCode">The code, from <see cref="ErrorCodes"/>.</param>
+  /// <param name="defaultMessage">Used for a code Noelia does not know.</param>
   public string GetUserMessage(string errorCode, string? defaultMessage = null)
   {
+    if (_text?.Message(errorCode) is { Length: > 0 } supplied)
+    {
+      return supplied;
+    }
+
     if (_errorMappings.TryGetValue(errorCode, out var errorInfo))
     {
       return errorInfo.UserMessage;
     }
 
-    return defaultMessage ?? "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.";
+    return defaultMessage ?? "Something went wrong.";
   }
 
   public string? GetHelpUrl(string errorCode)
@@ -41,8 +64,23 @@ public class ErrorMessageService : IErrorMessageService
     return null;
   }
 
+  /// <summary>
+  /// The application's actions where it has them, otherwise Noelia's keys.
+  /// </summary>
+  /// <remarks>
+  /// What Noelia returns are keys from <see cref="ErrorActions"/>, not
+  /// sentences. An application that shows them to a user without translating
+  /// them shows a key, which is visible immediately — better than a sentence in
+  /// a language nobody chose, which is not.
+  /// </remarks>
+  /// <param name="errorCode">The code, from <see cref="ErrorCodes"/>.</param>
   public string[]? GetSuggestedActions(string errorCode)
   {
+    if (_text?.SuggestedActions(errorCode) is { Length: > 0 } supplied)
+    {
+      return supplied;
+    }
+
     if (_errorMappings.TryGetValue(errorCode, out var errorInfo))
     {
       return errorInfo.SuggestedActions;
@@ -62,225 +100,191 @@ public class ErrorMessageService : IErrorMessageService
     return false;
   }
 
-  private Dictionary<string, ErrorInfo> InitializeErrorMappings()
-  {
-    return new Dictionary<string, ErrorInfo>
+  /// <summary>
+  /// The built-in wording, in English.
+  /// </summary>
+  /// <remarks>
+  /// English because that is the language of this package — its API, its XML
+  /// documentation, its README. It is the library's own language and no claim
+  /// about the user's: an application that serves people in another one
+  /// registers an <see cref="IErrorTextProvider"/> and every sentence here is
+  /// replaced. Until 5.3.0 these were German, which was the same decision made
+  /// once and never offered to anyone else.
+  /// <para>
+  /// The structure — which code exists, whether it may be shown at all, which
+  /// help page explains it, which actions might resolve it — stays here,
+  /// because that is a property of the error and not of the audience.
+  /// </para>
+  /// </remarks>
+  private static Dictionary<string, ErrorInfo> InitializeErrorMappings() =>
+    new()
     {
-      // Domain Errors
+      // Domain
       [ErrorCodes.BusinessRuleViolation] = new ErrorInfo
       {
-        UserMessage = "Diese Aktion verstößt gegen Geschäftsregeln. Bitte überprüfen Sie Ihre Eingaben und versuchen Sie es erneut.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Überprüfen Sie die Anforderungen", "Kontaktieren Sie den Support, falls das Problem weiterhin besteht" }
+        UserMessage = "That action is not allowed by the rules of this system. Check what you sent and try again.",
+        SuggestedActions = [ErrorActions.CheckInput, ErrorActions.ContactSupport]
       },
-
       [ErrorCodes.ResourceNotFound] = new ErrorInfo
       {
-        UserMessage = "Das angeforderte Element wurde nicht gefunden. Es wurde möglicherweise gelöscht oder Sie haben keinen Zugriff darauf.",
-        IsUserFacing = true,
+        UserMessage = "That item could not be found. It may have been deleted, or you may not have access to it.",
         HelpPath = "resource-not-found",
-        SuggestedActions = new[] { "Überprüfen Sie die URL oder ID", "Laden Sie die Seite neu", "Kontaktieren Sie den Eigentümer der Ressource" }
+        SuggestedActions = [ErrorActions.CheckIdentifier, ErrorActions.AskTheOwner]
       },
-
       [ErrorCodes.ResourceAlreadyExists] = new ErrorInfo
       {
-        UserMessage = "Ein Element mit demselben Bezeichner existiert bereits. Bitte verwenden Sie einen anderen Namen oder Bezeichner.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Wählen Sie einen anderen Namen", "Aktualisieren Sie stattdessen das vorhandene Element" }
+        UserMessage = "Something with that identifier already exists. Use a different one.",
+        SuggestedActions = [ErrorActions.ChooseAnotherName]
       },
-
-      // Authentication & Authorization
-      [ErrorCodes.Unauthorized] = new ErrorInfo
-      {
-        UserMessage = "Sie müssen sich anmelden, um auf diese Ressource zuzugreifen.",
-        IsUserFacing = true,
-        HelpPath = "authentication",
-        SuggestedActions = new[] { "Melden Sie sich in Ihrem Konto an", "Überprüfen Sie, ob Ihre Sitzung abgelaufen ist" }
-      },
-
-      [ErrorCodes.InsufficientPermissions] = new ErrorInfo
-      {
-        UserMessage = "Sie haben keine Berechtigung, diese Aktion auszuführen.",
-        IsUserFacing = true,
-        HelpPath = "permissions",
-        SuggestedActions = new[] { "Kontaktieren Sie Ihren Administrator", "Fordern Sie die erforderlichen Berechtigungen an" }
-      },
-
-      [ErrorCodes.TokenExpired] = new ErrorInfo
-      {
-        UserMessage = "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Erneut anmelden", "Bleiben Sie aktiv, um ein Sitzungs-Timeout zu vermeiden" }
-      },
-
-      [ErrorCodes.InvalidCredentials] = new ErrorInfo
-      {
-        UserMessage = "Ungültige E-Mail-Adresse oder ungültiges Passwort. Bitte überprüfen Sie Ihre Eingaben und versuchen Sie es erneut.",
-        IsUserFacing = true,
-        HelpPath = "login-issues",
-        SuggestedActions = new[] { "Überprüfen Sie E-Mail-Adresse und Passwort", "Nutzen Sie 'Passwort vergessen', falls nötig", "Stellen Sie sicher, dass die Feststelltaste nicht aktiv ist" }
-      },
-
-      [ErrorCodes.AccountNotVerified] = new ErrorInfo
-      {
-        UserMessage = "Bitte bestätigen Sie Ihre E-Mail-Adresse, um fortzufahren. Prüfen Sie Ihren Posteingang auf den Bestätigungslink.",
-        IsUserFacing = true,
-        HelpPath = "email-verification",
-        SuggestedActions = new[] { "Prüfen Sie Ihren E-Mail-Posteingang", "Prüfen Sie Ihren Spam-Ordner", "Klicken Sie auf 'Bestätigung erneut senden', falls nötig" }
-      },
-
-      [ErrorCodes.TwoFactorRequired] = new ErrorInfo
-      {
-        UserMessage = "Für diese Aktion ist eine Zwei-Faktor-Authentifizierung erforderlich.",
-        IsUserFacing = true,
-        HelpPath = "two-factor-auth",
-        SuggestedActions = new[] { "Geben Sie Ihren 2FA-Code ein", "Richten Sie 2FA ein, falls noch nicht geschehen" }
-      },
-
-      // Validation Errors
-      [ErrorCodes.ValidationFailed] = new ErrorInfo
-      {
-        UserMessage = "Bitte überprüfen Sie Ihre Eingaben und korrigieren Sie eventuelle Fehler.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Überprüfen Sie alle Pflichtfelder", "Achten Sie auf Formatfehler" }
-      },
-
-      [ErrorCodes.RequiredFieldMissing] = new ErrorInfo
-      {
-        UserMessage = "Bitte füllen Sie alle Pflichtfelder aus.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Achten Sie auf Felder mit *", "Vervollständigen Sie alle Pflichtangaben" }
-      },
-
-      [ErrorCodes.InvalidEmail] = new ErrorInfo
-      {
-        UserMessage = "Bitte geben Sie eine gültige E-Mail-Adresse ein.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Überprüfen Sie das E-Mail-Format (z.B. user@example.com)" }
-      },
-
-      [ErrorCodes.InvalidPhoneNumber] = new ErrorInfo
-      {
-        UserMessage = "Bitte geben Sie eine gültige Telefonnummer ein.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Geben Sie ggf. die Ländervorwahl mit an", "Entfernen Sie Sonderzeichen" }
-      },
-
-      // External Service Errors
-      [ErrorCodes.ServiceUnavailable] = new ErrorInfo
-      {
-        UserMessage = "Der Dienst ist vorübergehend nicht verfügbar. Bitte versuchen Sie es in wenigen Augenblicken erneut.",
-        IsUserFacing = true,
-        HelpPath = "service-status",
-        SuggestedActions = new[] { "Warten Sie einige Minuten und versuchen Sie es erneut", "Prüfen Sie unsere Statusseite" }
-      },
-
-      [ErrorCodes.ServiceTimeout] = new ErrorInfo
-      {
-        UserMessage = "Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es erneut.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Überprüfen Sie Ihre Internetverbindung", "Probieren Sie eine einfachere Anfrage", "Wiederholen Sie den Vorgang" }
-      },
-
-      [ErrorCodes.RateLimitExceeded] = new ErrorInfo
-      {
-        UserMessage = "Sie haben zu viele Anfragen gesendet. Bitte warten Sie einen Moment, bevor Sie es erneut versuchen.",
-        IsUserFacing = true,
-        HelpPath = "rate-limits",
-        SuggestedActions = new[] { "Warten Sie 60 Sekunden, bevor Sie es erneut versuchen", "Reduzieren Sie die Anfragefrequenz" }
-      },
-
-      [ErrorCodes.PaymentFailed] = new ErrorInfo
-      {
-        UserMessage = "Die Zahlung konnte nicht verarbeitet werden. Bitte überprüfen Sie Ihre Zahlungsinformationen und versuchen Sie es erneut.",
-        IsUserFacing = true,
-        HelpPath = "payment-issues",
-        SuggestedActions = new[] { "Überprüfen Sie Ihre Zahlungsmethode", "Wenden Sie sich an Ihre Bank", "Probieren Sie eine andere Zahlungsmethode" }
-      },
-
-      // File & Storage Errors
-      [ErrorCodes.FileTooLarge] = new ErrorInfo
-      {
-        UserMessage = "Die Datei ist zu groß. Bitte wählen Sie eine kleinere Datei.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Komprimieren Sie die Datei", "Wählen Sie eine Datei unterhalb der Größenbegrenzung" }
-      },
-
-      [ErrorCodes.InvalidFileType] = new ErrorInfo
-      {
-        UserMessage = "Dieser Dateityp wird nicht unterstützt. Bitte wählen Sie eine andere Datei.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Prüfen Sie die unterstützten Dateitypen", "Konvertieren Sie Ihre Datei in ein unterstütztes Format" }
-      },
-
-      [ErrorCodes.StorageQuotaExceeded] = new ErrorInfo
-      {
-        UserMessage = "Sie haben Ihr Speicherlimit erreicht. Bitte löschen Sie einige Dateien oder erweitern Sie Ihren Plan.",
-        IsUserFacing = true,
-        HelpPath = "storage-limits",
-        SuggestedActions = new[] { "Löschen Sie nicht benötigte Dateien", "Erweitern Sie Ihren Speicherplan" }
-      },
-
-      // Business Logic Errors
-      [ErrorCodes.InsufficientBalance] = new ErrorInfo
-      {
-        UserMessage = "Sie haben nicht genügend Guthaben für diese Aktion.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Kaufen Sie weiteres Guthaben", "Prüfen Sie Ihren aktuellen Kontostand" }
-      },
-
-      [ErrorCodes.SubscriptionExpired] = new ErrorInfo
-      {
-        UserMessage = "Ihr Abonnement ist abgelaufen. Bitte verlängern Sie es, um fortzufahren.",
-        IsUserFacing = true,
-        HelpPath = "subscription",
-        SuggestedActions = new[] { "Verlängern Sie Ihr Abonnement", "Wählen Sie einen anderen Plan" }
-      },
-
-      [ErrorCodes.MaxAttemptsExceeded] = new ErrorInfo
-      {
-        UserMessage = "Maximale Anzahl an Versuchen überschritten. Bitte warten Sie, bevor Sie es erneut versuchen.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Warten Sie 30 Minuten, bevor Sie es erneut versuchen", "Kontaktieren Sie den Support, falls Sie sofortige Hilfe benötigen" }
-      },
-
-      // Database Errors (usually not user-facing)
-      [ErrorCodes.DatabaseError] = new ErrorInfo
-      {
-        UserMessage = "Ein technischer Fehler ist aufgetreten. Unser Team wurde benachrichtigt.",
-        IsUserFacing = false
-      },
-
       [ErrorCodes.DeadlockDetected] = new ErrorInfo
       {
-        UserMessage = "Der Vorgang konnte aufgrund eines Konflikts nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Wiederholen Sie den Vorgang", "Warten Sie einen Moment, falls mehrere Benutzer gleichzeitig dieselben Daten ändern" }
+        UserMessage = "That could not be completed because something else changed the same data. Try again.",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
       },
 
-      // System Errors (not user-facing)
-      [ErrorCodes.InternalError] = new ErrorInfo
+      // Authentication and authorisation
+      [ErrorCodes.Unauthorized] = new ErrorInfo
       {
-        UserMessage = "Ein unerwarteter Fehler ist aufgetreten. Unser Team wurde benachrichtigt.",
-        IsUserFacing = false
+        UserMessage = "You need to sign in to do that.",
+        HelpPath = "authentication",
+        SuggestedActions = [ErrorActions.SignIn]
+      },
+      [ErrorCodes.InsufficientPermissions] = new ErrorInfo
+      {
+        UserMessage = "Your account does not have permission to do that.",
+        HelpPath = "permissions",
+        SuggestedActions = [ErrorActions.AskAnAdministrator]
+      },
+      [ErrorCodes.TokenExpired] = new ErrorInfo
+      {
+        UserMessage = "Your session has ended. Sign in again to continue.",
+        SuggestedActions = [ErrorActions.SignIn]
+      },
+      [ErrorCodes.InvalidCredentials] = new ErrorInfo
+      {
+        // Deliberately says neither which of the two was wrong. Telling a
+        // caller that the address exists is telling them half the answer.
+        UserMessage = "That email address and password do not match an account.",
+        HelpPath = "login-issues",
+        SuggestedActions = [ErrorActions.CheckInput]
+      },
+      [ErrorCodes.AccountNotVerified] = new ErrorInfo
+      {
+        UserMessage = "Confirm your email address to continue.",
+        HelpPath = "email-verification",
+        SuggestedActions = [ErrorActions.VerifyAccount]
+      },
+      [ErrorCodes.TwoFactorRequired] = new ErrorInfo
+      {
+        UserMessage = "That action needs your second factor.",
+        HelpPath = "two-factor-auth",
+        SuggestedActions = [ErrorActions.CompleteSecondFactor]
+      },
+      [ErrorCodes.MaxAttemptsExceeded] = new ErrorInfo
+      {
+        UserMessage = "Too many attempts. Wait before trying again.",
+        HelpPath = "rate-limits",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
       },
 
-      // Network Errors
+      // Input
+      [ErrorCodes.ValidationFailed] = new ErrorInfo
+      {
+        UserMessage = "Some of what you sent was not accepted. Check the fields and try again.",
+        SuggestedActions = [ErrorActions.CheckInput]
+      },
+      [ErrorCodes.RequiredFieldMissing] = new ErrorInfo
+      {
+        UserMessage = "Something required was left out.",
+        SuggestedActions = [ErrorActions.CheckInput]
+      },
+      [ErrorCodes.InvalidEmail] = new ErrorInfo
+      {
+        UserMessage = "That is not an email address this system can use.",
+        SuggestedActions = [ErrorActions.CheckInput]
+      },
+      [ErrorCodes.InvalidPhoneNumber] = new ErrorInfo
+      {
+        UserMessage = "That is not a phone number this system can use.",
+        SuggestedActions = [ErrorActions.CheckInput]
+      },
+
+      // Availability
+      [ErrorCodes.ServiceUnavailable] = new ErrorInfo
+      {
+        UserMessage = "This is temporarily unavailable. Try again shortly.",
+        HelpPath = "service-status",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
+      },
+      [ErrorCodes.ServiceTimeout] = new ErrorInfo
+      {
+        UserMessage = "That took too long to answer. Try again.",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
+      },
+      [ErrorCodes.RateLimitExceeded] = new ErrorInfo
+      {
+        UserMessage = "Too many requests. Wait a moment before sending more.",
+        HelpPath = "rate-limits",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
+      },
       [ErrorCodes.ConnectionTimeout] = new ErrorInfo
       {
-        UserMessage = "Zeitüberschreitung der Verbindung. Bitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Überprüfen Sie Ihre Internetverbindung", "Versuchen Sie es in wenigen Augenblicken erneut" }
+        UserMessage = "The connection timed out. Check your network and try again.",
+        SuggestedActions = [ErrorActions.WaitAndRetry]
       },
-
       [ErrorCodes.SslError] = new ErrorInfo
       {
-        UserMessage = "Sichere Verbindung fehlgeschlagen. Bitte stellen Sie sicher, dass Sie einen aktuellen Browser verwenden.",
-        IsUserFacing = true,
-        SuggestedActions = new[] { "Aktualisieren Sie Ihren Browser", "Überprüfen Sie Datum und Uhrzeit Ihres Systems" }
+        UserMessage = "The secure connection could not be established.",
+        SuggestedActions = [ErrorActions.ContactSupport]
+      },
+
+      // Billing and storage
+      [ErrorCodes.PaymentFailed] = new ErrorInfo
+      {
+        UserMessage = "That payment did not go through.",
+        HelpPath = "payment-issues",
+        SuggestedActions = [ErrorActions.CheckPaymentMethod]
+      },
+      [ErrorCodes.InsufficientBalance] = new ErrorInfo
+      {
+        UserMessage = "There is not enough balance for that.",
+        SuggestedActions = [ErrorActions.CheckPaymentMethod]
+      },
+      [ErrorCodes.SubscriptionExpired] = new ErrorInfo
+      {
+        UserMessage = "That needs an active subscription.",
+        HelpPath = "subscription",
+        SuggestedActions = [ErrorActions.RenewSubscription]
+      },
+      [ErrorCodes.FileTooLarge] = new ErrorInfo
+      {
+        UserMessage = "That file is larger than this system accepts.",
+        SuggestedActions = [ErrorActions.UseADifferentFile]
+      },
+      [ErrorCodes.InvalidFileType] = new ErrorInfo
+      {
+        UserMessage = "That kind of file is not accepted here.",
+        SuggestedActions = [ErrorActions.UseADifferentFile]
+      },
+      [ErrorCodes.StorageQuotaExceeded] = new ErrorInfo
+      {
+        UserMessage = "You have used all the storage available to you.",
+        HelpPath = "storage-limits",
+        SuggestedActions = [ErrorActions.FreeUpSpace]
+      },
+
+      // Not shown to users. The wording exists for a log, not a screen.
+      [ErrorCodes.InternalError] = new ErrorInfo
+      {
+        UserMessage = "Something went wrong that is not the caller's to fix.",
+        IsUserFacing = false
+      },
+      [ErrorCodes.DatabaseError] = new ErrorInfo
+      {
+        UserMessage = "A data store refused the operation.",
+        IsUserFacing = false
       }
     };
-  }
 
   private class ErrorInfo
   {
