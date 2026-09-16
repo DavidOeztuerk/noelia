@@ -10,6 +10,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Hosting;
+using Noelia.Infrastructure.Sovereignty;
 using Noelia.Abstractions.Security;
 using Noelia.Abstractions.Security.Checks;
 using Noelia.Abstractions.Security.Encryption;
@@ -139,6 +140,64 @@ internal sealed class ReadinessCoverageSecurityCheck(
             : Result(
                 SecurityCheckStatus.Pass,
                 $"Readiness covers {ready} registered check(s)."));
+    }
+}
+
+internal sealed class EgressGuardSecurityCheck(
+    IServiceProvider services) : SecurityCheckBase
+{
+    public override string Id => "noelia.egress.guard";
+    public override NoeliaModule Module => NoeliaModule.Composition;
+    public override SecurityCheckCategory Category => SecurityCheckCategory.Composition;
+    public override SecurityCheckSeverity Severity => SecurityCheckSeverity.High;
+    public override string Remediation =>
+        "Declare the hosts this service may reach with AddSovereignPlatform(sovereign => "
+        + "sovereign.Allow(...)) so that an undeclared outbound call fails instead of "
+        + "succeeding unnoticed.";
+
+    /// <summary>
+    /// Whether an undeclared outbound call would actually be refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the claim the sovereignty report rests on. The register of
+    /// destinations is complete rather than observed <em>because</em> a call to
+    /// anything absent from it fails — and if nothing enforces that, the
+    /// register is an inventory of intentions.</para>
+    ///
+    /// <para><strong>What it cannot see.</strong> The guard is installed into
+    /// every client the HTTP client factory builds. A client constructed with
+    /// <c>new HttpClient()</c> never passes through it, and no check inside the
+    /// process can detect that — a socket opened without asking anyone leaves
+    /// no trace to inspect. So the summary says which calls are covered instead
+    /// of claiming that all of them are, because the gap between those two
+    /// sentences is exactly where a false assurance would live.</para>
+    /// </remarks>
+    public override Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default)
+    {
+        var probe = services.GetService<IServiceProviderIsService>();
+
+        if (probe?.IsService(typeof(IEgressPolicy)) != true)
+        {
+            return Task.FromResult(Result(
+                SecurityCheckStatus.NotApplicable,
+                "No egress policy is registered, so outbound calls are not constrained and "
+                + "the sovereignty report lists only what configuration mentions."));
+        }
+
+        var policy = services.GetRequiredService<IEgressPolicy>();
+
+        return Task.FromResult(policy.IsEnforcing
+            ? Result(
+                SecurityCheckStatus.Pass,
+                $"{policy.DeclaredHosts.Count} host pattern(s) are declared, and calls made "
+                + "through the HTTP client factory to anything else are refused before they "
+                + "leave. Clients built with new HttpClient() bypass the factory and cannot "
+                + "be checked from inside the process.")
+            : Result(
+                SecurityCheckStatus.Fail,
+                "An egress policy is registered but declares no hosts, so every outbound "
+                + "call is permitted. The destination register is then a list of what was "
+                + "configured, not a boundary."));
     }
 }
 

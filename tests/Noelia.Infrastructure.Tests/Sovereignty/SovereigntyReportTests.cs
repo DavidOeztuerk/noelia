@@ -36,6 +36,28 @@ public class HostJurisdictionTests
         note.Should().Contain("third-country");
     }
 
+    /// <summary>
+    /// The provider's own domain, with nothing in front of it.
+    /// </summary>
+    /// <remarks>
+    /// Every recognised domain in the list is written with a leading dot and
+    /// matched with EndsWith, which answers correctly for
+    /// <c>api.openai.com</c> and not at all for <c>openai.com</c>. A service
+    /// configured against the apex — which is where a REST API usually lives —
+    /// would come back Undetermined, and Undetermined is the answer that means
+    /// "we could not tell".
+    /// </remarks>
+    [Theory]
+    [InlineData("openai.com")]
+    [InlineData("amazonaws.com")]
+    [InlineData("cloudflare.com")]
+    [InlineData("sentry.io")]
+    public void AProvidersOwnDomainIsRecognisedWithoutASubdomain(string host)
+    {
+        HostJurisdiction.Classify(host).Jurisdiction
+            .Should().Be(Jurisdiction.ThirdCountryProvider);
+    }
+
     [Theory]
     [InlineData("db.example.eu")]
     [InlineData("secrets.some-provider.de")]

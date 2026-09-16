@@ -1,3 +1,46 @@
+# Noelia 6.0.0 → 6.1.0
+
+Beides kam aus einer Frage zur Control Plane: „Warum stehen überall dieselben
+Zahlen?" Die Antwort war, dass die Demo nur Selbstgehostetes deklariert — und
+dass Noelias Drittland-Erkennung deshalb nie an etwas anderem als einteiligen
+Namen gelaufen war.
+
+## Behoben: die Domain eines Anbieters ohne Subdomain
+
+`HostJurisdiction` führt jede erkannte Domain mit führendem Punkt und vergleicht
+mit `EndsWith`. Das antwortet richtig für `api.openai.com` und **gar nicht** für
+`openai.com` — also für genau die Form, unter der eine REST-Schnittstelle
+üblicherweise konfiguriert wird.
+
+Betroffen waren alle 25 Einträge der Liste. `openai.com`, `sentry.io`,
+`cloudflare.com` und `amazonaws.com` kamen als `Undetermined` zurück, und
+`Undetermined` liest sich als „konnten wir nicht feststellen" — nicht als
+„Drittland".
+
+**Was du tun musst:** nichts. Aber sieh dir deinen Souveränitätsbericht noch
+einmal an: Abhängigkeiten, die bisher unbestimmt waren, können jetzt als
+Drittland ausgewiesen sein. Das ist keine neue Lage, sondern eine, die vorher
+nicht gemeldet wurde.
+
+## Neu: `noelia.egress.guard`
+
+Die Zusage, auf der der ganze Souveränitätsbericht ruht, lautet: Das Verzeichnis
+der Ziele ist vollständig, **weil** ein Aufruf zu allem, was nicht darin steht,
+scheitert. Geprüft hat das nichts.
+
+Die neue Prüfung sagt, ob eine Egress-Richtlinie registriert ist und Hosts
+deklariert — und nennt in derselben Antwort, was sie **nicht** abdeckt: Ein mit
+`new HttpClient()` gebauter Client geht an der Factory und damit am Wächter
+vorbei, und das kann kein Vorgang in sich selbst feststellen. Ein Kommentar in
+`EgressPolicyBuilder` behauptete bislang, der Bericht melde solche Clients
+gesondert. Er tat es nicht.
+
+Eine Richtlinie **ohne** deklarierte Hosts meldet jetzt `Fail` statt lautlos
+alles durchzulassen: Von außen sieht sie aus wie Durchsetzung, während sie jedes
+Ziel erlaubt.
+
+---
+
 # Noelia 5.3.0 → 6.0.0
 
 **Noelia wird maschinell auskunftsfähig.** Bisher konnte ein Dienst einem

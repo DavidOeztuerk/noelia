@@ -89,7 +89,10 @@ public static class EgressPolicyExtensions
     /// </summary>
     /// <remarks>
     /// Clients constructed with <c>new HttpClient()</c> bypass the factory and
-    /// therefore this guard; the sovereignty report flags that separately.
+    /// therefore this guard. <strong>That is not detected</strong> — a process
+    /// cannot see a socket somebody opened without asking it — so it is a
+    /// code-review matter, and <c>noelia.egress.guard</c> says so rather than
+    /// implying a guarantee the guard cannot give.
     /// </remarks>
     public static IServiceCollection AddNoeliaEgressPolicy(
         this IServiceCollection services,

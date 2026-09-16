@@ -74,10 +74,19 @@ public static class HostJurisdiction
 
         foreach (var domain in ThirdCountryDomains)
         {
-            if (host.EndsWith(domain, StringComparison.OrdinalIgnoreCase))
+            // The apex as well as anything under it. Every entry is written
+            // with a leading dot so that "notamazonaws.com" cannot match, but
+            // EndsWith alone then answers for api.openai.com and not at all for
+            // openai.com — which is where a REST API usually lives. A provider
+            // reported as Undetermined reads as "we could not tell", and that
+            // is the one answer this must never give about a name it knows.
+            var apex = domain.TrimStart('.');
+
+            if (host.EndsWith(domain, StringComparison.OrdinalIgnoreCase)
+                || host.Equals(apex, StringComparison.OrdinalIgnoreCase))
             {
                 return (Jurisdiction.ThirdCountryProvider,
-                    $"{domain.TrimStart('.')} is operated by a provider subject to third-country access law.");
+                    $"{apex} is operated by a provider subject to third-country access law.");
             }
         }
 
