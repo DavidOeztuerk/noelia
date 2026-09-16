@@ -1,52 +1,57 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Noelia.Abstractions.Audit;
-using Noelia.Abstractions.Caching;
-using Noelia.Abstractions.Hosting;
-using Noelia.Abstractions.Security.Checks;
-using Noelia.Abstractions.Security.Sessions;
-using Noelia.Abstractions.Sovereignty;
+using Noelia.Abstractions.Operator;
 
 namespace Noelia.Dashboard;
 
+/// <summary>
+/// Draws an <see cref="OperatorReport"/> as the page an operator reads.
+/// </summary>
+/// <remarks>
+/// <para>This renders a report and queries nothing. Until 6.0.0 it read the
+/// registered services itself and wrote HTML as it went, which left no model to
+/// hand to anything that is not a browser — and meant a second reader had to
+/// re-query the same services along a second code path that could disagree with
+/// this one without either side noticing.</para>
+///
+/// <para>The explanatory sentences live here rather than in the model, because
+/// they are presentation: they tell a reader how to interpret what they are
+/// seeing. A collector consuming the JSON has no use for them, and a data model
+/// that carried them would be making a claim about its audience.</para>
+/// </remarks>
 internal static class DashboardPage
 {
-    internal static async Task<string> RenderAsync(
-        HttpContext context,
-        NoeliaDashboardOptions options)
+    internal static string Render(OperatorReport report, NoeliaDashboardOptions options)
     {
-        var services = context.RequestServices;
-        var composition = services.GetRequiredService<NoeliaComposition>();
         var output = new StringBuilder(16_384);
 
         output.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
             .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-            .Append("<title>Noelia · ").Append(H(options.ServiceName)).Append("</title>")
+            .Append("<title>Noelia · ").Append(H(report.Service)).Append("</title>")
             .Append("<link rel=\"stylesheet\" href=\"").Append(H(options.Path))
             .Append("/assets/dashboard.css\"></head><body><main>")
             .Append("<header><h1>Noelia</h1><div class=\"identity\">")
-            .Append(H(options.ServiceName)).Append(" · instance ")
-            .Append(H(options.InstanceName)).Append(" · ")
-            .Append(H(options.EnvironmentName)).Append("</div>")
+            .Append(H(report.Service)).Append(" · instance ")
+            .Append(H(report.Instance)).Append(" · ")
+            .Append(H(report.Environment));
+
+        if (report.Fleet is { } fleet)
+        {
+            output.Append(" · fleet ").Append(H(fleet));
+        }
+
+        output.Append("</div>")
             .Append("<p class=\"muted\">Read-only operator view. Configuration values, tokens, keys and state snapshots are never rendered.</p></header>");
 
-        Composition(output, composition, services.GetService<IServiceProviderIsService>());
-        Configuration(output, composition, options);
-        Security(output, composition, services.GetService<ISecurityCheckReport>());
-        Sovereignty(output, services.GetService<ISovereigntyReport>());
-        await Audit(output, services.GetService<IAuditTrailService>(), context.RequestAborted)
-            .ConfigureAwait(false);
-        await Sessions(output, services.GetService<ITokenSessionService>(), context.RequestAborted)
-            .ConfigureAwait(false);
-        await RateLimits(output, services.GetService<IDistributedRateLimitStore>(), context.RequestAborted)
-            .ConfigureAwait(false);
-        await Health(output, services.GetService<HealthCheckService>(), context.RequestAborted)
-            .ConfigureAwait(false);
+        Composition(output, report.Composition);
+        Configuration(output, report.Configuration);
+        Security(output, report.SecurityChecks);
+        Sovereignty(output, report.Sovereignty);
+        Audit(output, report.Audit);
+        Sessions(output, report.Sessions);
+        RateLimits(output, report.RateLimits);
+        Health(output, report.Health);
 
         output.Append("<script src=\"").Append(H(options.Path))
             .Append("/assets/dashboard.js\"></script></main></body></html>");
@@ -54,38 +59,24 @@ internal static class DashboardPage
         return output.ToString();
     }
 
-    private static void Composition(
-        StringBuilder output,
-        NoeliaComposition composition,
-        IServiceProviderIsService? services)
+    private static void Composition(StringBuilder output, CompositionView composition)
     {
         output.Append("<section><h2>Composition</h2>")
             .Append("<input type=\"search\" aria-label=\"Filter modules\" placeholder=\"Filter modules\" data-filter=\"#modules tbody tr\">")
             .Append("<table id=\"modules\"><thead><tr><th>Module</th><th>State</th><th>Decision</th></tr></thead><tbody>");
 
-        foreach (var module in composition.Included)
+        foreach (var module in composition.Modules)
         {
-            output.Append("<tr><td>").Append(H(module.Name))
-                .Append("</td><td class=\"active\">running</td><td>selected</td></tr>");
-        }
-
-        foreach (var (module, reason) in composition.Excluded.OrderBy(pair => pair.Key.Name, StringComparer.Ordinal))
-        {
-            output.Append("<tr><td>").Append(H(module.Name))
-                .Append("</td><td class=\"excluded\">not running</td><td>")
-                .Append(H(reason)).Append("</td></tr>");
+            output.Append("<tr><td>").Append(H(module.Name)).Append("</td><td class=\"")
+                .Append(module.IsRunning ? "active\">running" : "excluded\">not running")
+                .Append("</td><td>").Append(H(module.Decision)).Append("</td></tr>");
         }
 
         output.Append("</tbody></table>");
 
-        foreach (var module in composition.Included)
+        foreach (var contract in composition.Contracts)
         {
-            if (!composition.Contracts.TryGetValue(module, out var contract))
-            {
-                continue;
-            }
-
-            output.Append("<h3>").Append(H(module.Name)).Append(" contract</h3>");
+            output.Append("<h3>").Append(H(contract.Module)).Append(" contract</h3>");
 
             if (contract.Requirements.Count == 0 && contract.Provisions.Count == 0)
             {
@@ -105,10 +96,9 @@ internal static class DashboardPage
 
             foreach (var requirement in contract.Requirements)
             {
-                var present = services?.IsService(requirement.ServiceType) == true;
                 output.Append("<tr><td>requires</td><td><code>")
-                    .Append(H(requirement.ServiceType.Name)).Append("</code></td><td class=\"")
-                    .Append(present ? "pass\">present" : "missing\">missing")
+                    .Append(H(requirement.ServiceType)).Append("</code></td><td class=\"")
+                    .Append(requirement.IsPresent ? "pass\">present" : "missing\">missing")
                     .Append("</td><td>")
                     .Append(H(string.Join(" or ", requirement.Providers)))
                     .Append("</td></tr>");
@@ -116,22 +106,13 @@ internal static class DashboardPage
 
             foreach (var provision in contract.Provisions)
             {
-                var present = services?.IsService(provision.ServiceType) == true;
-                var readers = composition.Contracts.Values
-                    .Where(other => other.Module != module)
-                    .Where(other => other.Requirements.Any(
-                        requirement => requirement.ServiceType == provision.ServiceType))
-                    .Select(other => other.Module.Name)
-                    .Order(StringComparer.Ordinal)
-                    .ToArray();
-
                 output.Append("<tr><td>provides</td><td><code>")
-                    .Append(H(provision.ServiceType.Name)).Append("</code></td><td class=\"")
-                    .Append(present ? "pass\">registered" : "missing\">not registered")
+                    .Append(H(provision.ServiceType)).Append("</code></td><td class=\"")
+                    .Append(provision.IsRegistered ? "pass\">registered" : "missing\">not registered")
                     .Append("</td><td>")
-                    .Append(readers.Length == 0
+                    .Append(provision.ReadBy.Count == 0
                         ? "No active module declares that it reads this service."
-                        : $"Read by {H(string.Join(", ", readers))}.")
+                        : $"Read by {H(string.Join(", ", provision.ReadBy))}.")
                     .Append("</td></tr>");
             }
 
@@ -141,50 +122,22 @@ internal static class DashboardPage
         output.Append("</section>");
     }
 
-    private static void Configuration(
-        StringBuilder output,
-        NoeliaComposition composition,
-        NoeliaDashboardOptions options)
+    private static void Configuration(StringBuilder output, ConfigurationView configuration)
     {
-        var requested = composition.Included.Select(module => module.Name)
-            .Concat(options.ConfigurationSections)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
         output.Append("<section><h2>Configuration shapes</h2>")
             .Append("<p class=\"muted\">Only keys and shapes are shown. A shape is derived in memory and the value is discarded.</p>")
             .Append("<table><thead><tr><th>Section</th><th>Key</th><th>Shape</th></tr></thead><tbody>");
 
-        foreach (var sectionName in requested)
+        foreach (var shape in configuration.Shapes)
         {
-            var section = options.Configuration.GetSection(sectionName);
-            var leaves = Leaves(section).Take(201).ToArray();
-
-            if (leaves.Length == 0)
-            {
-                output.Append("<tr><td>").Append(H(sectionName))
-                    .Append("</td><td>—</td><td>no explicit value</td></tr>");
-                continue;
-            }
-
-            foreach (var leaf in leaves.Take(200))
-            {
-                output.Append("<tr><td>").Append(H(sectionName)).Append("</td><td>")
-                    .Append(H(RelativeKey(section, leaf))).Append("</td><td>")
-                    .Append(H(ValueShape(leaf.Value))).Append("</td></tr>");
-            }
-
-            if (leaves.Length > 200)
-            {
-                output.Append("<tr><td>").Append(H(sectionName))
-                    .Append("</td><td>…</td><td>more than 200 keys; remaining shapes omitted</td></tr>");
-            }
+            output.Append("<tr><td>").Append(H(shape.Section)).Append("</td><td>")
+                .Append(shape.Key is null ? "—" : H(shape.Key)).Append("</td><td>")
+                .Append(H(shape.Shape)).Append("</td></tr>");
         }
 
         output.Append("</tbody></table>");
 
-        if (options.ProductionReason is not null)
+        if (configuration.ProductionReason is not null)
         {
             // The wording, not a character count. InProduction(reason) already
             // gates composition, so the reason is written down in every case —
@@ -193,44 +146,31 @@ internal static class DashboardPage
             // An operator looking at this page is exactly the person who has to
             // judge whether the stated reason still holds.
             output.Append("<p>Production exposure reason: ")
-                .Append(H(options.ProductionReason))
+                .Append(H(configuration.ProductionReason))
                 .Append("</p>");
         }
 
         output.Append("</section>");
     }
 
-    private static void Security(
-        StringBuilder output,
-        NoeliaComposition composition,
-        ISecurityCheckReport? report)
+    private static void Security(StringBuilder output, SecurityCheckView checks)
     {
         output.Append("<section><h2>Security checks</h2>");
 
-        if (report is null)
+        if (Note(output, checks.State, checks.Note))
         {
-            output.Append("<p class=\"not-applicable\">No security-check report is registered.</p></section>");
-            return;
-        }
-
-        var active = composition.Included.ToHashSet();
-        active.Add(NoeliaModule.Composition);
-        var results = report.Latest.Where(result => active.Contains(result.Module)).ToArray();
-
-        if (results.Length == 0)
-        {
-            output.Append("<p class=\"not-applicable\">No completed check exists for an active module.</p></section>");
+            output.Append("</section>");
             return;
         }
 
         output.Append("<table><thead><tr><th>Check</th><th>Module</th><th>Status</th><th>Finding</th><th>Remediation</th></tr></thead><tbody>");
-        foreach (var result in results)
+
+        foreach (var result in checks.Results)
         {
-            var status = result.Status.ToString().ToLowerInvariant();
             output.Append("<tr><td><code>").Append(H(result.Id)).Append("</code></td><td>")
-                .Append(H(result.Module.Name)).Append("</td><td class=\"")
-                .Append(H(status)).Append("\">").Append(H(result.Status.ToString()))
-                .Append(" · ").Append(H(result.Severity.ToString())).Append("</td><td>")
+                .Append(H(result.Module)).Append("</td><td class=\"")
+                .Append(H(result.Status.ToLowerInvariant())).Append("\">").Append(H(result.Status))
+                .Append(" · ").Append(H(result.Severity)).Append("</td><td>")
                 .Append(H(result.Summary)).Append("</td><td>")
                 .Append(H(result.Remediation)).Append("</td></tr>");
         }
@@ -238,88 +178,65 @@ internal static class DashboardPage
         output.Append("</tbody></table></section>");
     }
 
-    private static void Sovereignty(StringBuilder output, ISovereigntyReport? report)
+    private static void Sovereignty(StringBuilder output, SovereigntyView sovereignty)
     {
         output.Append("<section><h2>Sovereignty and egress</h2>");
-        if (report is null)
-        {
-            output.Append("<p class=\"not-applicable\">No sovereignty report is registered.</p></section>");
-            return;
-        }
 
-        SovereigntyAssessment assessment;
-        try
+        if (Note(output, sovereignty.State, sovereignty.Note))
         {
-            assessment = report.Assess();
-        }
-        catch
-        {
-            output.Append("<p class=\"fail\">The sovereignty report could not be read.</p></section>");
+            output.Append("</section>");
             return;
         }
 
         output.Append("<p>Egress enforcement: <span class=\"")
-            .Append(assessment.EgressIsEnforced ? "pass\">active" : "warning\">not active")
+            .Append(sovereignty.EgressIsEnforced ? "pass\">active" : "warning\">not active")
             .Append("</span></p><p>Declared hosts: ")
-            .Append(assessment.DeclaredEgressHosts.Count == 0
+            .Append(sovereignty.DeclaredHosts.Count == 0
                 ? "none"
-                : H(string.Join(", ", assessment.DeclaredEgressHosts.Order(StringComparer.Ordinal))))
+                : H(string.Join(", ", sovereignty.DeclaredHosts)))
             .Append("</p><table><thead><tr><th>Dependency</th><th>Host</th><th>Assessment</th><th>Reason</th></tr></thead><tbody>");
 
-        foreach (var dependency in assessment.Dependencies)
+        foreach (var dependency in sovereignty.Dependencies)
         {
-            var css = dependency.Jurisdiction == Jurisdiction.SelfHosted ? "pass" : "warning";
             output.Append("<tr><td>").Append(H(dependency.Name)).Append("</td><td>")
                 .Append(H(dependency.Host ?? "not configured")).Append("</td><td class=\"")
-                .Append(css).Append("\">").Append(H(dependency.Jurisdiction.ToString()))
+                .Append(dependency.Jurisdiction == "SelfHosted" ? "pass" : "warning")
+                .Append("\">").Append(H(dependency.Jurisdiction))
                 .Append("</td><td>").Append(H(dependency.Note)).Append("</td></tr>");
         }
 
         output.Append("</tbody></table><p class=\"muted\">Undetermined is not a pass; a hostname cannot prove jurisdiction.</p></section>");
     }
 
-    private static async Task Audit(
-        StringBuilder output,
-        IAuditTrailService? audit,
-        CancellationToken cancellationToken)
+    private static void Audit(StringBuilder output, AuditView audit)
     {
         output.Append("<section><h2>Audit trail</h2>");
-        if (audit is null)
+
+        // The one section where a missing provider is a warning rather than a
+        // note: the dashboard records who looked at it, and refuses to answer
+        // when it cannot. An absent trail here is a finding, not a choice.
+        if (audit.State is OperatorSectionState.Absent)
         {
-            output.Append("<p class=\"warning\">No audit trail is registered; the dashboard access check reports this.</p></section>");
+            output.Append("<p class=\"warning\">").Append(H(audit.Note ?? string.Empty))
+                .Append("</p></section>");
             return;
         }
 
-        AuditTrailInspection inspection;
-        try
+        if (Note(output, audit.State, audit.Note))
         {
-            inspection = await audit.InspectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            output.Append("<p class=\"fail\">The audit trail could not be inspected.</p></section>");
-            return;
-        }
-
-        if (!inspection.IsAvailable)
-        {
-            output.Append("<p class=\"not-applicable\">Access was recorded, but this audit provider exposes no read model.</p></section>");
+            output.Append("</section>");
             return;
         }
 
         output.Append("<p>Instance chain at write time: <span class=\"")
-            .Append(inspection.IsChainValidAtWriteTime ? "pass\">valid" : "fail\">invalid")
+            .Append(audit.IsChainValidAtWriteTime ? "pass\">valid" : "fail\">invalid")
             .Append("</span> · persisted sink: ")
-            .Append(inspection.VerifiesPersistedSink ? "verified" : "not verified by this provider")
+            .Append(audit.VerifiesPersistedSink ? "verified" : "not verified by this provider")
             .Append(" · ")
-            .Append(inspection.Length.ToString(CultureInfo.InvariantCulture))
+            .Append(audit.Length.ToString(CultureInfo.InvariantCulture))
             .Append(" entries</p><table><thead><tr><th>Time</th><th>Actor</th><th>Capacity</th><th>Action</th><th>Resource</th></tr></thead><tbody>");
 
-        foreach (var entry in inspection.Latest)
+        foreach (var entry in audit.Latest)
         {
             output.Append("<tr><td>").Append(H(entry.Timestamp.ToString("O", CultureInfo.InvariantCulture)))
                 .Append("</td><td>").Append(H(entry.ActorId))
@@ -331,88 +248,22 @@ internal static class DashboardPage
         output.Append("</tbody></table><p class=\"muted\">This is the chain of the instance named above, not a cluster-wide claim.</p></section>");
     }
 
-    private static async Task Health(
-        StringBuilder output,
-        HealthCheckService? health,
-        CancellationToken cancellationToken)
-    {
-        output.Append("<section><h2>Health</h2>");
-        if (health is null)
-        {
-            output.Append("<p class=\"not-applicable\">No health-check service is registered.</p></section>");
-            return;
-        }
-
-        HealthReport report;
-        try
-        {
-            report = await health.CheckHealthAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            output.Append("<p class=\"fail\">Health checks could not complete.</p></section>");
-            return;
-        }
-
-        output.Append("<p>Overall: <span class=\"")
-            .Append(report.Status == HealthStatus.Healthy ? "pass" : "warning")
-            .Append("\">").Append(H(report.Status.ToString())).Append("</span></p>")
-            .Append("<table><thead><tr><th>Check</th><th>Status</th><th>Duration</th><th>Tags</th></tr></thead><tbody>");
-
-        foreach (var (name, entry) in report.Entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
-        {
-            output.Append("<tr><td>").Append(H(name)).Append("</td><td>")
-                .Append(H(entry.Status.ToString())).Append("</td><td>")
-                .Append(H(entry.Duration.TotalMilliseconds.ToString("0.###", CultureInfo.InvariantCulture)))
-                .Append(" ms</td><td>").Append(H(string.Join(", ", entry.Tags))).Append("</td></tr>");
-        }
-
-        output.Append("</tbody></table></section>");
-    }
-
-    private static async Task Sessions(
-        StringBuilder output,
-        ITokenSessionService? sessions,
-        CancellationToken cancellationToken)
+    private static void Sessions(StringBuilder output, SessionView sessions)
     {
         output.Append("<section><h2>Sessions</h2>");
-        if (sessions is null)
-        {
-            output.Append("<p class=\"not-applicable\">No token-session service is registered.</p></section>");
-            return;
-        }
 
-        TokenSessionInspection inspection;
-        try
+        if (Note(output, sessions.State, sessions.Note))
         {
-            inspection = await sessions.InspectAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            output.Append("<p class=\"fail\">Sessions could not be inspected.</p></section>");
-            return;
-        }
-
-        if (!inspection.IsAvailable)
-        {
-            output.Append("<p class=\"not-applicable\">The session provider exposes no safe operator read model.</p></section>");
+            output.Append("</section>");
             return;
         }
 
         output.Append("<p>")
-            .Append(inspection.Sessions.Count.ToString(CultureInfo.InvariantCulture))
+            .Append(sessions.Count.ToString(CultureInfo.InvariantCulture))
             .Append(" active sessions observed by this instance.</p>")
             .Append("<table><thead><tr><th>Subject</th><th>Session</th><th>Started</th><th>Last used</th><th>Expires</th><th>Device shape</th></tr></thead><tbody>");
 
-        foreach (var session in inspection.Sessions)
+        foreach (var session in sessions.Sessions)
         {
             output.Append("<tr><td>").Append(H(session.Subject))
                 .Append("</td><td>").Append(H(session.Session))
@@ -425,41 +276,19 @@ internal static class DashboardPage
         output.Append("</tbody></table><p class=\"muted\">Tokens and raw device fingerprints are never available here. This is not a cluster-wide inventory.</p></section>");
     }
 
-    private static async Task RateLimits(
-        StringBuilder output,
-        IDistributedRateLimitStore? store,
-        CancellationToken cancellationToken)
+    private static void RateLimits(StringBuilder output, RateLimitView rateLimits)
     {
         output.Append("<section><h2>Rate limits</h2>");
-        if (store is null)
-        {
-            output.Append("<p class=\"not-applicable\">No rate-limit store is registered.</p></section>");
-            return;
-        }
 
-        RateLimitInspection inspection;
-        try
+        if (Note(output, rateLimits.State, rateLimits.Note))
         {
-            inspection = await store.InspectAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            output.Append("<p class=\"fail\">Rate-limit counters could not be inspected.</p></section>");
-            return;
-        }
-
-        if (!inspection.IsAvailable)
-        {
-            output.Append("<p class=\"not-applicable\">The active store exposes no safe counter read model.</p></section>");
+            output.Append("</section>");
             return;
         }
 
         output.Append("<table><thead><tr><th>Key fingerprint</th><th>Count</th><th>Limit</th><th>Decision</th><th>Observed</th></tr></thead><tbody>");
-        foreach (var counter in inspection.Counters)
+
+        foreach (var counter in rateLimits.Counters)
         {
             output.Append("<tr><td><code>").Append(H(counter.KeyFingerprint))
                 .Append("</code></td><td>").Append(counter.CurrentCount.ToString(CultureInfo.InvariantCulture))
@@ -472,35 +301,55 @@ internal static class DashboardPage
         output.Append("</tbody></table><p class=\"muted\">Store keys can contain subjects or addresses; only a one-way 12-character fingerprint is shown.</p></section>");
     }
 
-    private static IEnumerable<IConfigurationSection> Leaves(IConfigurationSection section)
+    private static void Health(StringBuilder output, HealthView health)
     {
-        var children = section.GetChildren().ToArray();
-        if (children.Length == 0)
-        {
-            if (section.Value is not null)
-            {
-                yield return section;
-            }
+        output.Append("<section><h2>Health</h2>");
 
-            yield break;
+        if (Note(output, health.State, health.Note))
+        {
+            output.Append("</section>");
+            return;
         }
 
-        foreach (var child in children)
+        output.Append("<p>Overall: <span class=\"")
+            .Append(health.Overall == "Healthy" ? "pass" : "warning")
+            .Append("\">").Append(H(health.Overall ?? string.Empty)).Append("</span></p>")
+            .Append("<table><thead><tr><th>Check</th><th>Status</th><th>Duration</th><th>Tags</th></tr></thead><tbody>");
+
+        foreach (var entry in health.Entries)
         {
-            foreach (var leaf in Leaves(child))
-            {
-                yield return leaf;
-            }
+            output.Append("<tr><td>").Append(H(entry.Name)).Append("</td><td>")
+                .Append(H(entry.Status)).Append("</td><td>")
+                .Append(H(entry.DurationMs.ToString("0.###", CultureInfo.InvariantCulture)))
+                .Append(" ms</td><td>").Append(H(string.Join(", ", entry.Tags))).Append("</td></tr>");
         }
+
+        output.Append("</tbody></table></section>");
     }
 
-    private static string RelativeKey(IConfigurationSection root, IConfigurationSection leaf) =>
-        leaf.Path.Length > root.Path.Length + 1
-            ? leaf.Path[(root.Path.Length + 1)..]
-            : leaf.Key;
+    /// <summary>
+    /// Writes the section's explanation when it has no data, and says whether
+    /// it did.
+    /// </summary>
+    /// <remarks>
+    /// The three empty states are not one state. A reader has to be able to
+    /// tell "nothing of this kind is registered" from "it is registered and
+    /// stopped answering", because the second is an outage and the first is a
+    /// decision — so a failure is styled as a failure and never as a note.
+    /// </remarks>
+    private static bool Note(StringBuilder output, OperatorSectionState state, string? note)
+    {
+        if (state is OperatorSectionState.Present)
+        {
+            return false;
+        }
 
-    private static string ValueShape(string? value) =>
-        value is null ? "missing" : "set";
+        output.Append("<p class=\"")
+            .Append(state is OperatorSectionState.Faulted ? "fail" : "not-applicable")
+            .Append("\">").Append(H(note ?? string.Empty)).Append("</p>");
+
+        return true;
+    }
 
     private static string H(string value) => HtmlEncoder.Default.Encode(value);
 }

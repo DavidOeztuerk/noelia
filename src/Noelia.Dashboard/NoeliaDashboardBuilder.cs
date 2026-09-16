@@ -129,7 +129,12 @@ public sealed class NoeliaDashboardBuilder
             configuration,
             serviceName,
             environment.EnvironmentName,
-            Environment.MachineName);
+            Environment.MachineName,
+            // A label the operator chooses, so a collector can tell that
+            // seventeen services are one system rather than seventeen. Noelia
+            // never invents one: a guessed fleet name would group services that
+            // have nothing to do with each other and look authoritative doing it.
+            configuration["Dashboard:Fleet"]);
     }
 }
 

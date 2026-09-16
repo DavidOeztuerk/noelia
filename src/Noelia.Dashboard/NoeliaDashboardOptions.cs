@@ -11,6 +11,7 @@ internal sealed record NoeliaDashboardOptions(
     IConfiguration Configuration,
     string ServiceName,
     string EnvironmentName,
-    string InstanceName);
+    string InstanceName,
+    string? Fleet);
 
 internal sealed class NoeliaDashboardMarker : INoeliaDashboard;
