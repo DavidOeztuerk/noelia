@@ -47,6 +47,7 @@ public sealed class SecurityHeadersPackageTests
             "noelia.audit.chain-scope",
             "noelia.composition.providers",
             "noelia.dataprotection.key-ring",
+            "noelia.egress.guard",
             "noelia.headers.browser-baseline",
             "noelia.health.readiness-coverage");
         report.Latest.Should().OnlyContain(result =>
