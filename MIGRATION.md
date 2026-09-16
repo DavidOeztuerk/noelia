@@ -63,6 +63,43 @@ Nachschlagen; ein Satz ist etwas zum Überschreiben.
   jetzt Schlüssel. Ein angezeigter Schlüssel fällt sofort auf; ein Satz in einer
   ungewählten Sprache fällt nie auf, und genau darum geht es.
 
+## Die Sitzungsübersicht konnte nie etwas anzeigen
+
+`TokenSessionService` ist `AddScoped` registriert, und die Menge der
+beobachteten Subjekte war ein Instanzfeld — bei jeder Anfrage ein neues, leeres
+Wörterbuch. Das Dashboard meldete deshalb `0 active sessions observed by this
+instance`, in jedem Einsatz, dauerhaft. Die Formulierung ließ die Leere wie eine
+Antwort klingen statt wie einen Defekt, und genau das ist die Fehlerklasse, für
+die die 5.0-Linie existiert: registriert, vorhanden, ohne Wirkung, und niemand
+merkt es.
+
+Die Menge liegt jetzt in `SessionObservations`, einem Singleton, das
+`NoeliaModule.TokenSessions` mitregistriert. Über die Komposition ändert sich
+für dich nichts.
+
+**Brechend, wenn du `TokenSessionService` selbst baust** — in eigenen Tests
+etwa. Der Konstruktor hat einen fünften Parameter:
+
+```csharp
+// vorher
+new TokenSessionService(store, options, clock, logger);
+
+// jetzt
+new TokenSessionService(store, options, clock, logger, new SessionObservations());
+```
+
+Es gibt bewusst **keine** Überladung mit vier Parametern. Sie müsste sich ihre
+eigene Beobachtungsmenge anlegen — also genau den Defekt wiederherstellen, den
+diese Änderung behebt, und zwar lautlos. Ein `[Obsolete]`-Pfad, der weiter das
+Falsche tut, ist schlechter als ein Compilerfehler, der eine Zeile kostet.
+
+Wer den Dienst aus dem Container auflöst, ist nicht betroffen.
+
+Eine Nebenwirkung, mit der zu rechnen ist: Dashboards, die hier immer `0`
+zeigten, zeigen ab jetzt echte Zahlen. Das ist keine neue Last — die Menge hält
+nur Subjekt-Bezeichner dieses Prozesses —, aber es ist eine Zahl, die vorher
+niemand gesehen hat.
+
 ---
 
 # Noelia 5.1.0 → 5.2.0
