@@ -1,3 +1,49 @@
+# Noelia 6.2.0 → 6.3.0
+
+Beides beim Anbinden eines **fremden** Dienstes gefunden — eines, der nicht aus
+der Demo stammt und deshalb Dinge deklariert, die die Demo nie deklariert hat.
+
+## Behoben: ein Dateipfad war ein öffentlicher Host
+
+`DeclareDependency("Ledger", "invoices.db")` kam als `Undetermined` zurück —
+„who operates it and under which law cannot be told from the name" —, über eine
+Datei auf derselben Platte. `Classify` sah einen Punkt und schloss auf einen
+DNS-Namen; `.db` ist keine Top-Level-Domain.
+
+Der Demo ist das nie passiert, weil sie `sqlite` ohne Punkt deklariert.
+
+**Ein falsches `Undetermined` ist schlimmer als gar keine Einstufung.** Das
+Register beantwortet „wohin fließen unsere Daten"; eine lokale Datei als offene
+Frage zu melden lehrt einen Betreiber, über `Undetermined` hinwegzulesen — und
+dann liest er über das echte hinweg.
+
+Erkannt werden jetzt Pfadtrenner und eine enge Liste von Datei-Endungen. Eine
+Endung, an die niemand gedacht hat, wird weiterhin als Name eingestuft; das ist
+der ehrliche Fehlschlag, und die Alternative wäre eine Abhängigkeit von der
+IANA-Liste für eine Frage, die selten gestellt wird.
+
+**Was du tun musst:** nichts. Sieh dir deinen Bericht an — Abhängigkeiten, die
+bisher unbestimmt waren, können jetzt als selbst gehostet ausgewiesen sein.
+
+## Behoben: die Drittland-Liste kannte kein SaaS
+
+`api.stripe.com` kam als `Undetermined` zurück. Die Liste deckte ab, **wo** ein
+System läuft — AWS, Azure, Google, Oracle, IBM, Cloudflare — und nicht, **was**
+es anruft: Zahlung, Mail, Messaging, Support, Identität, verwaltete Datenbanken.
+
+Ein Kunde mit Stripe und SendGrid bekam zweimal „konnten wir nicht feststellen"
+und las es als Entwarnung.
+
+Rund vierzig Namen kamen dazu. Vollständig kann die Liste nicht sein und sagt
+das auch — aber die offensichtlichen zu kennen ist der Unterschied zwischen
+einer engen Liste und einer zufälligen.
+
+**Was du tun musst:** deinen Souveränitätsbericht erneut ansehen. Was vorher
+unbestimmt war, kann jetzt als Drittland ausgewiesen sein. Das ist keine neue
+Lage, sondern eine, die vorher nicht gemeldet wurde.
+
+---
+
 # Noelia 6.1.0 → 6.2.0
 
 ## Zeiten im Dashboard stehen in der Zone des Lesers

@@ -58,6 +58,48 @@ public class HostJurisdictionTests
             .Should().Be(Jurisdiction.ThirdCountryProvider);
     }
 
+    /// <summary>
+    /// A file is not a host, however many dots it has.
+    /// </summary>
+    /// <remarks>
+    /// Found by wiring up a service that declared <c>invoices.db</c> as its
+    /// ledger. It came back Undetermined — "who operates it cannot be told from
+    /// the name" — about a file sitting on the same disk. A false Undetermined
+    /// teaches an operator to skip past the real ones.
+    /// </remarks>
+    [Theory]
+    [InlineData("invoices.db")]
+    [InlineData("app.sqlite3")]
+    [InlineData("/var/lib/app/ledger.db")]
+    [InlineData("./data/store.db")]
+    [InlineData("C:\\data\\ledger.mdf")]
+    [InlineData("settings.json")]
+    public void AFileIsSelfHostedAndNotAnOpenQuestion(string path)
+    {
+        var (jurisdiction, note) = HostJurisdiction.Classify(path);
+
+        jurisdiction.Should().Be(Jurisdiction.SelfHosted);
+        note.Should().Contain("file");
+    }
+
+    /// <summary>
+    /// The layer an application actually calls.
+    /// </summary>
+    /// <remarks>
+    /// The list covered where a system is hosted and not what it talks to, so a
+    /// customer running Stripe and SendGrid was told twice that jurisdiction
+    /// could not be determined — and read it as an all-clear.
+    /// </remarks>
+    [Theory]
+    [InlineData("api.stripe.com")]
+    [InlineData("api.sendgrid.net")]
+    [InlineData("api.twilio.com")]
+    [InlineData("acme.auth0.com")]
+    [InlineData("cluster0.abc.mongodb.net")]
+    public void SaasProvidersAreRecognisedToo(string host) =>
+        HostJurisdiction.Classify(host).Jurisdiction
+            .Should().Be(Jurisdiction.ThirdCountryProvider);
+
     [Theory]
     [InlineData("db.example.eu")]
     [InlineData("secrets.some-provider.de")]

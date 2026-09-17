@@ -27,7 +27,52 @@ public static class HostJurisdiction
         ".googleapis.com", ".cloud.google.com", ".appspot.com", ".gcp.gvt2.com",
         ".oraclecloud.com", ".ibmcloud.com", ".cloudflare.com", ".workers.dev",
         ".openai.com", ".anthropic.com", ".datadoghq.com", ".newrelic.com",
-        ".sentry.io", ".segment.com", ".google-analytics.com", ".doubleclick.net"
+        ".sentry.io", ".segment.com", ".google-analytics.com", ".doubleclick.net",
+
+        // The layer an application actually calls. The list above covers where
+        // a system is hosted; these are the services it talks to — payment,
+        // mail, messaging, support, identity — and they were missing entirely,
+        // so a customer running Stripe and SendGrid was told twice that it
+        // could not be determined.
+        ".stripe.com", ".paypal.com", ".adyen.com", ".braintreegateway.com",
+        ".sendgrid.net", ".sendgrid.com", ".mailgun.net", ".mailgun.org",
+        ".postmarkapp.com", ".mandrillapp.com",
+        ".twilio.com", ".sendbird.com", ".pusher.com",
+        ".slack.com", ".zendesk.com", ".intercom.io", ".hubapi.com",
+        ".auth0.com", ".okta.com", ".onelogin.com",
+        ".github.com", ".githubusercontent.com", ".atlassian.net",
+        ".algolia.net", ".algolianet.com", ".mixpanel.com", ".amplitude.com",
+        ".bugsnag.com", ".rollbar.com", ".logdna.com", ".loggly.com",
+        ".snowflakecomputing.com", ".mongodb.net", ".redislabs.com",
+        ".upstash.io", ".planetscale.com", ".supabase.co", ".firebaseio.com"
+    ];
+
+    /// <summary>
+    /// Endings that mean a value is a file on disk rather than a name in DNS.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>invoices.db</c> is a SQLite file and <c>.db</c> is not a
+    /// delegated top-level domain, but a classifier that only looks for a dot
+    /// cannot tell the two apart — and reported the file as a public name whose
+    /// operator could not be determined.</para>
+    ///
+    /// <para>A false <c>Undetermined</c> is worse than no classification. The
+    /// register exists to answer "where can our data go"; reporting a local
+    /// file as an open question teaches an operator to skip past
+    /// <c>Undetermined</c>, and then they skip past the real one.</para>
+    ///
+    /// <para>Narrow on purpose, like the third-country list. A file extension
+    /// nobody thought of is still classified by name, which is the honest
+    /// failure — the alternative, carrying the IANA list to decide what is not
+    /// a domain, is a dependency on a moving target for a question this rarely
+    /// asks.</para>
+    /// </remarks>
+    private static readonly string[] FileSuffixes =
+    [
+        ".db", ".db3", ".sqlite", ".sqlite3", ".mdb", ".mdf",
+        ".json", ".xml", ".yaml", ".yml", ".ini", ".toml", ".config",
+        ".log", ".dat", ".csv", ".txt", ".bak", ".tmp",
+        ".pem", ".key", ".pfx", ".p8", ".crt"
     ];
 
     /// <summary>Suffixes reserved for names that never leave an internal network.</summary>
@@ -57,6 +102,13 @@ public static class HostJurisdiction
             return IsPrivate(address)
                 ? (Jurisdiction.SelfHosted, "Private network address.")
                 : (Jurisdiction.Undetermined, "Public IP address; the operator cannot be told from it.");
+        }
+
+        // Before the dot test, because a path is not a name however many dots
+        // it contains.
+        if (IsFilePath(host))
+        {
+            return (Jurisdiction.SelfHosted, "A file on this machine, not a name in DNS.");
         }
 
         foreach (var suffix in InternalSuffixes)
@@ -93,6 +145,17 @@ public static class HostJurisdiction
         return (Jurisdiction.Undetermined,
             "Public name; who operates it and under which law cannot be told from the name.");
     }
+
+    /// <summary>Whether this is plainly a path rather than a host.</summary>
+    /// <remarks>
+    /// A separator settles it outright: no DNS name contains one. Failing that,
+    /// a known data-file ending does — <c>invoices.db</c> has no separator and
+    /// is still a file.
+    /// </remarks>
+    private static bool IsFilePath(string host) =>
+        host.Contains('/', StringComparison.Ordinal)
+        || host.Contains('\\', StringComparison.Ordinal)
+        || FileSuffixes.Any(suffix => host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsLoopback(string host) =>
         host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
