@@ -26,6 +26,14 @@ gestritten wird.
 `analyze` schreibt nie, `init` schreibt nur und überschreibt nichts. Die
 Trennung ist die von Terraform und sie ist hier die richtige.
 
+**Der gedruckte Kompositionswurzel startet.** Ein Test kompiliert ihn mit
+Roslyn, und vor jedem Release läuft er in einem Wegwerfprojekt: `dotnet run`
+steht auf Production, das Dashboard wird deshalb nur außerhalb komponiert, und
+die Pipeline benennt ihre Schritte statt die Standardkette zu nehmen — deren
+`UseAuth()` braucht ein Authentifizierungsschema, das ein neuer Dienst noch
+nicht hat. Jedes davon war ein Absturz beim ersten Start, bevor es ein Kommentar
+in der Ausgabe war.
+
 **Was `analyze` statisch findet**, ist genau der Fehler, den dieses Repository
 immer wieder bei sich selbst findet: `AddRedisCache(...)` neben `AddNoelia(...)`
 statt `noelia.UseRedisCache(...)` darin. Die eingebauten Module registrieren

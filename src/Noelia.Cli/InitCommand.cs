@@ -67,6 +67,13 @@ internal static class InitCommand
     {
         string[] wanted = ["Noelia.Infrastructure", "Noelia.Dashboard"];
 
+        // Whether this repository pins versions centrally decides whether a
+        // version belongs in the csproj. Writing one where Directory.Packages.props
+        // manages them is NU1008 and the build stops; leaving one out where it
+        // does not is NU1604 and the restore stops. Guessing either way breaks
+        // somebody, so this looks.
+        var central = ManagesVersionsCentrally(project);
+
         var document = XDocument.Load(project);
 
         var present = document.Descendants("PackageReference")
@@ -95,26 +102,119 @@ internal static class InitCommand
             document.Root.Add(group);
         }
 
+        var version = Version();
+
         foreach (var id in missing)
         {
-            // No Version attribute. Central package management is the norm in a
-            // repository that has a Directory.Packages.props, and writing a
-            // version into the csproj there is an error rather than a default —
-            // so the version is named in the printed instruction instead, where
-            // a person decides what to do with it.
-            group.Add(new XElement("PackageReference", new XAttribute("Include", id)));
-            output.WriteLine($"  added     {id}");
+            var reference = new XElement("PackageReference", new XAttribute("Include", id));
+
+            if (!central)
+            {
+                reference.Add(new XAttribute("Version", version));
+            }
+
+            group.Add(reference);
+            output.WriteLine($"  added     {id}{(central ? string.Empty : " " + version)}");
         }
 
         if (!dryRun)
         {
-            document.Save(project);
+            Save(document, project);
         }
 
         output.WriteLine();
-        output.WriteLine("  Pin the version: dotnet add package Noelia.Infrastructure");
+        output.WriteLine(central
+            ? $"  Versions are managed centrally here. Add <PackageVersion Include=\"Noelia.*\" "
+              + $"Version=\"{version}\" /> to Directory.Packages.props."
+            : $"  Pinned to {version}, the version of this tool. All Noelia packages ship "
+              + "under one version; mixing them is untested.");
 
         return true;
+    }
+
+    /// <summary>
+    /// Writes the project file back without adding anything to it.
+    /// </summary>
+    /// <remarks>
+    /// <c>XDocument.Save(path)</c> writes a UTF-8 byte order mark and an XML
+    /// declaration that a csproj written by the SDK does not have. Neither
+    /// breaks anything, and both turn "added two package references" into a
+    /// whole-file diff — which is how a setup command earns a reputation for
+    /// touching more than it said it would.
+    /// </remarks>
+    private static void Save(XDocument document, string path)
+    {
+        var settings = new System.Xml.XmlWriterSettings
+        {
+            Indent = true,
+            IndentChars = "  ",
+            OmitXmlDeclaration = document.Declaration is null,
+            Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+        };
+
+        using var writer = System.Xml.XmlWriter.Create(path, settings);
+        document.Save(writer);
+    }
+
+    /// <summary>
+    /// Whether a Directory.Packages.props above this project manages versions.
+    /// </summary>
+    /// <remarks>
+    /// Walks upward, because that is how MSBuild finds the file, and stops at
+    /// the filesystem root rather than at a repository boundary this tool has no
+    /// reliable way to recognise.
+    /// </remarks>
+    private static bool ManagesVersionsCentrally(string project)
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(project))!);
+
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "Directory.Packages.props");
+
+            if (File.Exists(candidate))
+            {
+                try
+                {
+                    return XDocument.Load(candidate)
+                        .Descendants("ManagePackageVersionsCentrally")
+                        .Any(element => element.Value.Trim()
+                            .Equals("true", StringComparison.OrdinalIgnoreCase));
+                }
+                catch (System.Xml.XmlException)
+                {
+                    // Unparseable: treat it as absent rather than guessing. The
+                    // printed instruction covers whichever it turns out to be.
+                    return false;
+                }
+            }
+
+            directory = directory.Parent;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The version to pin to: this tool's own.
+    /// </summary>
+    /// <remarks>
+    /// All fourteen packages ship under one version, and the tool is one of
+    /// them — so the version a user just installed is the version whose
+    /// packages it should wire up. Anything else would have it recommend a
+    /// combination nobody tested together.
+    /// </remarks>
+    private static string Version()
+    {
+        var informational = typeof(InitCommand).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+
+        // "6.4.0+abc123" — the build metadata is not part of a NuGet version.
+        return informational?.Split('+')[0]
+            ?? typeof(InitCommand).Assembly.GetName().Version?.ToString(3)
+            ?? "6.4.0";
     }
 
     private static bool Settings(
@@ -193,27 +293,72 @@ internal static class InitCommand
         })
     ];
 
+    /// <summary>
+    /// The composition root, with its using directives.
+    /// </summary>
+    /// <remarks>
+    /// The usings are not decoration. Every call below lives in a different
+    /// namespace — <c>AddNoelia</c> and <c>UseNoelia</c> in
+    /// <c>Infrastructure.Extensions</c>, <c>AddSovereignPlatform</c> in
+    /// <c>Infrastructure.Builder</c>, <c>UseDashboard</c> in
+    /// <c>Noelia.Dashboard</c> — and a snippet that left one out compiles to
+    /// "no such extension method", which reads to a newcomer as "this package
+    /// does not have that". It is a documented failure here: the same omission
+    /// in the README cost a patch release.
+    /// </remarks>
     private static string Snippet(string serviceName)
     {
         var builder = new StringBuilder();
 
-        builder.AppendLine("var builder = WebApplication.CreateBuilder(args);")
+        builder.AppendLine("using Noelia.Dashboard;")
+            .AppendLine("using Noelia.Infrastructure.Builder;")
+            .AppendLine("using Noelia.Infrastructure.Builder.Modules;   // the pipeline steps")
+            .AppendLine("using Noelia.Infrastructure.Extensions;")
+            .AppendLine()
+            .AppendLine("var builder = WebApplication.CreateBuilder(args);")
             .AppendLine()
             .AppendLine("builder.Services.AddNoelia(")
             .AppendLine("    builder.Configuration,")
             .AppendLine("    builder.Environment,")
             .AppendLine($"    \"{serviceName}\",")
-            .AppendLine("    noelia => noelia")
-            .AppendLine("        .UseDefaults()")
-            .AppendLine("        .UseDashboard(dashboard => dashboard.VisibleTo(")
-            .AppendLine("            context => context.User.IsInRole(\"operator\")))")
-            .AppendLine("        .AddSovereignPlatform(sovereign => sovereign")
-            .AppendLine("            .AllowLoopback()")
-            .AppendLine("            .AllowPrivateNetworks()));")
+            .AppendLine("    noelia =>")
+            .AppendLine("    {")
+            .AppendLine("        noelia.UseDefaults();")
+            .AppendLine()
+            .AppendLine("        // In Production the dashboard refuses to compose until the")
+            .AppendLine("        // exposure is an explicit decision with a reason — so it is")
+            .AppendLine("        // left out here rather than crashing on your first run.")
+            .AppendLine("        // To expose it there, drop this condition and add")
+            .AppendLine("        // .InProduction(\"why it is reachable and to whom\").")
+            .AppendLine("        if (!builder.Environment.IsProduction())")
+            .AppendLine("        {")
+            .AppendLine("            noelia.UseDashboard(dashboard => dashboard")
+            .AppendLine("                .At(\"/noelia\")")
+            .AppendLine("                .VisibleTo(context => context.User.IsInRole(\"operator\")));")
+            .AppendLine("        }")
+            .AppendLine()
+            .AppendLine("        // Loopback and private networks are allowed already; name")
+            .AppendLine("        // every public host this service may reach. Declared")
+            .AppendLine("        // dependencies appear in the destination register.")
+            .AppendLine("        noelia.AddSovereignPlatform(sovereign => sovereign")
+            .AppendLine("            .DeclareDependency(")
+            .AppendLine("                \"Database\",")
+            .AppendLine("                builder.Configuration.GetConnectionString(\"Default\")));")
+            .AppendLine("    });")
             .AppendLine()
             .AppendLine("var app = builder.Build();")
             .AppendLine()
-            .AppendLine($"app.UseNoelia(app.Environment, \"{serviceName}\");")
+            .AppendLine("// The default chain includes UseAuth(), which needs an")
+            .AppendLine("// authentication scheme — UseJwt(...) while configuring Noelia, or")
+            .AppendLine("// your own AddAuthentication(...). A new service usually has neither")
+            .AppendLine("// yet, so the steps are named here and UseAuth() is added once there")
+            .AppendLine("// is something for it to read. The order below carries security")
+            .AppendLine("// weight; the reasons are in the comments on UseNoelia.")
+            .AppendLine($"app.UseNoelia(app.Environment, \"{serviceName}\", pipeline => pipeline")
+            .AppendLine("    .UseExceptionHandling()")
+            .AppendLine("    .UseCorrelationId()")
+            .AppendLine("    .UseSecurityHeaders()")
+            .AppendLine("    .UseHealthCheckEndpoints());")
             .AppendLine()
             .AppendLine("app.Run();");
 

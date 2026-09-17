@@ -40,6 +40,14 @@
       dependency does.
     -->
     <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+
+    <!--
+      Only the test project takes this, to compile the snippet `noelia init`
+      prints rather than to grep it. A snippet checked by string comparison is a
+      snippet that contains the right words and does not build — which is how
+      the first version of it shipped.
+    -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
   </ItemGroup>
 

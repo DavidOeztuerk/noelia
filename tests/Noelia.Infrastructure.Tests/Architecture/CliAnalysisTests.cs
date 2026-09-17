@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Noelia.Cli;
 
 namespace Noelia.Infrastructure.Tests.Architecture;
@@ -15,6 +17,13 @@ public class CliAnalysisTests : IDisposable
 {
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "noelia-cli-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>The assemblies the snippet's usings refer to.</summary>
+    private static readonly System.Reflection.Assembly[] Shipped =
+    [
+        typeof(Noelia.Infrastructure.Sovereignty.SovereigntyReport).Assembly,
+        typeof(Noelia.Dashboard.INoeliaDashboard).Assembly
+    ];
 
     public CliAnalysisTests() => Directory.CreateDirectory(_root);
 
@@ -229,8 +238,118 @@ public class CliAnalysisTests : IDisposable
 
         var text = output.ToString();
         text.Should().Contain("AddNoelia(");
-        text.Should().Contain("UseNoelia(app.Environment, \"billing\")");
+        text.Should().Contain("UseNoelia(app.Environment, \"billing\"");
         text.Should().Contain("AddSovereignPlatform");
+    }
+
+    /// <summary>
+    /// The snippet compiles.
+    /// </summary>
+    /// <remarks>
+    /// <para>Compiled, not grepped. The first version of this was checked by
+    /// asserting the text contained "AddSovereignPlatform", which it did — and
+    /// the snippet still did not build: the call lived in a third namespace the
+    /// snippet had no using for, and two lines below it called
+    /// <c>AllowLoopback()</c> on a builder that has no such method, because
+    /// loopback is allowed by default and opted <em>out</em> of.</para>
+    ///
+    /// <para>A snippet that contains the right words and does not build is
+    /// worse than none. It reads to a newcomer as "this package does not have
+    /// that method", and they conclude the library is broken rather than the
+    /// documentation.</para>
+    ///
+    /// <para>Roslyn against the already-loaded assemblies, so this costs
+    /// milliseconds and needs no restore of a throwaway project.</para>
+    /// </remarks>
+    [Fact]
+    public void The_composition_root_it_prints_actually_compiles()
+    {
+        Write("App.csproj", """<Project Sdk="Microsoft.NET.Sdk"><ItemGroup /></Project>""");
+
+        using var output = new StringWriter();
+        InitCommand.Run(_root, "billing", dryRun: true, output);
+
+        var text = output.ToString();
+        var snippet = text[text.IndexOf("using Noelia", StringComparison.Ordinal)..];
+
+        // What Microsoft.NET.Sdk.Web puts in scope without anyone writing it.
+        // The snippet is pasted into such a project, so the test has to give it
+        // the same starting point or it would demand usings a real project does
+        // not need.
+        const string ImplicitUsings = """
+            global using global::System;
+            global using global::System.Collections.Generic;
+            global using global::System.Linq;
+            global using global::System.Threading.Tasks;
+            global using global::Microsoft.AspNetCore.Builder;
+            global using global::Microsoft.AspNetCore.Http;
+            global using global::Microsoft.Extensions.Configuration;
+            global using global::Microsoft.Extensions.DependencyInjection;
+            global using global::Microsoft.Extensions.Hosting;
+            global using global::Microsoft.Extensions.Logging;
+            """;
+
+        var parse = new CSharpParseOptions(LanguageVersion.Latest);
+
+        var compilation = CSharpCompilation.Create(
+            "SnippetProbe",
+            [
+                CSharpSyntaxTree.ParseText(ImplicitUsings, parse),
+                CSharpSyntaxTree.ParseText(snippet, parse)
+            ],
+            References(),
+            new CSharpCompilationOptions(OutputKind.ConsoleApplication));
+
+        var errors = compilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(diagnostic => diagnostic.GetMessage(
+                System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+
+        errors.Should().BeEmpty(
+            "the composition root this tool prints is the first Noelia code most people "
+            + "will run");
+    }
+
+    /// <summary>
+    /// Everything the snippet could need, taken from what is already loaded.
+    /// </summary>
+    /// <remarks>
+    /// The whole loaded set rather than a hand-picked list: picking is how a
+    /// reference gets forgotten and the failure reads as a missing using rather
+    /// than a missing assembly.
+    /// </remarks>
+    private static IEnumerable<MetadataReference> References()
+    {
+        // Every assembly beside the test binary, not only the loaded ones.
+        // Referencing what happens to be loaded makes this pass or fail
+        // depending on which tests ran first, and the framework facades a
+        // snippet needs are often not loaded at all until something touches
+        // them.
+        var directory = Path.GetDirectoryName(typeof(CliAnalysisTests).Assembly.Location)!;
+
+        var runtime = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var aspnet = Path.GetDirectoryName(
+            typeof(Microsoft.AspNetCore.Builder.WebApplication).Assembly.Location)!;
+
+        return new[] { directory, runtime, aspnet }
+            .Distinct(StringComparer.Ordinal)
+            .SelectMany(folder => Directory.GetFiles(folder, "*.dll"))
+            .Select(path =>
+            {
+                try
+                {
+                    return (MetadataReference?)MetadataReference.CreateFromFile(path);
+                }
+                catch (BadImageFormatException)
+                {
+                    // A native library in the same folder. Not a reference.
+                    return null;
+                }
+            })
+            .Where(reference => reference is not null)
+            .Select(reference => reference!)
+            .DistinctBy(reference => Path.GetFileName(reference.Display), StringComparer.Ordinal);
     }
 
     [Fact]
@@ -250,7 +369,7 @@ public class CliAnalysisTests : IDisposable
     }
 
     [Fact]
-    public void Init_adds_the_packages_and_the_sections_that_are_missing()
+    public void Init_pins_a_version_where_nothing_manages_them_centrally()
     {
         Write("App.csproj", """<Project Sdk="Microsoft.NET.Sdk"><ItemGroup /></Project>""");
 
@@ -258,13 +377,41 @@ public class CliAnalysisTests : IDisposable
         InitCommand.Run(_root, "billing", dryRun: false, output).Should().Be(0);
 
         var project = File.ReadAllText(Path.Combine(_root, "App.csproj"));
+
         project.Should().Contain("Noelia.Infrastructure");
-        project.Should().NotContain("Version=",
-            "a version written into the csproj is an error where packages are managed "
-            + "centrally, so the version is named in the instruction instead");
+        project.Should().Contain("Version=",
+            "a PackageReference without a version fails restore with NU1604 wherever "
+            + "Directory.Packages.props does not manage it");
 
         var settings = File.ReadAllText(Path.Combine(_root, "appsettings.json"));
         settings.Should().Contain("\"ServiceName\": \"billing\"");
+    }
+
+    [Fact]
+    public void Init_writes_no_version_where_a_repository_manages_them_centrally()
+    {
+        Write("Directory.Packages.props", """
+            <Project>
+              <PropertyGroup>
+                <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        Write("app/App.csproj", """<Project Sdk="Microsoft.NET.Sdk"><ItemGroup /></Project>""");
+
+        using var output = new StringWriter();
+        InitCommand.Run(_root, "billing", dryRun: false, output).Should().Be(0);
+
+        var project = File.ReadAllText(Path.Combine(_root, "app", "App.csproj"));
+
+        project.Should().Contain("Noelia.Infrastructure");
+        project.Should().NotContain("Version=",
+            "a version in the csproj is NU1008 where versions are pinned centrally — "
+            + "guessing either way breaks somebody, so this looks");
+
+        output.ToString().Should().Contain("Directory.Packages.props",
+            "the instruction has to name where the version actually goes");
     }
 
     [Fact]

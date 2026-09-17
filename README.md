@@ -1743,8 +1743,20 @@ and costs more trust than the typing it saved. Nothing is overwritten — a key
 already present is left exactly as it is and reported, because the second run of
 a setup command is the one most likely to be an accident.
 
+A version goes into the `PackageReference` only where nothing manages versions
+centrally. Writing one where `Directory.Packages.props` does is `NU1008`; leaving
+it out where it does not is `NU1604` — so `init` looks rather than guesses.
+
 No value it writes looks like a credential. A generated placeholder that reads
 like a key is a key somebody ships.
+
+**The snippet it prints starts.** A test compiles it with Roslyn, and it is run
+in a throwaway project before every release: `dotnet run` defaults to Production,
+so the dashboard is composed only outside it (it refuses Production exposure
+without an explicit reason), and the pipeline names its steps rather than taking
+the default chain, whose `UseAuth()` needs an authentication scheme a new service
+does not have yet. Each of those was a crash on first run before it was a
+comment in the output.
 
 ### `noelia mcp` — the reading half, for an assistant
 

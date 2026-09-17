@@ -3,7 +3,6 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
@@ -16,6 +15,8 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- Compiles the snippet `noelia init` prints, rather than grepping it. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
