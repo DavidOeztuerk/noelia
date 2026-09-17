@@ -50,7 +50,12 @@ public sealed class SovereigntyReport : ISovereigntyReport
         var host = ExtractHost(value);
         var (jurisdiction, note) = HostJurisdiction.Classify(host);
 
-        return new DependencyFinding(name, host, jurisdiction, note);
+        return new DependencyFinding(name, host, jurisdiction, note)
+        {
+            Kind = HostJurisdiction.IsArtificialIntelligence(host)
+                ? DependencyKind.ArtificialIntelligence
+                : DependencyKind.Ordinary
+        };
     }
 
     /// <summary>

@@ -44,6 +44,9 @@ public sealed class SecurityHeadersPackageTests
         // module they report on is composed — a probe that exposes no readiness
         // endpoint and keeps no audit trail gets NotApplicable, not a finding.
         report.Latest.Select(result => result.Id).Should().Equal(
+            "noelia.ai.inventory",
+            "noelia.ai.record-keeping",
+            "noelia.ai.transfer",
             "noelia.audit.chain-scope",
             "noelia.composition.providers",
             "noelia.dataprotection.key-ring",

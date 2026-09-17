@@ -38,7 +38,7 @@ public sealed class OperatorReportTests
 
         report.Should().NotBeNull();
         report!.Service.Should().Be("dashboard-probe");
-        report.SchemaVersion.Should().Be(1,
+        report.SchemaVersion.Should().Be(2,
             "a reader that has to infer the format is one version away from misreading it");
         report.GeneratedAt.Should().NotBe(default);
     }
@@ -57,7 +57,7 @@ public sealed class OperatorReportTests
     {
         await using var app = await Open();
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
         var report = await Report(app);
 
         report.Composition.Modules.Should().NotBeEmpty();
@@ -147,7 +147,7 @@ public sealed class OperatorReportTests
         await using var app = await Open(services =>
             services.AddSingleton<IDistributedRateLimitStore, ThrowingRateLimitStore>());
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain("class=\"fail\">Rate-limit counters could not be inspected.",
             "an outage styled as a note is an outage nobody reacts to");
@@ -225,7 +225,7 @@ public sealed class OperatorReportTests
         // something to render — the page records who looked at it.
         await using var app = await Open(services => services.AddSovereignAuditTrail());
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
         var report = await Report(app);
 
         report.Audit.Latest.Should().NotBeEmpty();

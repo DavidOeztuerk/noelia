@@ -74,7 +74,7 @@ public sealed class MonolithTests : IDisposable
     [Fact]
     public async Task Dashboard_reports_the_real_monolith_composition_without_the_canary()
     {
-        var html = await _client.GetStringAsync("/noelia");
+        var html = await WholeDashboard(_client);
 
         html.Should().Contain("Dashboard");
         html.Should().Contain("PasswordHashing");
@@ -95,4 +95,41 @@ public sealed class MonolithTests : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Every section of the dashboard, fetched and joined.
+    /// </summary>
+    /// <remarks>
+    /// Since 6.4.0 each section is its own page, so "the dashboard shows X" is a
+    /// statement about a set of pages. Fetching all of them keeps that assertion
+    /// saying what it always said, and adds one it could not make before: every
+    /// section the navigation offers answers, rather than 404ing in somebody's
+    /// browser.
+    /// </remarks>
+    internal static async Task<string> WholeDashboard(HttpClient client, string root = "/noelia")
+    {
+        string[] sections =
+        [
+            "", "/composition", "/configuration", "/security", "/sovereignty", "/ai",
+            "/obligations", "/audit", "/sessions", "/rate-limits", "/health"
+        ];
+
+        var joined = new System.Text.StringBuilder();
+
+        foreach (var section in sections)
+        {
+            var response = await client.GetAsync(root + section);
+
+            if (response.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                throw new InvalidOperationException(
+                    $"The navigation links to {root}{section}, which answered {(int)response.StatusCode}.");
+            }
+
+            joined.Append(await response.Content.ReadAsStringAsync());
+        }
+
+        return joined.ToString();
+    }
+
 }

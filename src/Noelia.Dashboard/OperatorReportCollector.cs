@@ -188,7 +188,14 @@ internal static class OperatorReportCollector
                 result.Status.ToString(),
                 result.Severity.ToString(),
                 result.Summary,
-                result.Remediation))
+                result.Remediation)
+            {
+                References = [.. result.References.Select(reference => new RegulatoryReferenceView(
+                    reference.Regime.ToString(),
+                    reference.Citation,
+                    reference.Obligation,
+                    reference.Reader))]
+            })
             .ToArray();
 
         return results.Length == 0
@@ -238,7 +245,10 @@ internal static class OperatorReportCollector
                 dependency.Name,
                 dependency.Host,
                 dependency.Jurisdiction.ToString(),
-                dependency.Note))]
+                dependency.Note)
+            {
+                Kind = dependency.Kind.ToString()
+            })]
         };
     }
 

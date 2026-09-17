@@ -13,6 +13,7 @@
     <Project Path="src/Noelia.Http/Noelia.Http.csproj" />
     <Project Path="src/Noelia.Dashboard/Noelia.Dashboard.csproj" />
     <Project Path="src/Noelia.Infrastructure/Noelia.Infrastructure.csproj" />
+    <Project Path="src/Noelia.Cli/Noelia.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Noelia.Core.Tests/Noelia.Core.Tests.csproj" />

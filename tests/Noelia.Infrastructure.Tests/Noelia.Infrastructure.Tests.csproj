@@ -3,7 +3,6 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
@@ -16,6 +15,8 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- Compiles the snippet `noelia init` prints, rather than grepping it. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
@@ -29,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Noelia.Infrastructure/Noelia.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Noelia.Dashboard/Noelia.Dashboard.csproj" />
+    <ProjectReference Include="../../src/Noelia.Cli/Noelia.Cli.csproj" />
     <ProjectReference Include="../../src/Noelia.InMemory/Noelia.InMemory.csproj" />
     <ProjectReference Include="../../src/Noelia.Passwords.BCrypt/Noelia.Passwords.BCrypt.csproj" />
     <ProjectReference Include="../../src/Noelia.Passwords.Argon2/Noelia.Passwords.Argon2.csproj" />

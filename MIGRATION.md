@@ -1,3 +1,127 @@
+# Noelia 6.3.0 → 6.4.0
+
+Keine Breaking Changes. Alles Neue ist additiv, und das Schema des
+Operator-Berichts steht deshalb auf **2** statt auf einer anderen Form.
+
+## Neu: das Paket `Noelia.Cli`
+
+Das vierzehnte Paket, und das erste, das ein **Werkzeug** ist und keine
+Bibliothek:
+
+```bash
+dotnet tool install -g Noelia.Cli
+
+noelia analyze                     # dieses Verzeichnis, statisch
+noelia analyze --url http://localhost:5000/noelia
+noelia init --name billing --dry-run
+noelia mcp                         # der lesende Teil für einen MCP-Client
+```
+
+Ein NuGet-Paket ist das eine oder das andere und kann nicht beides sein: ein
+Werkzeug liegt unter `tools/<tfm>/any/`, eine Bibliothek unter `lib/<tfm>/`.
+Nichts, was eine Anwendung ausliefert, trägt also etwas davon — weshalb sein
+Abhängigkeits-Budget (32) groß sein darf, wo über jedes Bibliotheks-Budget
+gestritten wird.
+
+`analyze` schreibt nie, `init` schreibt nur und überschreibt nichts. Die
+Trennung ist die von Terraform und sie ist hier die richtige.
+
+**Der gedruckte Kompositionswurzel startet.** Ein Test kompiliert ihn mit
+Roslyn, und vor jedem Release läuft er in einem Wegwerfprojekt: `dotnet run`
+steht auf Production, das Dashboard wird deshalb nur außerhalb komponiert, und
+die Pipeline benennt ihre Schritte statt die Standardkette zu nehmen — deren
+`UseAuth()` braucht ein Authentifizierungsschema, das ein neuer Dienst noch
+nicht hat. Jedes davon war ein Absturz beim ersten Start, bevor es ein Kommentar
+in der Ausgabe war.
+
+**Was `analyze` statisch findet**, ist genau der Fehler, den dieses Repository
+immer wieder bei sich selbst findet: `AddRedisCache(...)` neben `AddNoelia(...)`
+statt `noelia.UseRedisCache(...)` darin. Die eingebauten Module registrieren
+ihren eigenen Provider während `Build()`, die frühere Registrierung wird
+überschrieben, und nichts sagt es. Die Liste der Paare ist im CLI fest
+hinterlegt und wird per Reflection gegen die ausgelieferten Assemblies geprüft —
+ein neues Paar bricht den Build, bis es dort steht.
+
+## Neu: Modell-Endpunkte als eigene Achse
+
+`DependencyFinding` hat jetzt ein `Kind`:
+
+```csharp
+foreach (var model in assessment.ArtificialIntelligenceDependencies)
+{
+    // Assistant  api.openai.com  ThirdCountryProvider
+}
+```
+
+`Kind` ist unabhängig von `Jurisdiction`, weil es zwei Fragen sind.
+`api.openai.com` ist beides, `api.mistral.ai` ist KI und nicht offensichtlich
+Drittland, ein S3-Bucket ist Drittland und keine KI. Beides in eine Achse zu
+falten würde jeden KI-Befund auch zu einem Jurisdiktions-Befund machen.
+
+Drei Prüfungen kommen dazu — `noelia.ai.inventory`, `noelia.ai.transfer`,
+`noelia.ai.record-keeping`. Alle in der Kategorie `Composition`, alle melden
+`NotApplicable`, wenn kein Modell-Endpunkt konfiguriert ist.
+
+**Die Erkennung erfolgt über den Hostnamen.** Ein Modell unter `ml.internal`
+oder hinter einem Gateway taucht nicht auf. Das Inventar ist eine Untergrenze,
+keine Obergrenze, und Seite wie Prüfsummary sagen das.
+
+## Neu: Prüfungen können Pflichten zitieren
+
+```csharp
+public override IReadOnlyList<RegulatoryReference> References =>
+[
+    RegulatoryReferences.GdprThirdCountryTransfer
+];
+```
+
+Ein `RegulatoryReference` trägt Regime, Artikel, Pflicht — und `Reader`: was ein
+Mensch danach immer noch entscheiden muss. `Reader` ist nie leer. Ein Zitat, das
+seinen eigenen Artikel erledigte, wäre genau die Anmaßung, gegen die das ganze
+Vokabular existiert.
+
+`RegulatoryReferences.All` nennt zehn Pflichten aus DSGVO, EU AI Act, NIS2 und
+DORA. **Noelia stellt keine Konformität fest** und kann es nicht: ein Programm
+zeigt, dass ein Protokoll existiert, automatisch entsteht und nicht verändert
+wurde — nicht, ob ein AV-Vertrag taugt.
+
+Souveränität steht absichtlich nicht in `RegulatoryRegime`. Keine Verordnung
+verlangt sie.
+
+## Geändert: das Dashboard hat jetzt eine Seite pro Abschnitt
+
+`/noelia` zeigt eine Übersicht; jeder Abschnitt hat eine eigene Adresse —
+`/noelia/composition`, `/noelia/security`, `/noelia/sovereignty`, `/noelia/ai`,
+`/noelia/obligations`, `/noelia/audit`, `/noelia/sessions`,
+`/noelia/rate-limits`, `/noelia/health`.
+
+Ein Pfad unter der Wurzel, der keinen Abschnitt benennt, antwortet **404** statt
+die Übersicht unter falscher Adresse zu rendern.
+
+**Wenn Sie die Seite in Tests gegen ihren Inhalt prüfen**, holt ein Test, der
+bisher `/noelia` las, jetzt nur noch die Übersicht. Entweder den Abschnitt
+gezielt holen, oder alle holen und zusammenfügen — der Testhelfer
+`WholeDashboard()` in diesem Repository macht das Zweite und prüft dabei, dass
+jeder Link der Navigation auch antwortet.
+
+`OperatorReport.SchemaVersion` steht auf `2`. Beide neuen Felder haben
+Standardwerte, ein Leser von Version 1 parst ein Version-2-Dokument also weiter
+und sieht nur keine Zitate.
+
+## Behoben: eine Composition-Prüfung lief im Standalone-Dashboard nie
+
+`StandaloneDashboardSecurityReport` — der Pfad hinter `AddNoeliaDashboard(...)`
+ohne Engine — wählte Prüfungen allein nach Modul aus. `SecurityCheckRunner`
+wählt nach `Category == Composition` **oder** Modul. Eine Prüfung der Kategorie
+`Composition` läuft, egal ob ihr Modul komponiert wurde; genau das bedeutet die
+Kategorie.
+
+Wer eine eigene solche Prüfung in einen reinen Dashboard-Host registrierte, bekam
+also eine Prüfung, die registriert war, nie lief und nichts meldete. Wieder
+derselbe Fehler: vorhanden, aber nicht wirksam.
+
+---
+
 # Noelia 6.2.0 → 6.3.0
 
 Beides beim Anbinden eines **fremden** Dienstes gefunden — eines, der nicht aus

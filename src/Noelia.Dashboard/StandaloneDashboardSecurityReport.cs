@@ -18,7 +18,15 @@ internal sealed class StandaloneDashboardSecurityReport(
         var active = composition.Included.ToHashSet();
         var results = new List<SecurityCheckResult>();
 
-        foreach (var check in checks.Where(check => active.Contains(check.Module)))
+        // The same rule SecurityCheckRunner applies, and it has to stay the same
+        // rule. A Composition-category check runs whether or not its module was
+        // composed — that is what the category means — and this class selected
+        // only by module, so a consumer who added one to a dashboard-only host
+        // got a check that was registered, never ran, and reported nothing to
+        // say it had not.
+        foreach (var check in checks.Where(check =>
+                     check.Category == SecurityCheckCategory.Composition
+                     || active.Contains(check.Module)))
         {
             try
             {
@@ -37,7 +45,10 @@ internal sealed class StandaloneDashboardSecurityReport(
                     SecurityCheckStatus.Fail,
                     check.Severity,
                     "The check could not complete.",
-                    check.Remediation));
+                    check.Remediation)
+                {
+                    References = check.References
+                });
             }
         }
 
