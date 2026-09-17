@@ -215,6 +215,19 @@ not an ancestor of `origin/main`, or not matching `<VersionPrefix>` in
 via OIDC Trusted Publishing (no stored API key). `docs/RELEASE-GATE-5.0.md`
 describes the out-of-repo acceptance gate against a real consumer project.
 
+## Skills
+
+`.claude/skills/` holds three, and they are the short form of this file for the
+three things most often done here:
+
+- `noelia-release` — the release gate in order, including the steps that have
+  actually been forgotten (the demo version pin, the NuGet cache purge,
+  ContosoInvoicing)
+- `noelia-evidence` — what may legally be claimed when mapping observations to
+  regulation, the required wording, and which duties are machine-checkable
+- `noelia-module` — the composition rules and the "registered but not effective"
+  defect class
+
 ## Docs map
 
 - `docs/MASTERPLAN-5.0.md` — why 5.0 is a major, and the five decisions behind it

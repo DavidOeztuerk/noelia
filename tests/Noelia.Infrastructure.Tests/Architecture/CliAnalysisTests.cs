@@ -206,6 +206,27 @@ public class CliAnalysisTests : IDisposable
     }
 
     [Fact]
+    public void A_reserved_loopback_name_is_not_reported_as_a_destination()
+    {
+        Write("App.csproj", Engine);
+        Write("appsettings.json", """
+            {
+              "Services": {
+                "Users": "http://users.localhost:8080",
+                "Payments": "https://api.stripe.com"
+              }
+            }
+            """);
+
+        var observations = string.Join("\n", ProjectScan.Run(_root).Observations);
+
+        observations.Should().Contain("api.stripe.com");
+        observations.Should().NotContain("users.localhost",
+            "RFC 6761 reserves .localhost for loopback, and a compose file full of such "
+            + "names buries the one line that was not about this machine");
+    }
+
+    [Fact]
     public void A_project_with_no_noelia_in_it_produces_nothing()
     {
         Write("App.csproj", """

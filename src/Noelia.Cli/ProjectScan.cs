@@ -425,9 +425,15 @@ internal static class ProjectScan
 
         // Destinations, so the reader can see what this configuration reaches
         // before the service has ever run.
+        //
+        // .localhost is excluded along with 127.0.0.1: RFC 6761 reserves it for
+        // loopback, and a compose file full of service.localhost names produced
+        // thirty observations that all said "this machine". A list nobody reads
+        // to the end hides the one line that was not about this machine.
         if (Uri.TryCreate(text, UriKind.Absolute, out var uri)
             && uri.Scheme is "http" or "https"
-            && !uri.IsLoopback)
+            && !uri.IsLoopback
+            && !uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
         {
             observations.Add($"{file} · {path} points at {uri.Host}");
         }
