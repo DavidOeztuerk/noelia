@@ -219,3 +219,40 @@ test("the login endpoint refuses a caller who keeps guessing", async ({ page }) 
   // 401 before that: the limit refuses the caller, it does not accept them.
   expect(statuses.filter((status) => status === 200)).toHaveLength(0);
 });
+
+/**
+ * A form that is submittable before its handler exists is a form that submits
+ * natively — a GET to the current URL with every field in the query string. On
+ * the sign-in form that is the password, in the address bar, the history and
+ * the proxy log.
+ *
+ * Found by blocking the page module and clicking submit. The CSP's
+ * `form-action 'none'` blocked the navigation, which is what defence in depth
+ * is for, but it left one directive standing between a password and a URL —
+ * and the page silently doing nothing.
+ */
+test("a submit button does nothing until the code behind it is loaded", async ({ page }) => {
+  await page.route("**/js/pages/login.js", (route) => route.abort());
+  await page.goto("/login");
+
+  const submit = page.getByRole("button", { name: "Anmelden" });
+  await expect(submit).toBeDisabled();
+
+  await page.unroute("**/js/pages/login.js");
+  await page.goto("/login");
+  await expect(submit).toBeEnabled();
+});
+
+test("completing a todo is announced, not only drawn", async ({ page }) => {
+  await register(page, credentials());
+
+  await page.getByLabel("Titel").fill("etwas zu tun");
+  await page.getByRole("button", { name: "Anlegen" }).click();
+  await expect(page.getByRole("status")).toHaveText(/angelegt/);
+
+  await page.getByRole("button", { name: "Erledigen" }).click();
+
+  // Somebody listening to the page gets told. Before this it kept saying
+  // "Aufgabe angelegt." from whenever the last one was created.
+  await expect(page.getByRole("status")).toHaveText(/erledigt/i);
+});

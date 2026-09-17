@@ -11,6 +11,22 @@ export class FormController {
     this.form = form;
     this.onSubmit = onSubmit;
     this.form.addEventListener("submit", (event) => this.#handle(event));
+
+    // The submit button ships disabled and is enabled here, once something
+    // exists to handle the submit.
+    //
+    // Until this ran, the form was an ordinary submittable <form> with no
+    // action, so a submit before the module loaded became a GET to the current
+    // URL with every field in the query string — on the sign-in form, that put
+    // the password in the address bar, the history and the proxy log. The CSP's
+    // `form-action 'none'` blocked the navigation, which is exactly what
+    // defence in depth is for, but it left the page silently doing nothing and
+    // put one directive between a password and a URL.
+    for (const button of this.form.querySelectorAll("[data-needs-js]")) {
+      button.disabled = false;
+      button.removeAttribute("aria-disabled");
+      button.removeAttribute("title");
+    }
   }
 
   /**

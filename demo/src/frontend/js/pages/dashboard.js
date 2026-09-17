@@ -74,6 +74,12 @@ class DashboardPage extends Page {
   async #complete(todoId) {
     await this.guard(async () => {
       await this.todos.complete(todoId);
+
+      // Say so. The list rerenders and the button changes to "Erledigt", which
+      // is enough for somebody watching the screen and nothing at all for
+      // somebody listening to it — the live region kept announcing "Aufgabe
+      // angelegt." from whenever the last one was created.
+      this.notice.info("Aufgabe erledigt.");
       this.list.render(await this.todos.list());
     });
   }
