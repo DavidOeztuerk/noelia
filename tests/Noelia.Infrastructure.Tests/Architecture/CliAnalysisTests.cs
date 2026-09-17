@@ -188,6 +188,24 @@ public class CliAnalysisTests : IDisposable
     }
 
     [Fact]
+    public void The_json_a_gate_reads_names_its_severities()
+    {
+        Write("App.csproj", Engine);
+        Write("Program.cs", "services.AddNoelia(configuration, environment, \"app\", n => n);");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            ProjectScan.Run(_root),
+            new System.Text.Json.JsonSerializerOptions(
+                System.Text.Json.JsonSerializerDefaults.Web));
+
+        json.Should().Contain("\"severity\":\"Problem\"",
+            "this JSON goes to CI gates and to assistants that do not have the source; an "
+            + "ordinal is a value whose meaning lives where they cannot read it");
+
+        json.Should().NotContain("\"severity\":2");
+    }
+
+    [Fact]
     public void A_project_with_no_noelia_in_it_produces_nothing()
     {
         Write("App.csproj", """

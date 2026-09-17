@@ -1,6 +1,14 @@
 namespace Noelia.Cli;
 
 /// <summary>How much a finding matters.</summary>
+/// <remarks>
+/// Serialised as its name. The JSON goes to CI gates and to assistants that do
+/// not have this source, and a bare <c>2</c> is a value whose meaning lives
+/// where they cannot read it — and changes the day somebody adds a level in the
+/// middle.
+/// </remarks>
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<FindingSeverity>))]
 public enum FindingSeverity
 {
     /// <summary>Worth knowing. Nothing is wrong.</summary>
