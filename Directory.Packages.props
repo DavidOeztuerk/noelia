@@ -30,7 +30,16 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+
+    <!--
+      The MCP server the CLI exposes. Only Noelia.Cli takes it, and the CLI is a
+      tool package: nothing a consumer ships carries this or its transitive
+      load, which is why it does not have to be argued for the way a library
+      dependency does.
+    -->
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
   </ItemGroup>
 

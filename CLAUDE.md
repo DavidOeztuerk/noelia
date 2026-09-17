@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Noelia is a set of 13 NuGet packages that form a shared foundation for .NET
+Noelia is a set of 14 NuGet packages that form a shared foundation for .NET
 microservices (CQRS pipeline, security/identity, caching, messaging, health,
-resilience, observability). Targets `net10.0`; version `6.3.0`.
+resilience, observability), plus `Noelia.Cli` — a **tool** package (`noelia
+init`, `noelia analyze`, `noelia mcp`), not a library. Targets `net10.0`;
+version `6.4.0`.
 
 The library itself has nothing to run but its tests. `demo/` holds a consumer:
 one todo application built twice (microservices behind a gateway, and a
@@ -204,7 +206,7 @@ habits keep it out:
 
 ## Releasing
 
-SemVer, all 13 packages shipped under one version. A breaking change is
+SemVer, all 14 packages shipped under one version. A breaking change is
 announced as `[Obsolete]` in a minor release before it is removed in the next
 major. `.github/workflows/publish.yml` runs on a published GitHub release (tag
 `vX.Y.Z`) or manual dispatch; it refuses anything that is not stable SemVer,

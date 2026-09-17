@@ -1,3 +1,4 @@
+using Noelia.Abstractions.Compliance;
 using Noelia.Abstractions.Hosting;
 
 namespace Noelia.Abstractions.Security.Checks;
@@ -31,7 +32,19 @@ public enum SecurityCheckCategory
     Secrets,
     Encryption,
     AbusePrevention,
-    Revocation
+    Revocation,
+
+    /// <summary>
+    /// What the service does with artificial intelligence, and what that
+    /// obliges its operator to keep.
+    /// </summary>
+    /// <remarks>
+    /// Its own boundary rather than a case of <see cref="Secrets"/> or
+    /// <see cref="Encryption"/>, because the duties attached to it come from a
+    /// different law and land on a different desk. An operator who wants to
+    /// know what the AI Act asks of them should be able to read one category.
+    /// </remarks>
+    ArtificialIntelligence
 }
 
 /// <summary>A value-free security finding safe to show in operator tooling.</summary>
@@ -47,7 +60,24 @@ public sealed record SecurityCheckResult(
     SecurityCheckStatus Status,
     SecurityCheckSeverity Severity,
     string Summary,
-    string Remediation);
+    string Remediation)
+{
+    /// <summary>
+    /// The obligations this result is evidence for, if any.
+    /// </summary>
+    /// <remarks>
+    /// <para>Optional, and empty for most checks. A citation belongs on a check
+    /// only where the article genuinely asks about the thing the check
+    /// measures — attaching one to every result would turn the mapping into
+    /// decoration, and a reader who finds one decorative citation stops
+    /// trusting the rest.</para>
+    ///
+    /// <para>Declared by the check itself rather than looked up from a table
+    /// keyed by <see cref="Id"/>, so that renaming a check cannot silently
+    /// detach it from the obligation it was written for.</para>
+    /// </remarks>
+    public IReadOnlyList<RegulatoryReference> References { get; init; } = [];
+}
 
 /// <summary>One explicitly executable security assertion.</summary>
 public interface ISecurityCheck
@@ -57,6 +87,11 @@ public interface ISecurityCheck
     SecurityCheckCategory Category { get; }
     SecurityCheckSeverity Severity { get; }
     string Remediation { get; }
+
+    /// <summary>
+    /// The obligations this check produces evidence for. Empty by default.
+    /// </summary>
+    IReadOnlyList<RegulatoryReference> References => [];
 
     Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default);
 }

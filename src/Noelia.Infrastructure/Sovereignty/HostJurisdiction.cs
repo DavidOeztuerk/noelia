@@ -48,6 +48,49 @@ public static class HostJurisdiction
     ];
 
     /// <summary>
+    /// Hosts that serve a model or an inference API.
+    /// </summary>
+    /// <remarks>
+    /// <para>Separate from <see cref="ThirdCountryDomains"/> because the two
+    /// questions are separate, and the answers cross: <c>api.openai.com</c> is
+    /// both, <c>api.mistral.ai</c> is AI and not obviously third-country, and
+    /// an S3 bucket is third-country and not AI. Folding them into one list
+    /// would make every AI finding also a jurisdiction finding, which is how a
+    /// register starts telling people things that are not true.</para>
+    ///
+    /// <para><strong>What this cannot see.</strong> A model served from
+    /// <c>ml.internal</c> or from a name the operator chose is invisible here,
+    /// and so is one reached through a gateway. The inventory therefore has a
+    /// floor, not a ceiling: everything it lists is an AI destination, and it
+    /// does not claim to list every one. The check that reports it says exactly
+    /// that, because an AI inventory that looks exhaustive and is not is the
+    /// worst possible input to an Article 26 assessment.</para>
+    /// </remarks>
+    private static readonly string[] ArtificialIntelligenceDomains =
+    [
+        // Model APIs.
+        ".openai.com", ".anthropic.com", ".mistral.ai", ".cohere.ai", ".cohere.com",
+        ".groq.com", ".deepseek.com", ".x.ai", ".together.xyz", ".together.ai",
+        ".perplexity.ai", ".fireworks.ai", ".anyscale.com", ".replicate.com",
+        ".aleph-alpha.com", ".ai21.com", ".voyageai.com",
+
+        // Hyperscaler model surfaces. The parent domains already appear as
+        // third-country; these narrower names add the second fact.
+        ".openai.azure.com", ".cognitiveservices.azure.com",
+        ".bedrock.amazonaws.com", ".sagemaker.amazonaws.com",
+        "generativelanguage.googleapis.com", "aiplatform.googleapis.com",
+
+        // Weights, inference and evaluation infrastructure.
+        ".huggingface.co", ".hf.co", ".modal.run", ".runpod.io",
+        ".langsmith.com", ".smith.langchain.com", ".wandb.ai",
+
+        // Speech, vision and embedding services, which are AI systems under the
+        // Act whether or not anyone in the building calls them that.
+        ".elevenlabs.io", ".deepgram.com", ".assemblyai.com", ".stability.ai",
+        ".clarifai.com", ".pinecone.io", ".weaviate.cloud", ".qdrant.tech"
+    ];
+
+    /// <summary>
     /// Endings that mean a value is a file on disk rather than a name in DNS.
     /// </summary>
     /// <remarks>
@@ -144,6 +187,35 @@ public static class HostJurisdiction
 
         return (Jurisdiction.Undetermined,
             "Public name; who operates it and under which law cannot be told from the name.");
+    }
+
+    /// <summary>
+    /// Whether this host is known to serve a model or an inference API.
+    /// </summary>
+    /// <remarks>
+    /// A name-based answer, so <c>false</c> means "not recognised" and never
+    /// "not an AI system". Callers are expected to say so where they show it.
+    /// </remarks>
+    /// <param name="host">The host, without scheme, credentials or port.</param>
+    public static bool IsArtificialIntelligence(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        foreach (var domain in ArtificialIntelligenceDomains)
+        {
+            var apex = domain.TrimStart('.');
+
+            if (host.EndsWith(domain, StringComparison.OrdinalIgnoreCase)
+                || host.Equals(apex, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Whether this is plainly a path rather than a host.</summary>

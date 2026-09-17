@@ -127,7 +127,14 @@ internal sealed partial class SecurityCheckRunner(
         SecurityCheckStatus.Fail,
         check.Severity,
         summary,
-        check.Remediation);
+        check.Remediation)
+    {
+        // Kept even here. A check that failed to run is still evidence about the
+        // article it was written for — evidence that nothing is known — and
+        // dropping the citation would quietly remove the obligation from the
+        // mapping instead of showing it unanswered.
+        References = check.References
+    };
 
     private static void EnsureUniqueStableIds(IReadOnlyList<ISecurityCheck> checks)
     {
@@ -177,5 +184,8 @@ internal static class SecurityCheckResultFactory
             status,
             severity ?? check.Severity,
             summary,
-            check.Remediation);
+            check.Remediation)
+        {
+            References = check.References
+        };
 }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Noelia.Abstractions.Caching;
+using Noelia.Abstractions.Compliance;
 using Noelia.Abstractions.Hosting;
 using Noelia.Infrastructure.Sovereignty;
 using Noelia.Abstractions.Security;
@@ -28,6 +29,14 @@ internal abstract class SecurityCheckBase : ISecurityCheck
     public abstract SecurityCheckCategory Category { get; }
     public abstract SecurityCheckSeverity Severity { get; }
     public abstract string Remediation { get; }
+
+    /// <summary>
+    /// The obligations this check produces evidence for. Empty unless a check
+    /// states otherwise, because most of them are about a property nobody
+    /// legislated.
+    /// </summary>
+    public virtual IReadOnlyList<RegulatoryReference> References => [];
+
     public abstract Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default);
 
     protected SecurityCheckResult Result(

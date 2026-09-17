@@ -26,11 +26,17 @@ public sealed record OperatorReport
 {
     /// <summary>The shape of this document, so a reader need not guess.</summary>
     /// <remarks>
-    /// A fleet view reads instances running different Noelia versions side by
-    /// side. Without a version it has to infer the format from its contents,
-    /// and inference about a format is where quiet misreading starts.
+    /// <para>A fleet view reads instances running different Noelia versions side
+    /// by side. Without a version it has to infer the format from its contents,
+    /// and inference about a format is where quiet misreading starts.</para>
+    ///
+    /// <para>Version 2 added regulatory references to a check result and a kind
+    /// to a dependency. Both are additions with defaults, so a reader written
+    /// for version 1 still parses a version 2 document and simply sees no
+    /// citations — which is why the number went up rather than the shape
+    /// changing.</para>
     /// </remarks>
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
 
     /// <summary>When this report was taken.</summary>
     public DateTimeOffset GeneratedAt { get; init; }
@@ -215,7 +221,22 @@ public sealed record SecurityCheckResultView(
     string Status,
     string Severity,
     string Summary,
-    string Remediation);
+    string Remediation)
+{
+    /// <summary>The obligations this result is evidence for, if any.</summary>
+    public IReadOnlyList<RegulatoryReferenceView> References { get; init; } = [];
+}
+
+/// <summary>One obligation an observation speaks to.</summary>
+/// <param name="Regime">The body of law — <c>Gdpr</c>, <c>AiAct</c>, <c>Nis2</c>, <c>Dora</c>.</param>
+/// <param name="Citation">How it is cited, such as <c>GDPR Art. 30(1)(d), (e)</c>.</param>
+/// <param name="Obligation">What that article asks for.</param>
+/// <param name="Reader">What a person still has to decide.</param>
+public sealed record RegulatoryReferenceView(
+    string Regime,
+    string Citation,
+    string Obligation,
+    string Reader);
 
 /// <summary>Where this instance may reach, and under whose jurisdiction.</summary>
 /// <remarks>
@@ -254,7 +275,14 @@ public sealed record DependencyView(
     string Name,
     string? Host,
     string Jurisdiction,
-    string Note);
+    string Note)
+{
+    /// <summary>
+    /// <c>Ordinary</c>, or <c>ArtificialIntelligence</c> for a recognised model
+    /// or inference endpoint.
+    /// </summary>
+    public string Kind { get; init; } = "Ordinary";
+}
 
 /// <summary>The audit trail, as far as this instance can account for it.</summary>
 public sealed record AuditView

@@ -13,6 +13,14 @@ public class PackageDependencyBudgetTests
         {
             ["Noelia.Abstractions"] = 8,
             ["Noelia.Application"] = 4,
+
+            // The one package here that is a tool rather than a library. Nothing
+            // a consumer ships carries any of this: it is installed with
+            // `dotnet tool install -g Noelia.Cli` and run, never referenced. So
+            // its budget is pinned for the same reason as the others — growth
+            // should be a decision — but the number itself is allowed to be
+            // large where a library's is argued over.
+            ["Noelia.Cli"] = 32,
             ["Noelia.Contracts"] = 0,
             ["Noelia.Core"] = 0,
             ["Noelia.Data.EntityFrameworkCore"] = 19,

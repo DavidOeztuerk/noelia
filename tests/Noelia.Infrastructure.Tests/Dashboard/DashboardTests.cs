@@ -111,7 +111,7 @@ public sealed class DashboardTests
             options => options.VisibleTo(_ => true).InProduction(reason),
             Environments.Production);
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain(reason);
         html.Should().NotContain("characters",
@@ -141,7 +141,7 @@ public sealed class DashboardTests
     {
         await using var app = await DashboardHost.Start(options => options.VisibleTo(_ => true));
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().NotContain("Production exposure reason");
     }
@@ -209,7 +209,7 @@ public sealed class DashboardTests
             noelia.Build();
         });
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain("Probe.Passive");
         html.Should().Contain("Running, but its contract declares no requirement or provided effect.");
@@ -236,7 +236,7 @@ public sealed class DashboardTests
             noelia.Build();
         });
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain("IMissingProvider");
         html.Should().Contain("missing");
@@ -257,7 +257,7 @@ public sealed class DashboardTests
             options => options.VisibleTo(_ => true),
             configuration: configuration);
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().NotContain(Canary);
         html.Should().NotContain("https://internal.example");
@@ -276,7 +276,7 @@ public sealed class DashboardTests
                 Finding("noelia.jwt.must-not-appear", NoeliaModule.Jwt)
             ])));
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain("noelia.dashboard.expected");
         html.Should().NotContain("noelia.jwt.must-not-appear");
@@ -347,7 +347,7 @@ public sealed class DashboardTests
         await rateLimits.SlidingWindowIncrementAsync(rateKey, 1, TimeSpan.FromMinutes(1));
         await rateLimits.SlidingWindowIncrementAsync(rateKey, 1, TimeSpan.FromMinutes(1));
 
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         html.Should().Contain("Instance chain at write time:");
         html.Should().Contain(signIn.Session.ToString());
@@ -370,14 +370,18 @@ public sealed class DashboardTests
 
         var composition = app.Host.Services.GetRequiredService<NoeliaComposition>();
         var report = app.Host.Services.GetRequiredService<ISecurityCheckReport>();
-        var html = await app.Client.GetStringAsync("/noelia");
+        var html = await app.WholeDashboard();
 
         composition.Included.Should().Equal(NoeliaModule.Dashboard);
         report.Latest.Select(result => result.Module).Should()
-            // Five Composition-category checks run everywhere: providers,
+            // Eight Composition-category checks run everywhere: providers,
             // readiness coverage, the data protection key ring, the scope of
-            // the audit chain, and the egress guard.
+            // the audit chain, the egress guard, and the three that answer for
+            // model endpoints — inventory, transfer and record-keeping.
             .BeEquivalentTo([
+                NoeliaModule.Composition,
+                NoeliaModule.Composition,
+                NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,

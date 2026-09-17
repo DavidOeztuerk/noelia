@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Noelia.Infrastructure/Noelia.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Noelia.Dashboard/Noelia.Dashboard.csproj" />
+    <ProjectReference Include="../../src/Noelia.Cli/Noelia.Cli.csproj" />
     <ProjectReference Include="../../src/Noelia.InMemory/Noelia.InMemory.csproj" />
     <ProjectReference Include="../../src/Noelia.Passwords.BCrypt/Noelia.Passwords.BCrypt.csproj" />
     <ProjectReference Include="../../src/Noelia.Passwords.Argon2/Noelia.Passwords.Argon2.csproj" />

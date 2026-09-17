@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A tool, not a library. A NuGet package is one or the other and cannot be
+    both: a tool ships under tools/<tfm>/any/ with an entry point, a library
+    under lib/<tfm>/, and the two layouts are mutually exclusive. So this is its
+    own package, installed with `dotnet tool install -g Noelia.Cli` and never
+    referenced by an application.
+
+    Which is also why its dependency load is allowed to be large where every
+    library package's is argued over: nothing a consumer ships takes any of it.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>noelia</ToolCommandName>
+    <PackageId>Noelia.Cli</PackageId>
+    <Description>
+      The Noelia command line: set a project up, read what a composition
+      actually does, and answer the same questions to an MCP client.
+    </Description>
+    <PackageTags>$(PackageTags);cli;dotnet-tool;mcp</PackageTags>
+
+    <!-- A console tool has no XML documentation to ship. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>

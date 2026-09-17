@@ -33,10 +33,16 @@ the application's composition root.
 | `Noelia.Passwords.Argon2` | Argon2id, where custom hardware is part of the threat | Konscious | 10 |
 | `Noelia.Messaging.MassTransit` | Event bus, correlation filters, broker health | MassTransit 8, RabbitMQ | 4 |
 | `Noelia.Data.EntityFrameworkCore` | Id converters, tenant filters, readiness probe, exception mapping, **refresh token store** | EF Core (no database provider) | 19 |
+| `Noelia.Cli` | The `noelia` command: `init`, `analyze`, and an MCP server — **a tool, not a library** | ModelContextProtocol | 32² |
 
 ¹ Direct and transitive NuGet packages in the restored `net10.0` graph. An
 architecture test pins every number, including zero, so dependency growth is a
 reviewed decision rather than an invisible side effect.
+
+² `Noelia.Cli` is installed with `dotnet tool install -g Noelia.Cli` and never
+referenced by an application, so nothing you ship carries any of it. Its budget
+is pinned for the same reason as the others — growth should be a decision — but
+the number is allowed to be large where a library's is argued over.
 
 Dependencies point inward, as Clean Architecture requires. `Noelia.Core`,
 `Noelia.Contracts` and `Noelia.Abstractions` are held to that by a build
@@ -1206,7 +1212,11 @@ evaluates `VisibleTo`, so role and claim policies work even though the dashboard
 startup filter is registered ahead of application middleware. Authentication
 errors fail closed as the same empty `404`.
 
-The reason itself is not rendered; only the fact and its character count are.
+The reason is rendered in full. Until 5.1.0 the page printed its length instead,
+which let it say anything at all without a reader ever seeing it — and the person
+looking at this page is exactly the one who has to judge whether the stated
+exposure still holds.
+
 Every authorized page or asset request is written to `IAuditTrailService` when
 one is registered. If that registered trail cannot accept the event, the
 dashboard fails closed with `503`. A missing audit trail remains visible as a
@@ -1214,16 +1224,38 @@ security warning rather than silently pretending access was recorded.
 
 The page is GET/HEAD-only and sends `Cache-Control: no-store` plus a restrictive
 CSP. It identifies the service, environment and answering machine, because
-audit chains, observed sessions and in-process counters are per instance. It
-shows:
+audit chains, observed sessions and in-process counters are per instance.
 
-- active modules and verbatim reasons recorded by `Without`;
-- each module's requirements, provider remedies, provisions and active readers;
-- configuration keys only as `set` or `no explicit value`, without value lengths;
-- security results only for the composition plus its universal composition check;
-- sovereignty findings and declared egress hosts;
-- a state-free audit view, token-free session observations, HMAC-fingerprinted
-  rate-limit counters and health results without descriptions, data or exceptions.
+### One section, one address
+
+Since 6.4.0 each section is its own page under the dashboard root, with a link
+you can paste into a ticket:
+
+| Path | What is on it |
+|---|---|
+| `/noelia` | One line per section: its state and what is in it |
+| `/noelia/composition` | Active modules, verbatim `Without` reasons, each contract's requirements, provider remedies, provisions and active readers |
+| `/noelia/configuration` | Keys as `set` or `no explicit value`, never a value or a length |
+| `/noelia/security` | Every check that ran for this composition, plus the universal composition checks |
+| `/noelia/sovereignty` | Declared egress hosts and every destination with its jurisdiction |
+| `/noelia/ai` | Recognised model endpoints, the AI checks, and what a person still has to decide |
+| `/noelia/obligations` | Which observation is evidence for which article — and what it does not settle |
+| `/noelia/audit` | A state-free audit view, chain validity and length |
+| `/noelia/sessions` | Token-free session observations |
+| `/noelia/rate-limits` | HMAC-fingerprinted counters |
+| `/noelia/health` | Probe results without descriptions, data or exceptions |
+
+The navigation carries a dot on any section holding a failing check, an
+unenforced egress boundary, a broken chain or an unhealthy probe, so a reader on
+one page still learns that another has something to say. Nothing else earns a
+dot: a mark that appears for ordinary states is one people learn to ignore.
+
+A path under the root that names no section answers `404` rather than rendering
+the overview, so a typo does not become a second URL for the same page.
+
+`/noelia/report.json` is the same reading as a document; `/noelia/audit-chain.json`
+recomputes the chain on request. Both sit behind the same authentication,
+visibility rule and audit entry as the pages.
 
 The default audit view can prove only that this process produced a valid chain
 at write time. It says “persisted sink not verified” because the write-only sink
@@ -1572,6 +1604,165 @@ that deliberately calls outward drops it with a reason — and then nothing of i
 is set up.
 
 Full detail in [SOVEREIGNTY.md](SOVEREIGNTY.md).
+
+## Artificial intelligence
+
+A destination that serves a model or an inference API is a second fact about the
+same host, on an axis of its own:
+
+```csharp
+builder.Services.AddNoeliaSovereigntyReport(
+    new DeclaredDependency("Assistant", configuration["Assistant:Endpoint"]));
+
+var assessment = app.Services.GetRequiredService<ISovereigntyReport>().Assess();
+
+foreach (var model in assessment.ArtificialIntelligenceDependencies)
+{
+    // Assistant  api.openai.com  ThirdCountryProvider
+}
+```
+
+`DependencyKind.ArtificialIntelligence` is independent of `Jurisdiction` because
+the two questions are: `api.openai.com` is both, `api.mistral.ai` is AI and not
+obviously third-country, and an S3 bucket is third-country and not AI. Folding
+them into one axis would make every AI finding also a jurisdiction finding.
+
+Three checks follow from it, all in the `Composition` category so they run
+wherever Noelia does:
+
+| Check | What it answers |
+|---|---|
+| `noelia.ai.inventory` | Which configured destinations are model endpoints. Passes with the list, or passes with none. |
+| `noelia.ai.transfer` | Whether any of them sits under a third country's access law, or under a name whose operator cannot be told. |
+| `noelia.ai.record-keeping` | Whether what the service records about its model calls is written automatically and can be shown not to have been edited. |
+
+Where no model endpoint is configured, the last two report `NotApplicable`
+rather than passing: a green tick against an article that does not apply is
+noise in the one document meant to cut through it.
+
+### What the inventory is not
+
+Recognition is **by host name**. It finds the SDK somebody added last week and
+it does not find a model served from `ml.internal`, from a name you chose, or
+through a gateway. So the inventory is a floor, not a ceiling, and both the page
+and the check summary say so — an inventory read as exhaustive when it is not is
+the worst possible input to an assessment.
+
+## Obligations, and what a program cannot tell you
+
+A check can declare the obligations its observation is evidence for:
+
+```csharp
+public override IReadOnlyList<RegulatoryReference> References =>
+[
+    RegulatoryReferences.GdprThirdCountryTransfer,
+    RegulatoryReferences.GdprProcessorContract
+];
+```
+
+Each reference carries four things, and the fourth is the point:
+
+```csharp
+new RegulatoryReference(
+    RegulatoryRegime.Gdpr,
+    "Chapter V (Art. 44–49)",
+    "A transfer of personal data to a third country requires an adequacy "
+    + "decision, appropriate safeguards, or a derogation.",
+    Reader: "Which safeguard covers this destination, and whether a transfer "
+          + "impact assessment exists for it.");
+```
+
+`Reader` is never empty. A reference that settled its own article by itself
+would be the overreach the whole vocabulary exists to avoid.
+
+`RegulatoryReferences.All` holds the ten obligations Noelia cites, across GDPR,
+the EU AI Act, NIS2 and DORA. `/noelia/obligations` renders the mapping with the
+citation, what the article asks for, the checks that evidence it, and what a
+person still decides — in one table, so it cannot be screenshotted into a claim
+it does not make.
+
+**Noelia states no compliance.** A program can show that a record exists, is
+automatic, and has not been edited; that a host resolves to a given
+jurisdiction; that a dependency was declared or was not. It cannot show that a
+processing agreement is adequate, that a risk assessment is any good, or that a
+use case was classified correctly. Those are the reader's, and every citation
+says which of them it leaves open.
+
+Sovereignty is deliberately absent from `RegulatoryRegime`: no regulation
+requires it. It is a decision an operator makes, and the sovereignty evidence
+cites obligations it happens to support rather than one that demands it.
+
+## The `noelia` command
+
+```bash
+dotnet tool install -g Noelia.Cli
+```
+
+`Noelia.Cli` is a tool package, so nothing your application ships carries any of
+it.
+
+### `noelia analyze` — reads, never writes
+
+```bash
+noelia analyze                          # this directory, statically
+noelia analyze --format json            # for CI
+noelia analyze --url http://localhost:5000/noelia --operator-secret "$SECRET"
+```
+
+Two readings of the same questions. A **directory** is read statically: literal
+calls and configuration files, which means it sees `noelia.UseRedisCache("x")`
+and does not see `noelia.Use(configuration["Module"])`. A **URL** reads the
+report a running service publishes, which is the composition that actually
+happened — authoritative wherever a service is up.
+
+What the static reading looks for:
+
+| Finding | Why it matters |
+|---|---|
+| `noelia.provider.eager` | `AddRedisCache(...)` beside `AddNoelia(...)`. The built-in modules register their own provider during `Build()`, so the eager call is overwritten and nothing says so. |
+| `noelia.composition.absent` | `Noelia.Infrastructure` is referenced and `AddNoelia(...)` is never called. |
+| `noelia.pipeline.absent` | `AddNoelia(...)` without `UseNoelia(...)`: none of the middleware is in the request pipeline. |
+| `noelia.egress.undeclared` | No egress policy, so the destination register lists what was configured rather than what is reachable. |
+| `noelia.configuration.inline-secret` | A credential-shaped key with a literal value in a committed file. The value is never reproduced in the output. |
+| `noelia.packages.version-skew` | Noelia packages pinned to different versions. All of them ship under one. |
+
+Exit codes follow the scanner convention: **0** clean, **1** findings, **2** the
+tool itself failed. A gate that cannot tell 1 from 2 cannot tell a failing
+project from a broken scanner.
+
+### `noelia init` — writes, and only what is missing
+
+```bash
+noelia init --name billing --dry-run
+```
+
+Adds the package references, writes the configuration sections those packages
+read, and prints the composition root. It does **not** edit `Program.cs`: a tool
+that rewrites the file where a service decides what it is gets one case wrong
+and costs more trust than the typing it saved. Nothing is overwritten — a key
+already present is left exactly as it is and reported, because the second run of
+a setup command is the one most likely to be an accident.
+
+No value it writes looks like a credential. A generated placeholder that reads
+like a key is a key somebody ships.
+
+### `noelia mcp` — the reading half, for an assistant
+
+```jsonc
+// .mcp.json
+{
+  "mcpServers": {
+    "noelia": { "command": "noelia", "args": ["mcp"] }
+  }
+}
+```
+
+Four tools over stdio: `noelia_analyze_project`, `noelia_analyze_service`,
+`noelia_provider_pairs` and `noelia_composition_snippet`. **Every one of them
+reads.** None writes a file, installs a package or changes configuration —
+`init` is deliberately absent, because an agent that can propose a change and a
+person who applies it is a good arrangement, and the way to be sure of that is
+not to ship the other capability.
 
 ## Secrets and keys
 

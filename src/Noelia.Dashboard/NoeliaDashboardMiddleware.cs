@@ -62,9 +62,17 @@ internal sealed class NoeliaDashboardMiddleware(
 
         ApplySecurityHeaders(context.Response);
 
-        var isPage = !remaining.HasValue || remaining == "/";
         var isCss = remaining == "/assets/dashboard.css";
         var isScript = remaining == "/assets/dashboard.js";
+
+        // Each section has an address of its own. The router asks the page which
+        // ones exist rather than listing them here, so a section cannot be added
+        // with navigation that links to a path nothing serves.
+        var section = DashboardSection.Overview;
+        var isPage = !isCss
+            && !isScript
+            && DashboardPage.TryParseSection(
+                remaining.HasValue ? remaining.Value! : string.Empty, out section);
 
         // The same reading the page shows, for a reader that is not a person.
         // It sits inside this middleware rather than beside it so that it
@@ -145,7 +153,7 @@ internal sealed class NoeliaDashboardMiddleware(
         }
 
         await context.Response.WriteAsync(
-            DashboardPage.Render(report, options),
+            DashboardPage.Render(report, options, section),
             context.RequestAborted).ConfigureAwait(false);
     }
 

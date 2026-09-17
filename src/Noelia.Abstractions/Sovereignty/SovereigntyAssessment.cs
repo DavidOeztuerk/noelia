@@ -26,6 +26,32 @@ public enum Jurisdiction
     ThirdCountryProvider
 }
 
+/// <summary>
+/// What a dependency is, where that changes who has to answer for it.
+/// </summary>
+/// <remarks>
+/// A separate axis from <see cref="Jurisdiction"/> on purpose: jurisdiction
+/// answers <em>where</em>, this answers <em>what</em>. An inference endpoint in
+/// Frankfurt and a mail relay in Frankfurt sit in the same jurisdiction and
+/// carry different duties.
+/// </remarks>
+public enum DependencyKind
+{
+    /// <summary>Nothing about the destination suggests a particular regime.</summary>
+    Ordinary,
+
+    /// <summary>
+    /// A model or inference endpoint, recognised by name.
+    /// </summary>
+    /// <remarks>
+    /// Recognition is by host, so it finds the SDK someone added last week and
+    /// misses a self-hosted model behind an ordinary name. Both directions are
+    /// stated where the finding is shown, because a list that looks complete
+    /// and is not is worse than one that admits its edge.
+    /// </remarks>
+    ArtificialIntelligence
+}
+
 /// <summary>What is known about one outbound dependency.</summary>
 /// <param name="Name">What it is used for, such as "Database" or "Secrets".</param>
 /// <param name="Host">The host, without credentials.</param>
@@ -35,7 +61,11 @@ public sealed record DependencyFinding(
     string Name,
     string? Host,
     Jurisdiction Jurisdiction,
-    string Note);
+    string Note)
+{
+    /// <summary>What kind of destination this is.</summary>
+    public DependencyKind Kind { get; init; } = DependencyKind.Ordinary;
+}
 
 /// <summary>
 /// What the running configuration says about where data can go.
@@ -57,6 +87,14 @@ public sealed record SovereigntyAssessment(
     /// <summary>Dependencies whose operator cannot be told from the host name.</summary>
     public IReadOnlyList<DependencyFinding> UndeterminedDependencies =>
         [.. Dependencies.Where(d => d.Jurisdiction == Jurisdiction.Undetermined)];
+
+    /// <summary>Dependencies that are model or inference endpoints.</summary>
+    /// <remarks>
+    /// The inventory an AI-Act deployer needs before they can answer anything
+    /// else. Empty is a real answer here, and the common one.
+    /// </remarks>
+    public IReadOnlyList<DependencyFinding> ArtificialIntelligenceDependencies =>
+        [.. Dependencies.Where(d => d.Kind == DependencyKind.ArtificialIntelligence)];
 
     /// <summary>
     /// True when nothing configured points at a provider known to be subject to
