@@ -42,7 +42,8 @@ internal static class DashboardPage
         }
 
         output.Append("</div>")
-            .Append("<p class=\"muted\">Read-only operator view. Configuration values, tokens, keys and state snapshots are never rendered.</p></header>");
+            .Append("<p class=\"muted\">Read-only operator view. Configuration values, tokens, keys and state snapshots are never rendered. ")
+            .Append("Times are shown in <span data-zone>UTC</span>.</p></header>");
 
         Composition(output, report.Composition);
         Configuration(output, report.Configuration);
@@ -238,8 +239,9 @@ internal static class DashboardPage
 
         foreach (var entry in audit.Latest)
         {
-            output.Append("<tr><td>").Append(H(entry.Timestamp.ToString("O", CultureInfo.InvariantCulture)))
-                .Append("</td><td>").Append(H(entry.ActorId))
+            output.Append("<tr><td>");
+            Moment(output, entry.Timestamp);
+            output.Append("</td><td>").Append(H(entry.ActorId))
                 .Append("</td><td>").Append(H(entry.Capacity))
                 .Append("</td><td>").Append(H(entry.Action))
                 .Append("</td><td>").Append(H(entry.Resource)).Append("</td></tr>");
@@ -266,11 +268,13 @@ internal static class DashboardPage
         foreach (var session in sessions.Sessions)
         {
             output.Append("<tr><td>").Append(H(session.Subject))
-                .Append("</td><td>").Append(H(session.Session))
-                .Append("</td><td>").Append(H(session.StartedAt.ToString("O", CultureInfo.InvariantCulture)))
-                .Append("</td><td>").Append(H(session.LastUsedAt.ToString("O", CultureInfo.InvariantCulture)))
-                .Append("</td><td>").Append(H(session.ExpiresAt.ToString("O", CultureInfo.InvariantCulture)))
-                .Append("</td><td>").Append(H(session.ClientFingerprintShape)).Append("</td></tr>");
+                .Append("</td><td>").Append(H(session.Session)).Append("</td><td>");
+            Moment(output, session.StartedAt);
+            output.Append("</td><td>");
+            Moment(output, session.LastUsedAt);
+            output.Append("</td><td>");
+            Moment(output, session.ExpiresAt);
+            output.Append("</td><td>").Append(H(session.ClientFingerprintShape)).Append("</td></tr>");
         }
 
         output.Append("</tbody></table><p class=\"muted\">Tokens and raw device fingerprints are never available here. This is not a cluster-wide inventory.</p></section>");
@@ -294,8 +298,9 @@ internal static class DashboardPage
                 .Append("</code></td><td>").Append(counter.CurrentCount.ToString(CultureInfo.InvariantCulture))
                 .Append("</td><td>").Append(counter.Limit?.ToString(CultureInfo.InvariantCulture) ?? "not recorded")
                 .Append("</td><td class=\"").Append(counter.IsRejected ? "fail\">rejected" : "pass\">allowed")
-                .Append("</td><td>").Append(H(counter.ObservedAt.ToString("O", CultureInfo.InvariantCulture)))
-                .Append("</td></tr>");
+                .Append("</td><td>");
+            Moment(output, counter.ObservedAt);
+            output.Append("</td></tr>");
         }
 
         output.Append("</tbody></table><p class=\"muted\">Store keys can contain subjects or addresses; only a one-way 12-character fingerprint is shown.</p></section>");
@@ -349,6 +354,28 @@ internal static class DashboardPage
             .Append("\">").Append(H(note ?? string.Empty)).Append("</p>");
 
         return true;
+    }
+
+    /// <summary>
+    /// A moment, marked up so the reader sees it in their own zone.
+    /// </summary>
+    /// <remarks>
+    /// <para>The machine-readable value stays UTC in the attribute, which is
+    /// what a collector reads and what a signature would cover. The visible
+    /// text starts as the same UTC string and is rewritten to local time by
+    /// dashboard.js.</para>
+    ///
+    /// <para>It renders correctly with scripting off — as UTC, marked
+    /// <c>Z</c>-suffixed, rather than as a blank. An operator page that needed
+    /// JavaScript to show a time would show none at all in the console where
+    /// somebody has scripts disabled.</para>
+    /// </remarks>
+    private static void Moment(StringBuilder output, DateTimeOffset moment)
+    {
+        var iso = moment.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+        output.Append("<time data-utc datetime=\"").Append(H(iso)).Append("\">")
+            .Append(H(iso)).Append("</time>");
     }
 
     private static string H(string value) => HtmlEncoder.Default.Encode(value);

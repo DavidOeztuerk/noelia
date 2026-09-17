@@ -40,7 +40,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>noelia;microservices;cqrs;security;multi-tenancy;sovereignty</PackageTags>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <VersionPrefix>6.1.0</VersionPrefix>
+    <VersionPrefix>6.2.0</VersionPrefix>
     <PackageReleaseNotes>https://github.com/DavidOeztuerk/noelia/releases/tag/v$(VersionPrefix)</PackageReleaseNotes>
 
     <!-- Ties a package back to the exact commit it was built from. -->

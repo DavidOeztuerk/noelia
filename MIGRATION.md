@@ -1,3 +1,28 @@
+# Noelia 6.1.0 → 6.2.0
+
+## Zeiten im Dashboard stehen in der Zone des Lesers
+
+Das Dashboard gab jede Zeit als UTC aus. Das war richtig und wurde falsch
+gelesen: Wer in Berlin `15:04` sieht, während seine Uhr `17:04` zeigt, gibt es
+falsch weiter.
+
+Jetzt steht jeder Zeitpunkt als `<time data-utc datetime="…">` in der Seite.
+Das Attribut trägt weiterhin **UTC** — das liest ein Sammler, und darauf würde
+eine Signatur liegen —, und `dashboard.js` schreibt den sichtbaren Text in die
+Zone des Browsers um. Der Tooltip zeigt beides, der Kopf der Seite nennt die
+erkannte Zone.
+
+Ohne JavaScript steht dort weiterhin UTC statt gar nichts.
+
+**Was du tun musst:** nichts. `report.json` ist unverändert und liefert
+weiterhin UTC.
+
+Wer das gerenderte HTML auswertet — was niemand tun sollte, seit es
+`report.json` gibt —, findet Zeiten jetzt im `datetime`-Attribut statt im
+Zellentext.
+
+---
+
 # Noelia 6.0.0 → 6.1.0
 
 Beides kam aus einer Frage zur Control Plane: „Warum stehen überall dieselben
