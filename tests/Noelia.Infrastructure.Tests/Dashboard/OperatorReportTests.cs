@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Operator;
+using Noelia.Infrastructure.Audit;
 
 namespace Noelia.Infrastructure.Tests.Dashboard;
 
@@ -206,6 +207,43 @@ public sealed class OperatorReportTests
         dashboard.Should().NotBeNull();
         dashboard!.Provisions.Should().Contain(provision =>
             provision.ServiceType == "INoeliaDashboard" && provision.IsRegistered);
+    }
+
+    /// <summary>
+    /// A moment leaves as UTC and says so, whatever the reader's zone.
+    /// </summary>
+    /// <remarks>
+    /// The page localises times in the browser for whoever is reading, but the
+    /// value in the markup and the value in the report stay UTC. A timestamp
+    /// that changed with the reader would make two people quoting the same
+    /// audit entry disagree about when it happened.
+    /// </remarks>
+    [Fact]
+    public async Task Times_leave_as_utc_and_carry_a_machine_readable_value()
+    {
+        // A real trail, so the dashboard's own access gives the section
+        // something to render — the page records who looked at it.
+        await using var app = await Open(services => services.AddSovereignAuditTrail());
+
+        var html = await app.Client.GetStringAsync("/noelia");
+        var report = await Report(app);
+
+        report.Audit.Latest.Should().NotBeEmpty();
+
+        report.Audit.Latest.Should().OnlyContain(entry => entry.Timestamp.Offset == TimeSpan.Zero,
+            "a collected moment must not depend on where it was read");
+
+        // Each request writes its own audit entry, so the page and the report
+        // hold different moments. What has to hold for both is the property,
+        // not the value: every marked-up time is UTC.
+        var marked = System.Text.RegularExpressions.Regex
+            .Matches(html, "<time data-utc datetime=\"([^\"]+)\"")
+            .Select(match => System.Net.WebUtility.HtmlDecode(match.Groups[1].Value))
+            .ToArray();
+
+        marked.Should().NotBeEmpty("the localiser finds moments by that marker");
+        marked.Should().OnlyContain(value => DateTimeOffset.Parse(value, null).Offset == TimeSpan.Zero,
+            "the markup carries the instant a collector reads, not the localised text");
     }
 
     private static Task<DashboardHost> Open(Action<IServiceCollection>? additionalServices = null) =>
