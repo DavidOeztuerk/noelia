@@ -5,9 +5,9 @@ Auftrag: Die 28 Review-Befunde schrittweise korrigieren, wirksam testen und dies
 
 ## Sofort weiterlesen: Übergabe
 
-- **Aktuell:** AP10, AP11, AP13, AP14, AP16 ERLEDIGT; AP15 implementiert, volle Browsermatrix offen. Noelia **138 + 3438**, CP **279**, Demo **80**, Frontend **23**, Gate-Unittests **21**, jeweils 0 skipped. Keine umfassende Security-/Releasefreigabe.
-- **Letztes abgeschlossenes Paket:** AP16 – siehe Journal vom 30.09.
-- **Nächster konkreter Schritt:** AP17/AP18 schlank: ein lokales Release-Gate-Skript (Kandidat packen, Demo + CP gegen denselben Kandidaten, Compose-Smoke, Security-Gate, e2e je Stage), CI nur CP-Image-Start und Unit-Suites. Demo-Baseline an die neuen KI-Check-Ergebnisse anpassen, sobald sie gegen den Kandidaten läuft. Versionsentscheidung (brechende Änderungen → Major). AP12 (Lizenzen) vor dem ersten Verkauf. Keine Veröffentlichung.
+- **Aktuell:** AP00–AP11 und AP13–AP17 ERLEDIGT. Release-Gate auf sauberen Ständen (Noelia `9d23255`, CP `1bae2c2`) komplett grün für Kandidat `6.4.0-gate.20260930180855`. AP12 (Lizenzen) bewusst zurückgestellt, AP18 in Arbeit.
+- **Letztes abgeschlossenes Paket:** AP17 – siehe Journal vom 30.09.
+- **Nächster konkreter Schritt:** AP12 separat mit dem Nutzer besprechen (Lizenz-/Entitlement-Vertrag). AP18: Versionsentscheidung (brechende Änderungen an IOutboxReader, UseDataProtection, Egress-Policy, KI-Check-Ergebnissen → Vorschlag 7.0.0), MIGRATION-Abschnitt mit Versionsüberschrift, PRs für beide Branches. R25c (Ocelot-Timeout) nicht reproduziert, beobachten. Keine Veröffentlichung.
 - **Arbeitszweige:** `security/review-2026-09` in beiden Repositories (lokal committet, nicht gepusht). Keine Pushes/Tags/Publishes ohne Freigabe.
 - **Baseline:** Noelia cf54577071cffbe15bc8231047117d4bf7c44a80; Control Plane 11304ca415f7ca9bfa4ee0e69e014b91080aedab.
 - **Nicht anfassen:** bereits vorhandene unversionierte NoeliaControlPlane/src/Noelia.ControlPlane/appsettings.WorkerTransfer.json. WorkerTransfer ist nicht im Auftrag.
@@ -59,10 +59,10 @@ Status: OFFEN / IN ARBEIT / IMPLEMENTIERT (Restabnahme offen) / ERLEDIGT.
 | AP12 Lizenz-/Entitlement-Konsistenz | P2 | R17 | OFFEN | AP02, AP05 |
 | AP13 Sichere Exporte und präzise KI-Checks | P2 | R19, R20 | ERLEDIGT | AP05, AP08 |
 | AP14 Wahrheitsgetreue, dauerhafte Demo | P1/P2 | R11, R12, R26, R27 | ERLEDIGT | AP05, AP07 |
-| AP15 Browser-/Gateway-Korrekturen | P2 | R25 | IMPLEMENTIERT (Restabnahme offen) | AP00 |
+| AP15 Browser-/Gateway-Korrekturen | P2 | R25 | ERLEDIGT | AP00 |
 | AP16 Vollständiges Security-Gate | P2 | R24 | ERLEDIGT | AP05, AP14 |
-| AP17 CI und reproduzierbares Release-Gate | P2 | R23 | OFFEN | AP01–AP16 |
-| AP18 Gesamtabnahme, Migration und Releasevorbereitung | P1 | alle | OFFEN | AP17 |
+| AP17 CI und reproduzierbares Release-Gate | P2 | R23 | ERLEDIGT | AP01–AP16 |
+| AP18 Gesamtabnahme, Migration und Releasevorbereitung | P1 | alle | IN ARBEIT | AP17 |
 
 ## Konkrete Umsetzung und Abnahme
 
@@ -259,6 +259,13 @@ Nicht schneller erneut starten als Auth-Rate-Limits erlauben; besser je Run isol
 Lokale Tests mit simuliertem IdP/HTTP-Server nicht auf externen Kundendiensten ausführen.
 
 ## Fortschrittsjournal
+
+### 30.09.2026 – AP15, AP17 – ERLEDIGT, Release-Gate
+- Dateien: Noelia `demo/eng/release-gate.mjs` (neu), `demo/eng/compose-report-smoke.mjs` (Modus mit fremdem Stack-Besitzer), `demo/Directory.Build.targets` (neu, `NOELIA_DECLARES_AI` für jede Version außer 6.4.0), `demo/src/shared/Demo.Platform/DemoProviders.cs` (deklariert „keine KI"), `demo/probes/Noelia.SecurityHeaders.Probe/…`, `demo/src/frontend/e2e/stage-hint.spec.js` (neu), `demo/eng/accepted-findings.txt`, `demo/README.md`, `demo/RELEASE-GATE-5.0.md`, `.github/workflows/ci.yml` (Gate-Unittests). CP `eng/demo-live-smoke.mjs` (`NOELIA_CP_DLL`), `.gitignore` (lokale WorkerTransfer-Konfiguration).
+- Gate: `node demo/eng/release-gate.mjs [VERSION] [--require-clean]`. Packt einen Kandidaten in einen neuen Feed und prüft genau diese 14 Pakete: Bibliothek, Demo und CP gegen den Kandidaten (Versionen in project.assets.json), Compose-Stack (Versionen in .deps.json), Security-Gate mit `--fail-on-warning`, Browser in sechs Kombinationen, CP-Live-Smoke, Frontend-Unit. Fehlendes Werkzeug oder übersprungener Schritt = Fehlschlag; Teardown nur des eigenen Projekts.
+- Ergebnis auf sauberen Ständen (Noelia `9d23255`, CP `1bae2c2`), Kandidat `6.4.0-gate.20260930180855`, 17 min: Bibliothek **3576**, Demo **80**, CP **279**, 12/12 Hosts mit Kandidatenversion, Security-Gate 12 Dienste, Browser **84** (6/6 Kombinationen inkl. Stage-Hinweis und Logout-Sperre), CP-Smoke 6/6 Flotten, Frontend **23**; alles 0 failed/skipped. Demo zusätzlich gegen veröffentlichte 6.4.0: **80/80**.
+- Einzige Abnahme im Gate: `dev noelia.audit.chain-scope` (ein Replikat je Dienst, Kette im Prozess; Staging/Prod Pass).
+- Offen: ein einmaliger, nicht reproduzierter Browserfehler in micro-dev beim Kaltstart (Lauf 2 des Subagenten; seitdem 3 volle Läufe und 10 Wiederholungen grün). Gate läuft nicht in CI (bewusst). Nicht bewiesen: Produktionshärtung, echtes TLS-Vertrauen, Last, Auditvollständigkeit.
 
 ### 30.09.2026 – AP13, AP14, AP15, AP16 – schlanke Umsetzung
 - R19 (CP, ERLEDIGT): `Export.cs` stellt jeder CSV-Textzelle, die (auch nach führenden Leerzeichen) mit `= + - @`, Tab, CR oder Vollbreitenform beginnt, ein `'` voran; JSON unverändert. 17 neue Tests mit RFC-4180-Parser, 14 vorher rot. CP **279/279**.
