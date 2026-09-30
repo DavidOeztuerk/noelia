@@ -25,16 +25,53 @@ public sealed class OutboxDispatcherOptions
     public int BatchSize { get; set; } = 50;
 
     /// <summary>
-    /// After this many failed attempts a message is reported rather than
-    /// retried quietly.
+    /// How many delivery attempts a message gets before it is quarantined.
     /// </summary>
     /// <remarks>
-    /// It is not dropped. A message nothing will accept is a decision for an
-    /// operator — the payload may be unroutable, or the consumer may have been
-    /// deployed wrong — and a dispatcher that binned it would take that
-    /// decision silently.
+    /// Quarantine, not deletion: the row stays with its reason, is never claimed
+    /// again and is logged once at error level. A payload nothing will accept is a
+    /// decision for an operator, who resumes it with
+    /// <see cref="IOutboxReader.RequeueAsync"/> once the cause is fixed. Without
+    /// this ceiling a message that never succeeds is retried for ever.
     /// </remarks>
-    public int AttemptsBeforeAlarm { get; set; } = 10;
+    public int MaxAttempts { get; set; } = 10;
+
+    /// <summary>The delay after the first failed attempt; each further failure doubles it.</summary>
+    public TimeSpan BaseRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>The longest a failed message waits before it is tried again.</summary>
+    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromMinutes(15);
+}
+
+/// <summary>Rejects dispatcher settings that cannot work, at startup.</summary>
+/// <remarks>
+/// A zero batch size or a negative delay does not fail anywhere near its cause:
+/// the loop simply never delivers, or retries in a tight spin.
+/// </remarks>
+public sealed class OutboxDispatcherOptionsValidator : IValidateOptions<OutboxDispatcherOptions>
+{
+    /// <inheritdoc />
+    public ValidateOptionsResult Validate(string? name, OutboxDispatcherOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var failures = new List<string>();
+
+        if (options.BatchSize < 1)
+            failures.Add($"{OutboxDispatcherOptions.SectionName}:BatchSize must be at least 1.");
+        if (options.IdleInterval <= TimeSpan.Zero)
+            failures.Add($"{OutboxDispatcherOptions.SectionName}:IdleInterval must be positive.");
+        if (options.MaxAttempts < 1)
+            failures.Add($"{OutboxDispatcherOptions.SectionName}:MaxAttempts must be at least 1.");
+        if (options.BaseRetryDelay <= TimeSpan.Zero)
+            failures.Add($"{OutboxDispatcherOptions.SectionName}:BaseRetryDelay must be positive.");
+        if (options.MaxRetryDelay < options.BaseRetryDelay)
+            failures.Add($"{OutboxDispatcherOptions.SectionName}:MaxRetryDelay must not be shorter than BaseRetryDelay.");
+
+        return failures.Count == 0
+            ? ValidateOptionsResult.Success
+            : ValidateOptionsResult.Fail(failures);
+    }
 }
 
 /// <summary>
@@ -50,13 +87,25 @@ public sealed class OutboxDispatcherOptions
 /// otherwise.</strong> A publish that succeeds and a mark that fails leaves the
 /// message to be delivered again — which is the right way round: the
 /// alternative is marking first and losing the message when the publish fails.
-/// Consumers see <see cref="OutboxMessage.Id"/> and decide.</para>
+/// Consumers see <see cref="OutboxMessage.Id"/> and must deduplicate by it.</para>
+///
+/// <para><strong>Failure policy lives here, not in the store.</strong> A refused
+/// message is released with an exponentially growing delay
+/// (<see cref="OutboxDispatcherOptions.BaseRetryDelay"/> up to
+/// <see cref="OutboxDispatcherOptions.MaxRetryDelay"/>), so a message nothing
+/// accepts cannot occupy every batch and starve newer ones. After
+/// <see cref="OutboxDispatcherOptions.MaxAttempts"/> it is quarantined. What is
+/// stored and logged about a failure is the exception's type name, never its
+/// message: those routinely echo the payload or connection details.</para>
 /// </remarks>
 public sealed partial class OutboxDispatcher(
     IServiceScopeFactory scopes,
     IOptions<OutboxDispatcherOptions> options,
-    ILogger<OutboxDispatcher> logger) : BackgroundService
+    ILogger<OutboxDispatcher> logger,
+    TimeProvider? time = null) : BackgroundService
 {
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -111,8 +160,18 @@ public sealed partial class OutboxDispatcher(
             try
             {
                 await bus.PublishAsync(serialiser.Read(message), cancellationToken);
-                await reader.MarkDeliveredAsync(message.Id, cancellationToken);
-                delivered++;
+
+                if (await reader.MarkDeliveredAsync(message, cancellationToken))
+                {
+                    delivered++;
+                }
+                else
+                {
+                    // Published, but the lease had been lost and someone else
+                    // owns the outcome. That is the at-least-once path, not a
+                    // failure; say so once and change nothing.
+                    StaleCompletion(logger, message.Id, message.Type);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -122,15 +181,35 @@ public sealed partial class OutboxDispatcher(
             }
             catch (Exception exception)
             {
-                await reader.ReleaseAsync(message.Id, exception.Message, CancellationToken.None);
+                // The type name, never the message: exception texts echo
+                // payloads, routing keys and connection strings, and this ends
+                // up in a table and in logs.
+                var reason = Classify(exception);
 
-                if (message.Attempts >= settings.AttemptsBeforeAlarm)
+                if (message.Attempts >= settings.MaxAttempts)
                 {
-                    Stuck(logger, message.Id, message.Type, message.Attempts, exception);
+                    if (await reader.QuarantineAsync(message, reason, CancellationToken.None))
+                    {
+                        Quarantined(logger, message.Id, message.Type, message.Attempts, reason);
+                    }
+                    else
+                    {
+                        StaleCompletion(logger, message.Id, message.Type);
+                    }
                 }
                 else
                 {
-                    Refused(logger, message.Id, message.Type, message.Attempts, exception);
+                    var delay = RetryDelay(settings, message.Attempts);
+
+                    if (await reader.ReleaseAsync(
+                            message, reason, _time.GetUtcNow() + delay, CancellationToken.None))
+                    {
+                        Refused(logger, message.Id, message.Type, message.Attempts, reason, delay);
+                    }
+                    else
+                    {
+                        StaleCompletion(logger, message.Id, message.Type);
+                    }
                 }
             }
         }
@@ -138,20 +217,41 @@ public sealed partial class OutboxDispatcher(
         return delivered;
     }
 
+    private static string Classify(Exception exception) => exception.GetType().Name;
+
+    // base * 2^(attempts-1), capped. The exponent is clamped before the shift so
+    // a large attempt count cannot overflow into a negative delay.
+    private static TimeSpan RetryDelay(OutboxDispatcherOptions settings, int attempts)
+    {
+        var factor = Math.Pow(2, Math.Clamp(attempts - 1, 0, 30));
+        var ticks = settings.BaseRetryDelay.Ticks * factor;
+
+        return ticks >= settings.MaxRetryDelay.Ticks
+            ? settings.MaxRetryDelay
+            : TimeSpan.FromTicks((long)ticks);
+    }
+
     [LoggerMessage(Level = LogLevel.Error,
         Message = "The outbox store is unavailable; delivery is paused")]
     private static partial void StoreUnavailable(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Outbox message {MessageId} of {MessageType} was refused on attempt {Attempts}")]
+        Message = "Outbox message {MessageId} of {MessageType} was refused on attempt {Attempts} "
+                  + "({Reason}); next attempt in {Delay}")]
     private static partial void Refused(
-        ILogger logger, Guid messageId, string messageType, int attempts, Exception exception);
+        ILogger logger, Guid messageId, string messageType, int attempts, string reason, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Error,
-        Message = "Outbox message {MessageId} of {MessageType} has failed {Attempts} times and "
-                  + "is not being delivered. It is still recorded and nothing has been dropped.")]
-    private static partial void Stuck(
-        ILogger logger, Guid messageId, string messageType, int attempts, Exception exception);
+        Message = "Outbox message {MessageId} of {MessageType} failed {Attempts} times ({Reason}) and "
+                  + "is quarantined. It is still recorded and nothing has been dropped; "
+                  + "IOutboxReader.RequeueAsync resumes it.")]
+    private static partial void Quarantined(
+        ILogger logger, Guid messageId, string messageType, int attempts, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Outbox message {MessageId} of {MessageType} was completed after its claim had "
+                  + "been taken over; the newer claim's outcome stands")]
+    private static partial void StaleCompletion(ILogger logger, Guid messageId, string messageType);
 }
 
 /// <summary>Turns a recorded payload back into the event it was.</summary>
@@ -194,7 +294,11 @@ public static class OutboxDispatcherExtensions
             {
                 builder.Services
                     .AddOptions<OutboxDispatcherOptions>()
-                    .Bind(builder.Configuration.GetSection(OutboxDispatcherOptions.SectionName));
+                    .Bind(builder.Configuration.GetSection(OutboxDispatcherOptions.SectionName))
+                    .ValidateOnStart();
+
+                builder.Services.AddSingleton<
+                    IValidateOptions<OutboxDispatcherOptions>, OutboxDispatcherOptionsValidator>();
 
                 builder.Services.AddHostedService<OutboxDispatcher>();
             },

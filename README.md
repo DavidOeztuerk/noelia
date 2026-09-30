@@ -1095,11 +1095,27 @@ one store are safe, because claiming a batch is a conditional update with a
 five-minute lease, but each one is another connection holding messages.
 
 **Delivery is at-least-once and the dispatcher does not pretend otherwise.** It
-publishes first and marks second: a crash in between delivers a message twice,
-where the other order loses it. `OutboxMessage.Id` travels with the message so a
-consumer can decide. A message that has failed `AttemptsBeforeAlarm` times is
-logged as stuck and left in the table — never dropped, because a payload nothing
-will accept is a decision for an operator.
+publishes first and marks second: a crash in between, or a lease that expires
+mid-publish, delivers a message twice, where the other order loses it.
+**Consumers must deduplicate by `OutboxMessage.Id`**, which travels with the
+message.
+
+**A message nothing accepts cannot starve the rest.** A refused message is
+released with an exponential back-off (`Outbox:BaseRetryDelay`, doubling up to
+`Outbox:MaxRetryDelay`) and is not claimable before it is due, so failing
+messages stop occupying every batch. After `Outbox:MaxAttempts` (default 10) it
+is **quarantined**: never claimed again, logged once at error level, and never
+dropped. `IOutboxReader.RequeueAsync(id)` is the deliberate way back once the
+cause is fixed; it restarts the attempt budget and folds the old attempt count
+and error into `LastError`, and the store logs it. Quarantined rows are those
+with `QuarantinedAt` set in the outbox table. What is stored and logged about a
+failure is the exception's type name only — never its message or the payload.
+
+Claims are fenced: each `ClaimAsync` call stamps a token, and
+`MarkDeliveredAsync`, `ReleaseAsync` and `QuarantineAsync` take the claimed
+`OutboxMessage` and return `false` — changing nothing — when a newer claim has
+taken the message over. A dispatcher that lost its lease cannot overwrite the
+outcome of the one that replaced it.
 
 Turning a recorded payload back into an event is yours: `IOutboxPayloadReader`
 is a port, because deserialising an arbitrary named type out of a database row

@@ -1,5 +1,63 @@
 # Unveröffentlichte Sicherheitskorrekturen
 
+## Outbox: Giftnachrichten, Backoff, Quarantäne und Fencing (R21)
+
+Bisher nahm `ClaimAsync` die ältesten offenen Zeilen, `ReleaseAsync` machte eine
+fehlgeschlagene Nachricht sofort wieder claimbar, und `AttemptsBeforeAlarm`
+änderte nur die Logstufe. Ein Batch dauerhaft fehlerhafter Nachrichten verdrängte
+neuere, zustellbare Nachrichten dauerhaft. Zusätzlich konnte ein Dispatcher mit
+abgelaufenem Lease per spätem `Release`/`MarkDelivered` den Claim eines anderen
+überschreiben.
+
+**Schema (EF-Migration erforderlich).** `noelia_outbox` erhält
+`NextAttemptAt` (nullable, UTC), `QuarantinedAt` (nullable, UTC) und
+`ClaimToken` (nullable Guid). Der Index `(DeliveredAt, RecordedAt)` wird durch
+`(DeliveredAt, QuarantinedAt, NextAttemptAt, RecordedAt)` ersetzt, dazu kommt ein
+Index auf `ClaimToken`. Nach dem Update `dotnet ef migrations add …` ausführen;
+bestehende Zeilen bleiben gültig (alle neuen Spalten `NULL` = fällig, nicht
+in Quarantäne, kein Claim). Vor dem Rollout laufende Dispatcher der alten
+Version beenden, sonst schreiben sie ohne Token.
+
+**Signaturänderungen an `IOutboxReader`** (kein `[Obsolete]`, harter Bruch):
+
+- `MarkDeliveredAsync(Guid id, ct)` → `Task<bool> MarkDeliveredAsync(OutboxMessage claim, ct)`
+- `ReleaseAsync(Guid id, string reason, ct)` → `Task<bool> ReleaseAsync(OutboxMessage claim, string reason, DateTimeOffset notBefore, ct)`
+- neu: `Task<bool> QuarantineAsync(OutboxMessage claim, string reason, ct)`
+- neu: `Task<bool> RequeueAsync(Guid id, ct)`
+- `OutboxMessage` erhält als letzten Parameter `Guid ClaimToken`.
+
+`false` bedeutet: der Claim war veraltet (ein anderer Dispatcher hat die
+Nachricht übernommen); es wurde nichts geändert. Eigene `IOutboxReader`-
+Implementierungen müssen dieses Fencing selbst liefern.
+`EntityFrameworkOutbox<TContext>` erhält einen optionalen `ILogger`-Parameter
+(per DI aufgelöst; direkte Konstruktoraufrufe bleiben gültig).
+
+**Verhalten.** `ClaimAsync` liefert nur Nachrichten, die unzugestellt, nicht in
+Quarantäne, fällig (`NextAttemptAt` leer oder erreicht) und ohne lebenden Lease
+sind; ein Aufruf stempelt ein frisches Token. Die Retry-Politik liegt im
+Dispatcher: Fehlschlag → `ReleaseAsync` mit exponentiellem Backoff
+(`BaseRetryDelay`, verdoppelt bis `MaxRetryDelay`), ab `Attempts >= MaxAttempts`
+→ `QuarantineAsync` (einmal Error-Log, nie wieder geclaimt, nie gelöscht).
+`RequeueAsync(id)` hebt die Quarantäne auf, macht die Nachricht sofort fällig und
+setzt `Attempts` auf 0; der alte Zählerstand und Fehler werden in `LastError`
+vermerkt, der Store loggt das Requeue. Eine Zeile in Quarantäne findest du über
+`QuarantinedAt IS NOT NULL`.
+
+**Optionen (`Outbox`-Sektion).** `AttemptsBeforeAlarm` entfällt; ersetzt durch
+`MaxAttempts` (Default 10, ≥ 1), `BaseRetryDelay` (Default 5 s, > 0) und
+`MaxRetryDelay` (Default 15 min, ≥ `BaseRetryDelay`). Ungültige Werte, auch
+`BatchSize < 1` und `IdleInterval <= 0`, brechen den Start ab.
+
+**Keine Rohdaten in `LastError` und Logs.** Der Dispatcher speichert und loggt
+nur den Exception-Typnamen, nie `Exception.Message`, Stacktrace oder Payload.
+Wer bisher den Text in `LastError` las, findet dort jetzt z. B.
+`InvalidOperationException`; Details stehen im Log des Transports.
+
+**Zustellung ist at-least-once.** Konsumenten müssen über `OutboxMessage.Id`
+deduplizieren, auch nach Lease-Ablauf.
+
+**Demo.** `demo/` nutzt den Outbox nicht; nichts zu ändern.
+
 ## Data-Protection-Schlüsselring: dedizierter atomarer Store
 
 `UseDataProtection(applicationName)` benötigt nun zusätzlich den providerfreien
