@@ -132,11 +132,14 @@ public sealed class OutboxDispatcherTests
         // Batch size equals the number of poison messages: before the back-off
         // they were the oldest N on every turn, for ever.
         var bus = new RecordingBus { RefuseWhen = p => p.Contains("poison"), RefusalText = Canary };
+        // Wait for the delivery itself, not for the claim: Attempts rises when a
+        // row is claimed, before it is published and marked, so stopping on it
+        // raced the dispatcher. A starved message still fails at the deadline.
         await fixture.RunDispatcherAsync(
             bus,
             o => o.BatchSize = 3,
-            until: rows => rows.All(r => r.DeliveredAt != null || r.Attempts > 0)
-                           && rows.Count(r => r.Attempts > 0) == 4);
+            until: rows => rows.Single(r => r.Id == good).DeliveredAt != null
+                           && poison.All(id => rows.Single(r => r.Id == id).Attempts > 0));
 
         var rows = await fixture.RowsAsync();
         rows.Single(r => r.Id == good).DeliveredAt.Should().NotBeNull(
@@ -384,13 +387,23 @@ public sealed class OutboxDispatcherTests
     }
 
     /// <summary>A real SQLite outbox behind a real dispatcher, on a fake clock.</summary>
+    /// <remarks>
+    /// A file, not one shared <c>:memory:</c> connection. The dispatcher and the
+    /// test's polling read at the same time, and a single SqliteConnection is not
+    /// safe for that: it failed about one run in five with "database is locked"
+    /// while a second context initialised on it. With a file every context opens
+    /// its own connection and SQLite's busy wait does the rest, which is also how
+    /// two real dispatchers meet.
+    /// </remarks>
     private sealed class SqliteFixture : IAsyncDisposable
     {
-        private readonly SqliteConnection _connection;
+        private readonly string _path;
+        private readonly string _connectionString;
 
-        private SqliteFixture(SqliteConnection connection, ServiceProvider provider, FakeTimeProvider time)
+        private SqliteFixture(string path, string connectionString, ServiceProvider provider, FakeTimeProvider time)
         {
-            _connection = connection;
+            _path = path;
+            _connectionString = connectionString;
             Provider = provider;
             Time = time;
         }
@@ -400,13 +413,17 @@ public sealed class OutboxDispatcherTests
 
         public static async Task<SqliteFixture> CreateAsync()
         {
-            var connection = new SqliteConnection("DataSource=:memory:");
-            await connection.OpenAsync();
+            var path = Path.Combine(Path.GetTempPath(), $"noelia-outbox-{Guid.NewGuid():N}.db");
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Pooling = false
+            }.ToString();
             var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-09-30T10:00:00Z"));
 
             var services = new ServiceCollection();
             services.AddSingleton<TimeProvider>(time);
-            services.AddDbContext<ProbeContext>(o => o.UseSqlite(connection));
+            services.AddDbContext<ProbeContext>(o => o.UseSqlite(connectionString));
             services.AddEntityFrameworkOutbox<ProbeContext>();
             services.AddSingleton<IOutboxPayloadReader>(new PassThroughReader());
             var provider = services.BuildServiceProvider();
@@ -416,7 +433,7 @@ public sealed class OutboxDispatcherTests
                 await scope.ServiceProvider.GetRequiredService<ProbeContext>().Database.EnsureCreatedAsync();
             }
 
-            return new SqliteFixture(connection, provider, time);
+            return new SqliteFixture(path, connectionString, provider, time);
         }
 
         public async Task<Guid> RecordAsync(string payload)
@@ -452,7 +469,7 @@ public sealed class OutboxDispatcherTests
             var services = new ServiceCollection();
             services.AddSingleton(Time);
             services.AddSingleton<TimeProvider>(Time);
-            services.AddDbContext<ProbeContext>(o => o.UseSqlite(_connection));
+            services.AddDbContext<ProbeContext>(o => o.UseSqlite(_connectionString));
             services.AddEntityFrameworkOutbox<ProbeContext>();
             services.AddSingleton<IEventBus>(bus);
             services.AddSingleton<IOutboxPayloadReader>(new PassThroughReader());
@@ -496,7 +513,7 @@ public sealed class OutboxDispatcherTests
         public async ValueTask DisposeAsync()
         {
             await Provider.DisposeAsync();
-            await _connection.DisposeAsync();
+            File.Delete(_path);
         }
     }
 }
