@@ -1,16 +1,15 @@
 FROM nginx:1.29-alpine
 
-# One certificate covering the six demo host names. Generated at build time so
-# the image carries no key anyone else has ever held, and regenerated on every
-# rebuild — a demo certificate that outlives the demo is a key nobody is
-# tracking.
+# Local self-signed certificate covering app and operator host names.
+# Generated in this build step (Docker may reuse the cached layer); never use
+# this image-carried demo key as a production TLS credential.
 RUN apk add --no-cache openssl \
     && mkdir -p /etc/nginx/tls \
     && openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
         -keyout /etc/nginx/tls/demo.key \
         -out /etc/nginx/tls/demo.crt \
         -subj "/CN=noelia-demo.localhost" \
-        -addext "subjectAltName=DNS:micro-dev.localhost,DNS:mono-dev.localhost,DNS:micro-staging.localhost,DNS:mono-staging.localhost,DNS:micro-prod.localhost,DNS:mono-prod.localhost,DNS:localhost,IP:127.0.0.1" \
+        -addext "subjectAltName=DNS:micro-dev.localhost,DNS:mono-dev.localhost,DNS:micro-staging.localhost,DNS:mono-staging.localhost,DNS:micro-prod.localhost,DNS:mono-prod.localhost,DNS:gateway-staging.localhost,DNS:gateway-prod.localhost,DNS:user-staging.localhost,DNS:todo-staging.localhost,DNS:user-prod.localhost,DNS:todo-prod.localhost,DNS:localhost,IP:127.0.0.1" \
     && chmod 600 /etc/nginx/tls/demo.key \
     && apk del openssl
 

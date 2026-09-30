@@ -28,7 +28,10 @@ public enum DashboardVisibility
     Open,
 
     /// <summary>A caller proving they are an operator.</summary>
-    Operator
+    Operator,
+
+    /// <summary>Operator-authenticated JSON reports only; no HTML or assets.</summary>
+    OperatorReports
 }
 
 /// <summary>Reads the demo's per-environment decisions out of configuration.</summary>
@@ -90,10 +93,10 @@ public sealed class DemoEnvironment
 
         var secret = section["Dashboard:OperatorSecret"];
 
-        if (visibility == DashboardVisibility.Operator && string.IsNullOrWhiteSpace(secret))
+        if (visibility is DashboardVisibility.Operator or DashboardVisibility.OperatorReports && string.IsNullOrWhiteSpace(secret))
         {
             throw new InvalidOperationException(
-                "Demo:Dashboard:Visibility is 'Operator' but Demo:Dashboard:OperatorSecret is "
+                "Demo:Dashboard:Visibility requires an operator but Demo:Dashboard:OperatorSecret is "
                 + "empty. A policy that cannot recognise an operator is a policy that admits "
                 + "everyone or no one, and which of the two is an accident.");
         }
@@ -153,7 +156,9 @@ public sealed class DemoEnvironment
         }
         else
         {
-            dashboard.VisibleTo(IsOperator);
+            dashboard.VisibleTo(context => IsOperator(context)
+                && (Visibility != DashboardVisibility.OperatorReports
+                    || context.Request.Path.Value is "/noelia/report.json" or "/noelia/audit-chain.json"));
         }
 
         if (environment.IsProduction())

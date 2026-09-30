@@ -21,9 +21,8 @@ const services = [
 const list = document.querySelector("[data-dashboards]");
 
 for (const [label, name, what] of services) {
-  // The gateway composes no dashboard outside Development, so there is no
-  // address for one. Listing it anyway would promise a page that does not
-  // exist and leave a "route not found" in the gateway's log on every click.
+  // Hardened gateways expose authenticated JSON reports, not an HTML page.
+  // Do not offer an HTML link that must return 404 even to an operator.
   if (name === "gateway" && stage !== "dev") {
     continue;
   }
@@ -46,5 +45,5 @@ document.querySelector("[data-note]").textContent =
   stage === "dev"
     ? "Development: every dashboard is open."
     : "Staging and Production: each needs the operator secret in X-Noelia-Operator, "
-      + "and the gateway composes no dashboard at all — it holds no key and could not "
-      + "recognise an operator.";
+      + "and the gateway exposes only authenticated JSON reports for the control plane, "
+      + "not an HTML dashboard.";

@@ -26,6 +26,7 @@ x-service: &service
     dockerfile: Dockerfile
     args:
       NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+      NOELIA_VERSION: ${NOELIA_VERSION:-}
   restart: unless-stopped
   healthcheck:
     test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/live"]
@@ -64,6 +65,8 @@ x-verifier-secrets: &verifier-secrets
 # The gateway reads no token and needs no key pair. It does need the master key,
 # because it keeps a data protection key ring like every other host.
 x-gateway-secrets: &gateway-secrets
+  - source: operator_secret
+    target: Demo__Dashboard__OperatorSecret
   - source: master_key
     target: Encryption__MasterKey
 
@@ -88,8 +91,8 @@ services:
     profiles: [dev, staging, prod, all]
     networks: [dev, staging, prod]
     ports:
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:${NOELIA_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${NOELIA_HTTPS_PORT:-8443}:8443"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "--header", "Host: micro-dev.localhost", "http://127.0.0.1:8080/"]
@@ -108,6 +111,7 @@ services:
         PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
         PROJECT_DLL: Gateway.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -126,6 +130,7 @@ services:
         PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
         PROJECT_DLL: UserService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -147,6 +152,7 @@ services:
         PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
         PROJECT_DLL: TodoService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -165,6 +171,7 @@ services:
         PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
         PROJECT_DLL: Demo.Monolith.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [dev, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -204,6 +211,7 @@ services:
         PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
         PROJECT_DLL: Gateway.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
@@ -226,6 +234,7 @@ services:
         PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
         PROJECT_DLL: UserService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
@@ -251,6 +260,7 @@ services:
         PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
         PROJECT_DLL: TodoService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
@@ -273,6 +283,7 @@ services:
         PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
         PROJECT_DLL: Demo.Monolith.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [staging, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
@@ -311,6 +322,7 @@ services:
         PROJECT_PATH: src/gateway/Gateway.Api/Gateway.Api.csproj
         PROJECT_DLL: Gateway.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -333,6 +345,7 @@ services:
         PROJECT_PATH: src/services/UserService/UserService.Api/UserService.Api.csproj
         PROJECT_DLL: UserService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -358,6 +371,7 @@ services:
         PROJECT_PATH: src/services/TodoService/TodoService.Api/TodoService.Api.csproj
         PROJECT_DLL: TodoService.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -380,6 +394,7 @@ services:
         PROJECT_PATH: src/monolith/Demo.Monolith.Api/Demo.Monolith.Api.csproj
         PROJECT_DLL: Demo.Monolith.Api.dll
         NOELIA_SOURCE: ${NOELIA_SOURCE:-https://api.nuget.org/v3/index.json}
+        NOELIA_VERSION: ${NOELIA_VERSION:-}
     profiles: [prod, all]
     environment:
       ASPNETCORE_ENVIRONMENT: Production

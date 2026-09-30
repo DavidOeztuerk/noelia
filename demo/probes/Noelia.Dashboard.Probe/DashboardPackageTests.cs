@@ -94,24 +94,10 @@ public sealed class DashboardPackageTests
         visibleAsset.Headers.CacheControl!.NoStore.Should().BeTrue();
     }
 
-    private static string ProjectFile() => Path.Combine(
-        RepositoryRoot(), "probes", "Noelia.Dashboard.Probe", "Noelia.Dashboard.Probe.csproj");
-
-    private static string RepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Noelia.TodoDemo.sln")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException("Noelia.TodoDemo.sln was not found.");
-    }
+    // An isolated --artifacts-path deliberately lives outside the checkout.
+    // Locate source via the compiler rather than assuming bin/ is inside it.
+    private static string ProjectFile([System.Runtime.CompilerServices.CallerFilePath] string source = "") =>
+        Path.Combine(Path.GetDirectoryName(source)!, "Noelia.Dashboard.Probe.csproj");
 
     private sealed class ProbeHost(IHost host, HttpClient client) : IAsyncDisposable
     {

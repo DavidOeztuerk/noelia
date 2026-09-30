@@ -54,7 +54,7 @@ builder.Services.AddNoelia(
         .Use(NoeliaModule.Principal)
         .Use(NoeliaModule.PasswordHashing)
         .Use(NoeliaModule.TokenSessions)
-        .UseDemoProviders(demo, serviceName, readsTokens: true)
+        .UseDemoProviders(demo, serviceName, readsTokens: true, ownsSessions: true)
         .UseDemoDashboard(demo, builder.Environment, "GateCanary"));
 
 builder.Services

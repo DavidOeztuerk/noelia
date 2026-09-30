@@ -75,16 +75,44 @@ that recommended one thing and ran another would be making the argument badly.
 | | Development | Staging | Production |
 |---|---|---|---|
 | user, todo, monolith | open | operator secret | operator secret, reason recorded |
-| gateway | open | not composed | not composed |
+| gateway | open | operator secret, JSON only | operator secret, JSON only, reason recorded |
 
 Two levers, deliberately separate: whether the module is composed at all, and
 who the visibility policy admits. A stage answering `None` does not run the page
 — the composition report says so — rather than running it behind a policy that
 refuses everyone.
 
-The gateway is `None` outside Development for a reason worth reading: it holds
-no key and verifies no token by design, so it could not recognise an operator if
-it wanted to. Showing it anyway would teach the wrong lesson.
+The gateway still holds no JWT signing key and verifies no application token.
+Operator authentication is a separate boundary: its `OperatorReports` mode
+checks the shared operator header and permits only `/noelia/report.json` and
+`/noelia/audit-chain.json`. HTML, assets and other dashboard routes remain 404
+even with that header. Nginx independently exposes only those two exact paths on
+`gateway-staging.localhost:8443` and `gateway-prod.localhost:8443` (HTTPS).
+The operator secret is mounted as a file, not a JWT key or an environment value.
+
+Dependency declarations are host-specific: only user-service and monolith own
+SQLite sessions; only token readers declare revocation storage. Gateway HTTP
+destinations are derived from its static Ocelot routes at startup. Restart after
+changing routes to refresh declarations; dynamic service discovery is not covered.
+Redis endpoint parsing emits hosts only, never credentials, and does not pretend
+RESP traffic is guarded by the HTTP policy. Local resources use `localhost` as a
+locality marker, not a claim that an HTTP server runs there. Declarations and
+factory allow-policy are configuration evidence, not observed traffic or proof
+that Ocelot's independent transport is protected.
+
+The isolated frontend check builds no backends and touches no demo data:
+
+```sh
+# From demo/; requires the existing Playwright/Chromium installation.
+docker build -t noelia-demo-frontend:local-check src/frontend
+PLAYWRIGHT_MODULE="$PWD/src/frontend/node_modules/playwright/index.mjs" \
+  node eng/frontend-report-smoke.mjs noelia-demo-frontend:local-check
+```
+
+It uses temporary loopback ports, checks the three stage index pages and nginx's
+gateway HTML/asset denials, then removes only its own container. It deliberately
+accepts the local self-signed TLS certificate and is neither a TLS-trust test
+nor a replacement for full Compose/gateway/control-plane acceptance.
 
 To open a staged dashboard:
 
@@ -97,6 +125,80 @@ Without the header it is a 404 — not a 403 and not a login form. Nothing in th
 response distinguishes it from a path that was never routed.
 
 ## Secrets
+
+### Reviewed composition baselines and isolated candidate builds
+
+`eng/composition-baselines.json` records exact expected running-module IDs for
+gateway, issuer, verifier and monolith, each with InMemory or Redis providers.
+These are reviewed design expectations, not sets learned from a running report.
+The Development host tests compare actual reports with the InMemory baselines;
+Redis-stage acceptance still requires the running stack. Module presence does
+not imply effective security or a completed security-check run.
+
+The CP demo configuration contains matching baseline copies. From its repository:
+
+```sh
+node eng/check-demo-baselines.mjs ../Noelia/demo/eng/composition-baselines.json
+```
+
+Docker accepts an optional `NOELIA_VERSION` alongside `NOELIA_SOURCE`; both
+restore and publish use the requested version. If omitted, the committed
+`Directory.Packages.props` version remains in effect. Use a **new unique** version
+and feed directory when package contents change; never overwrite public 6.4.0
+or clear the global package cache. Example from the Noelia repository:
+
+```sh
+dotnet pack Noelia.slnx -c Release -p:Version=6.4.1-security.YOUR_UNIQUE_ID \
+  -o demo/.local-feed/YOUR_UNIQUE_ID
+cd demo
+NOELIA_VERSION=6.4.1-security.YOUR_UNIQUE_ID \
+  NOELIA_SOURCE=/src/.local-feed/YOUR_UNIQUE_ID \
+  docker compose --profile all build
+```
+
+For a separately named acceptance stack, use Compose `-p` and explicitly supplied
+test credentials (`--env-file` or environment), not an existing stack's data.
+`NOELIA_HTTP_PORT` and `NOELIA_HTTPS_PORT` default to 8080/8443; set them to 0 for
+Docker-assigned loopback ports and inspect `docker compose port edge 8080` /
+`docker compose port edge 8443` using the same project/profile options. Do not
+assume the CP's checked-in 8080/8443 addresses then match that isolated stack.
+Building images alone does not constitute a running-stack acceptance test.
+
+For the schema-3 candidate, the automated isolated report smoke builds and starts
+all three stages with fresh synthetic keys, dynamic ports and a UUID project name:
+
+```sh
+# From demo/, after packing a uniquely versioned local candidate as above:
+node eng/compose-report-smoke.mjs 6.4.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
+```
+
+It ignores `.env` and inherited application credentials, checks the actual
+published dependency versions inside all 12 hosts, compares live reports with
+the eight reviewed roles, and tests operator-only report access through nginx.
+The staging/production Redis implementations run against disposable Valkey.
+Only this run's containers, networks and synthetic database volumes are removed
+afterwards; images and secret-free report artifacts remain. The self-signed demo
+certificate is accepted only by the smoke's requests. This is **not** CP live
+collection, a browser journey, a TLS-trust check or a durability/audit-completeness
+test. An interrupted process may require cleanup of its printed UUID project;
+never substitute an existing user's project name.
+
+To include real CP collection and Chromium overview/egress/composition pages for
+each of the six fleets, first build the sibling CP in Release, then run:
+
+```sh
+NOELIA_CP_SMOKE_MODULE=/absolute/path/to/NoeliaControlPlane/eng/demo-live-smoke.mjs \
+PLAYWRIGHT_MODULE=/absolute/path/to/demo/src/frontend/node_modules/playwright/index.mjs \
+node eng/compose-report-smoke.mjs 6.4.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
+```
+
+The CP helper uses one fleet per fresh process (no licence bypass), the checked-in
+Development demo roles, and fresh content/data directories. It never loads the
+WorkerTransfer configuration. Screenshots, reports and synthetic CP data remain
+in the printed temporary directory; CP processes are stopped automatically.
+This still does not cover the application's login/logout journeys.
+
+### Runtime secrets
 
 `.env` holds three values and is gitignored. Copy `.env.example` and fill it in:
 
