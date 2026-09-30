@@ -206,14 +206,37 @@ habits keep it out:
 
 ## Releasing
 
-SemVer, all 14 packages shipped under one version. A breaking change is
-announced as `[Obsolete]` in a minor release before it is removed in the next
-major. `.github/workflows/publish.yml` runs on a published GitHub release (tag
+SemVer, all 14 packages shipped under one version. `.github/workflows/publish.yml` runs on a published GitHub release (tag
 `vX.Y.Z`) or manual dispatch; it refuses anything that is not stable SemVer,
 not an ancestor of `origin/main`, or not matching `<VersionPrefix>` in
 `Directory.Build.props`, then builds, **runs the full test suite**, and pushes
 via OIDC Trusted Publishing (no stored API key). `docs/RELEASE-GATE-5.0.md`
 describes the out-of-repo acceptance gate against a real consumer project.
+
+## Model routing for agents
+
+The main session runs on **Opus 5.5** and is the orchestrator: it plans, makes
+the decisions, reviews subagent results, and does the edits that need this
+file's invariants in mind. Delegated work runs on cheaper models, and the choice
+is made **explicitly on every `Agent` call** via its `model` parameter, because
+that parameter outranks both the agent's `model:` frontmatter and
+`CLAUDE_CODE_SUBAGENT_MODEL`, and a call without it inherits Opus.
+
+| Work handed off | `model` |
+|---|---|
+| Default for every subagent: implementation tasks, test runs and fixing, reviews, research, `general-purpose`, `Plan`, `flow-next:*` | `"sonnet"` (Sonnet 5.5) |
+| Very light, mechanical work: locating files or symbols, `Explore` sweeps, grepping, summarising a log or test output, reading a doc for one fact | `"haiku"` (Haiku 4.5) |
+| Never for subagents | `"opus"` — Opus stays the orchestrator |
+
+- When in doubt between Haiku and Sonnet, use Sonnet. Haiku is for tasks with
+  one obvious answer and no judgement about Noelia's rules.
+- Anything touching a public API, a security check, the module catalogue, the
+  middleware order or a release step is reviewed by the orchestrator before it
+  is accepted, whichever model produced it.
+- `subagent_type: "fork"` always inherits Opus and ignores `model`; use a named
+  agent type with `model: "sonnet"` instead unless the full context is required.
+- Custom agents under `.claude/agents/` declare `model: sonnet` (or `haiku`) in
+  their frontmatter, never `inherit`.
 
 ## Skills
 
