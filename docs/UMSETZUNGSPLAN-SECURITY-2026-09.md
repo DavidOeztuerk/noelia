@@ -5,9 +5,9 @@ Auftrag: Die 28 Review-Befunde schrittweise korrigieren, wirksam testen und dies
 
 ## Sofort weiterlesen: Übergabe
 
-- **Aktuell:** AP00–AP11 und AP13–AP17 ERLEDIGT. Release-Gate auf sauberen Ständen (Noelia `9d23255`, CP `1bae2c2`) komplett grün für Kandidat `6.4.0-gate.20260930180855`. AP12 (Lizenzen) bewusst zurückgestellt, AP18 in Arbeit.
-- **Letztes abgeschlossenes Paket:** AP17 – siehe Journal vom 30.09.
-- **Nächster konkreter Schritt:** AP12 separat mit dem Nutzer besprechen (Lizenz-/Entitlement-Vertrag). AP18: Versionsentscheidung (brechende Änderungen an IOutboxReader, UseDataProtection, Egress-Policy, KI-Check-Ergebnissen → Vorschlag 7.0.0), MIGRATION-Abschnitt mit Versionsüberschrift, PRs für beide Branches. R25c (Ocelot-Timeout) nicht reproduziert, beobachten. Keine Veröffentlichung.
+- **Aktuell:** Noelia 7.0.0 releasefertig: Release-Gate auf sauberem Stand (Noelia `fd8c20c`, CP `1bae2c2`) für exakt Version 7.0.0 komplett grün; ContosoInvoicing baut und startet gegen 7.0.0 ohne Codeänderung. AP12 (CP-Lizenzen) zurückgestellt.
+- **Letztes abgeschlossenes Paket:** AP18 für die Bibliothek (Release vorbereitet, nicht veröffentlicht).
+- **Nächster konkreter Schritt:** Nutzerentscheidung: Branch pushen, PR nach main, Merge, `gh release create v7.0.0` (Publish-Workflow). Danach CP auf Noelia 7.0.0 von nuget.org heben. Separat: AP12 Brainstorming. R25c beobachten.
 - **Arbeitszweige:** `security/review-2026-09` in beiden Repositories (lokal committet, nicht gepusht). Keine Pushes/Tags/Publishes ohne Freigabe.
 - **Baseline:** Noelia cf54577071cffbe15bc8231047117d4bf7c44a80; Control Plane 11304ca415f7ca9bfa4ee0e69e014b91080aedab.
 - **Nicht anfassen:** bereits vorhandene unversionierte NoeliaControlPlane/src/Noelia.ControlPlane/appsettings.WorkerTransfer.json. WorkerTransfer ist nicht im Auftrag.
@@ -62,7 +62,7 @@ Status: OFFEN / IN ARBEIT / IMPLEMENTIERT (Restabnahme offen) / ERLEDIGT.
 | AP15 Browser-/Gateway-Korrekturen | P2 | R25 | ERLEDIGT | AP00 |
 | AP16 Vollständiges Security-Gate | P2 | R24 | ERLEDIGT | AP05, AP14 |
 | AP17 CI und reproduzierbares Release-Gate | P2 | R23 | ERLEDIGT | AP01–AP16 |
-| AP18 Gesamtabnahme, Migration und Releasevorbereitung | P1 | alle | IN ARBEIT | AP17 |
+| AP18 Gesamtabnahme, Migration und Releasevorbereitung | P1 | alle | ERLEDIGT (Bibliothek; Veröffentlichung durch Nutzer) | AP17 |
 
 ## Konkrete Umsetzung und Abnahme
 
@@ -259,6 +259,13 @@ Nicht schneller erneut starten als Auth-Rate-Limits erlauben; besser je Run isol
 Lokale Tests mit simuliertem IdP/HTTP-Server nicht auf externen Kundendiensten ausführen.
 
 ## Fortschrittsjournal
+
+### 01.10.2026 – AP18 – Bibliothek 7.0.0 releasefertig
+- Vier Restpunkte: `UseDataProtection` ohne Cache-Pflicht (Legacy-Import einmal, dann höchstens alle 5 min); Checkpoint-Implementierungen `internal`, Port bleibt öffentlich; XML-Doku für neue öffentliche Egress-/Observation-Typen; Redis-Audit als nicht clusterfähig dokumentiert. Neue `PublicSurfaceTests`.
+- Version 7.0.0 in `Directory.Build.props`, Demo-Pin, `CLAUDE.md`, `noelia init`; MIGRATION „Noelia 6.4.0 → 7.0.0" mit „Brechend auf einen Blick"; Demo-Übergangsschalter `NOELIA_DECLARES_AI` entfernt.
+- Gate `node demo/eng/release-gate.mjs 7.0.0 --require-clean` auf Noelia `fd8c20c`/CP `1bae2c2`: Bibliothek **3583**, Demo **80**, CP **279**, 12/12 Hosts mit 7.0.0, Security-Gate 12 Dienste, Browser **84** (6/6), CP-Smoke 6/6, Frontend **23**; 0 failed/skipped.
+- ContosoInvoicing (Kopie, Repo unverändert) gegen 7.0.0: Build 0 Warnungen, Start und Dashboard ok, Check-Ergebnisse identisch zu 6.4.0, `noelia analyze .` ohne Befund.
+- Keine offenen GitHub-Issues/PRs. Nicht gepusht, nicht veröffentlicht.
 
 ### 30.09.2026 – AP15, AP17 – ERLEDIGT, Release-Gate
 - Dateien: Noelia `demo/eng/release-gate.mjs` (neu), `demo/eng/compose-report-smoke.mjs` (Modus mit fremdem Stack-Besitzer), `demo/Directory.Build.targets` (neu, `NOELIA_DECLARES_AI` für jede Version außer 6.4.0), `demo/src/shared/Demo.Platform/DemoProviders.cs` (deklariert „keine KI"), `demo/probes/Noelia.SecurityHeaders.Probe/…`, `demo/src/frontend/e2e/stage-hint.spec.js` (neu), `demo/eng/accepted-findings.txt`, `demo/README.md`, `demo/RELEASE-GATE-5.0.md`, `.github/workflows/ci.yml` (Gate-Unittests). CP `eng/demo-live-smoke.mjs` (`NOELIA_CP_DLL`), `.gitignore` (lokale WorkerTransfer-Konfiguration).
