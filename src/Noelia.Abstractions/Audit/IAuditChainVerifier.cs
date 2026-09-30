@@ -4,9 +4,9 @@ namespace Noelia.Abstractions.Audit;
 /// Reads a stored audit chain back and recomputes it.
 /// </summary>
 /// <remarks>
-/// Separate from the writer on purpose. A component that both extends a chain
-/// and judges it is the same party doing both, which is the arrangement a hash
-/// chain exists to make unnecessary.
+/// Separate from the writer for read-back verification. This separation alone
+/// provides no independent trust: an attacker able to rewrite the store can
+/// recompute unkeyed hashes. Completeness requires additional evidence.
 /// </remarks>
 public interface IAuditChainVerifier
 {
@@ -36,11 +36,15 @@ public sealed record AuditChainVerification
     /// </remarks>
     public bool IsSupported { get; init; }
 
-    /// <summary>Whether every entry and every link held.</summary>
+    /// <summary>Legacy hash/link result for the entries read, not a completeness verdict.</summary>
+    /// <remarks>An empty successful walk also returns true. Prefer the explicit evidence states.</remarks>
     public bool IsIntact { get; init; }
 
-    /// <summary>How many entries were recomputed.</summary>
+    /// <summary>How many entries were examined, including the first failing entry if any.</summary>
     public long EntriesVerified { get; init; }
+
+    /// <summary>Versioned limits of this verification; null for legacy or unspecified evidence.</summary>
+    public AuditChainEvidence? Evidence { get; init; }
 
     /// <summary>The timestamp of the oldest entry seen, if any.</summary>
     public DateTimeOffset? Oldest { get; init; }
@@ -73,7 +77,88 @@ public sealed record AuditChainVerification
     /// <summary>The answer when no readable sink is registered.</summary>
     /// <param name="note">What to tell the operator.</param>
     public static AuditChainVerification Unsupported(string note) =>
-        new() { IsSupported = false, Note = note };
+        new() { IsSupported = false, Note = note, Evidence = new() { SchemaVersion = 1 } };
+}
+
+/// <summary>What a chain walk establishes, independently of legacy pass/fail flags.</summary>
+public sealed record AuditChainEvidence
+{
+    /// <summary>Evidence format; zero means unspecified, not the producer's current version.</summary>
+    public int SchemaVersion { get; init; }
+
+    /// <summary>Hash/link consistency of the available entries, not authenticity.</summary>
+    public AuditChainConsistency Consistency { get; init; }
+
+    /// <summary>Completeness of the audit history. Version 1 cannot establish completeness.</summary>
+    public AuditChainCompleteness Completeness { get; init; }
+
+    /// <summary>The requested read boundary, not proof of what exists outside it.</summary>
+    public AuditChainReadScope Scope { get; init; }
+
+    /// <summary>Whether a stable snapshot boundary was established for this walk.</summary>
+    public bool HasStableSnapshot { get; init; }
+
+    /// <summary>Whether a checkpoint independent of the mutable store was verified.</summary>
+    public bool HasIndependentCheckpoint { get; init; }
+
+    /// <summary>Whether index positions were contiguous from the defined genesis sequence.</summary>
+    public bool SequenceVerified { get; init; }
+
+    /// <summary>Number of entries atomically captured, when a snapshot was available.</summary>
+    public long? SnapshotEntryCount { get; init; }
+
+    /// <summary>Head atomically captured with the snapshot; still from the mutable store.</summary>
+    public string? SnapshotHead { get; init; }
+
+    /// <summary>Why an independent checkpoint did or did not establish completeness.</summary>
+    public string CheckpointState { get; init; } = "NotConfigured";
+
+    /// <summary>Digest identifier of the matched signed checkpoint, if any.</summary>
+    public string? CheckpointId { get; init; }
+
+    /// <summary>UTC issue time of the matched signed checkpoint, if any.</summary>
+    public DateTimeOffset? CheckpointIssuedAt { get; init; }
+}
+
+/// <summary>Consistency, an unavailable conclusion and a failed read are distinct outcomes.</summary>
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<AuditChainConsistency>))]
+public enum AuditChainConsistency
+{
+    /// <summary>No consistency conclusion, including an empty or unsupported walk.</summary>
+    Unknown,
+    /// <summary>Observed hashes and links held; rewriting and recomputing can still produce this result.</summary>
+    Consistent,
+    /// <summary>An observed hash, link or required genesis predecessor failed.</summary>
+    Broken,
+    /// <summary>The reader did not finish; no conclusion about the unread remainder.</summary>
+    ReadFailed
+}
+
+/// <summary>No complete-history claim is available without a defined independent anchor.</summary>
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<AuditChainCompleteness>))]
+public enum AuditChainCompleteness
+{
+    /// <summary>The available data cannot establish completeness.</summary>
+    Unknown,
+    /// <summary>The caller explicitly requested only a time suffix.</summary>
+    Partial,
+    /// <summary>A stable full snapshot matches an independent authenticated checkpoint.</summary>
+    Complete
+}
+
+/// <summary>Which part of the available store the caller asked to read.</summary>
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<AuditChainReadScope>))]
+public enum AuditChainReadScope
+{
+    /// <summary>No read scope was established.</summary>
+    Unknown,
+    /// <summary>All entries exposed by the reader; not a stable snapshot or complete-history proof.</summary>
+    AvailableStore,
+    /// <summary>A suffix starting at the supplied time boundary.</summary>
+    TimeSuffix
 }
 
 /// <summary>The first place the chain stopped adding up.</summary>

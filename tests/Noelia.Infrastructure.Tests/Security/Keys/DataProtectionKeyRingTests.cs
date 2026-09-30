@@ -4,8 +4,11 @@ using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.DataProtection.XmlEncryption;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Security.Encryption;
+using Noelia.Abstractions.Security.Keys;
 using Noelia.InMemory.Caching;
 using Noelia.Infrastructure.Security.Keys;
 
@@ -33,10 +36,11 @@ public sealed class DataProtectionKeyRingTests
 
         // Two repositories over one store: the second is the replica that never
         // saw the first one write.
-        new NoeliaXmlRepository(cache.Service, NullLogger<NoeliaXmlRepository>.Instance)
+        var store = new InMemoryDataProtectionKeyStore();
+        new NoeliaXmlRepository(store, cache.Service, NullLogger<NoeliaXmlRepository>.Instance)
             .StoreElement(new XElement("key", new XAttribute("id", "one")), "one");
 
-        var read = new NoeliaXmlRepository(cache.Service, NullLogger<NoeliaXmlRepository>.Instance)
+        var read = new NoeliaXmlRepository(store, cache.Service, NullLogger<NoeliaXmlRepository>.Instance)
             .GetAllElements();
 
         read.Should().HaveCount(1);
@@ -47,7 +51,8 @@ public sealed class DataProtectionKeyRingTests
     public void Two_elements_do_not_overwrite_each_other()
     {
         var cache = new RecordingCache();
-        var repository = new NoeliaXmlRepository(cache.Service, NullLogger<NoeliaXmlRepository>.Instance);
+        var repository = new NoeliaXmlRepository(new InMemoryDataProtectionKeyStore(),
+            cache.Service, NullLogger<NoeliaXmlRepository>.Instance);
 
         repository.StoreElement(new XElement("key", new XAttribute("id", "one")), "one");
         repository.StoreElement(new XElement("key", new XAttribute("id", "two")), "two");
@@ -60,19 +65,22 @@ public sealed class DataProtectionKeyRingTests
     }
 
     [Fact]
-    public void An_indexed_element_that_is_gone_does_not_stop_the_service()
+    public void An_indexed_legacy_element_that_is_gone_cannot_be_silently_migrated()
     {
         var cache = new RecordingCache();
-        var repository = new NoeliaXmlRepository(cache.Service, NullLogger<NoeliaXmlRepository>.Instance);
-
-        repository.StoreElement(new XElement("key", new XAttribute("id", "one")), "one");
-        repository.StoreElement(new XElement("key", new XAttribute("id", "two")), "two");
+        cache.Seed("noelia:dataprotection:index", new NoeliaXmlRepository.KeyRingIndex
+            { Ids = ["one", "two"] });
+        cache.Seed("noelia:dataprotection:key:one", new NoeliaXmlRepository.StoredElement
+            { Xml = new XElement("key", new XAttribute("id", "one")).ToString() });
+        cache.Seed("noelia:dataprotection:key:two", new NoeliaXmlRepository.StoredElement
+            { Xml = new XElement("key", new XAttribute("id", "two")).ToString() });
+        var repository = new NoeliaXmlRepository(new InMemoryDataProtectionKeyStore(),
+            cache.Service, NullLogger<NoeliaXmlRepository>.Instance);
         cache.Forget("noelia:dataprotection:key:one");
 
-        var read = repository.GetAllElements();
-
-        read.Should().HaveCount(1, "a key that is gone is already unusable; refusing to "
-            + "start would take the service down for it as well");
+        Action read = () => repository.GetAllElements();
+        read.Should().Throw<InvalidDataException>(
+            "a missing revocation must not disappear from the migrated ring");
     }
 
     [Fact]
@@ -203,17 +211,38 @@ public sealed class DataProtectionKeyRingTests
         await using var provider = services.BuildServiceProvider();
 
         var cache = provider.GetRequiredService<IDistributedCacheService>();
-        var repository = new NoeliaXmlRepository(cache, NullLogger<NoeliaXmlRepository>.Instance);
+        var store = provider.GetRequiredService<IDataProtectionKeyStore>();
+        var repository = new NoeliaXmlRepository(store, cache, NullLogger<NoeliaXmlRepository>.Instance);
 
         repository.StoreElement(
             new XElement("key", new XAttribute("id", "one"), new XElement("payload", Canary)),
             "one");
 
-        var read = new NoeliaXmlRepository(cache, NullLogger<NoeliaXmlRepository>.Instance)
+        var read = new NoeliaXmlRepository(store, cache, NullLogger<NoeliaXmlRepository>.Instance)
             .GetAllElements();
 
         read.Should().HaveCount(1);
         read.Single().Element("payload")!.Value.Should().Be(Canary);
+    }
+
+    [Fact]
+    public async Task A_new_reader_still_sees_keys_and_revocations_after_31_minutes()
+    {
+        var clock = new AdvancingClock();
+        using var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var cache = new InMemoryDistributedCacheService(memory,
+            NullLogger<InMemoryDistributedCacheService>.Instance, "keyring-clock:");
+        var store = new InMemoryDataProtectionKeyStore();
+        var writer = new NoeliaXmlRepository(store, cache, NullLogger<NoeliaXmlRepository>.Instance);
+        writer.StoreElement(new XElement("key", new XAttribute("id", "one")), "one");
+        writer.StoreElement(new XElement("revocation", new XAttribute("key", "one")), "revocation");
+        await cache.SetAsync("probe", new object());
+        clock.UtcNow = clock.UtcNow.AddMinutes(31);
+        (await cache.GetAsync<object>("probe")).Should().BeNull();
+
+        var replica = new NoeliaXmlRepository(store, cache, NullLogger<NoeliaXmlRepository>.Instance);
+        replica.GetAllElements().Select(element => element.Name.LocalName)
+            .Should().BeEquivalentTo(["key", "revocation"]);
     }
 
     [Fact]
@@ -268,7 +297,14 @@ public sealed class DataProtectionKeyRingTests
 
         public void Forget(string key) => _entries.Remove(key);
 
+        public void Seed(string key, object value) => _entries[key] = value;
+
         private T? Read<T>(string key) where T : class =>
             _entries.TryGetValue(key, out var value) ? (T?)value : null;
+    }
+
+    private sealed class AdvancingClock : ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
     }
 }

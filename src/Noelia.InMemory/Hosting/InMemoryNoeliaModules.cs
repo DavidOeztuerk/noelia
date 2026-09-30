@@ -44,8 +44,11 @@ public static class InMemoryNoeliaModules
         return noelia.Use(
             Cache,
             g => g.Services.AddInMemoryCache(keyPrefix),
-            contract => contract.Provides<Noelia.Abstractions.Caching.IDistributedCacheService>(
-                "Noelia.InMemory", "UseInMemoryCache(prefix)"));
+            contract => contract
+                .Provides<Noelia.Abstractions.Caching.IDistributedCacheService>(
+                    "Noelia.InMemory", "UseInMemoryCache(prefix)")
+                .Provides<Noelia.Abstractions.Security.Keys.IDataProtectionKeyStore>(
+                    "Noelia.InMemory", "UseInMemoryCache(prefix)"));
     }
 
     /// <summary>

@@ -48,7 +48,8 @@ internal static class OperatorReportCollector
             Composition = Composition(composition, services.GetService<IServiceProviderIsService>()),
             Configuration = Configuration(composition, options),
             SecurityChecks = SecurityChecks(composition, services.GetService<ISecurityCheckReport>()),
-            Sovereignty = Sovereignty(services.GetService<ISovereigntyReport>()),
+            Sovereignty = Sovereignty(services.GetService<ISovereigntyReport>(),
+                services.GetService<IHttpEgressPolicyReport>()),
             Audit = await Audit(
                 services.GetService<IAuditTrailService>(),
                 services.GetService<ISovereignAuditSink>() is IReadableSovereignAuditSink,
@@ -211,14 +212,16 @@ internal static class OperatorReportCollector
             };
     }
 
-    private static SovereigntyView Sovereignty(ISovereigntyReport? report)
+    private static SovereigntyView Sovereignty(ISovereigntyReport? report, IHttpEgressPolicyReport? httpPolicy)
     {
+        var httpEgress = HttpEgress(httpPolicy);
         if (report is null)
         {
             return new SovereigntyView
             {
                 State = OperatorSectionState.Absent,
-                Note = "No sovereignty report is registered."
+                Note = "No sovereignty report is registered.",
+                HttpEgress = httpEgress
             };
         }
 
@@ -232,13 +235,15 @@ internal static class OperatorReportCollector
             return new SovereigntyView
             {
                 State = OperatorSectionState.Faulted,
-                Note = "The sovereignty report could not be read."
+                Note = "The sovereignty report could not be read.",
+                HttpEgress = httpEgress
             };
         }
 
         return new SovereigntyView
         {
             State = OperatorSectionState.Present,
+            HttpEgress = httpEgress,
             EgressIsEnforced = assessment.EgressIsEnforced,
             DeclaredHosts = [.. assessment.DeclaredEgressHosts.Order(StringComparer.Ordinal)],
             Dependencies = [.. assessment.Dependencies.Select(dependency => new DependencyView(
@@ -250,6 +255,30 @@ internal static class OperatorReportCollector
                 Kind = dependency.Kind.ToString()
             })]
         };
+    }
+
+    private static HttpEgressPolicyView HttpEgress(IHttpEgressPolicyReport? report)
+    {
+        if (report is null)
+            return new() { State = OperatorSectionState.Absent, Note = "No factory HTTP guard report is registered." };
+        try
+        {
+            var policy = report.Assess();
+            return new()
+            {
+                State = OperatorSectionState.Present,
+                Note = "Registration and configuration only; not an effective-enforcement or complete network-boundary proof.",
+                IsEnforcing = policy.IsEnforcing,
+                Scope = "HttpClientFactory",
+                Evidence = "RegistrationAndConfiguration",
+                Redirects = policy.IsEnforcing ? "DisabledForSupportedTransports" : "TransportDefault",
+                AllowedTargets = [.. policy.AllowedTargets.Order(StringComparer.Ordinal)]
+            };
+        }
+        catch
+        {
+            return new() { State = OperatorSectionState.Faulted, Note = "The factory HTTP guard configuration could not be read." };
+        }
     }
 
     private static async Task<AuditView> Audit(

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Hosting;
 using Noelia.Abstractions.Security.Encryption;
+using Noelia.Abstractions.Security.Keys;
 
 namespace Noelia.Infrastructure.Security.Keys;
 
@@ -34,7 +35,7 @@ namespace Noelia.Infrastructure.Security.Keys;
 /// and used by nobody.</para>
 ///
 /// <para><strong>A master key, not an encryption service.</strong> The ring is
-/// stored through <see cref="IDistributedCacheService"/> and encrypted under the
+/// stored through <see cref="IDataProtectionKeyStore"/> and encrypted under the
 /// key <see cref="IMasterKeyProvider"/> holds. Requiring a whole
 /// <c>IDataEncryptionService</c> would have tied the key ring to a provider
 /// package — in practice to Redis — and left every stage without one unable to
@@ -48,7 +49,7 @@ public static class DataProtectionKeyRing
     public static NoeliaModule Module => new("DataProtection");
 
     /// <summary>
-    /// Persists and protects the key ring through the registered providers.
+    /// Protects the key ring through a dedicated append-only provider.
     /// </summary>
     /// <param name="noelia">The composition.</param>
     /// <param name="applicationName">
@@ -82,6 +83,9 @@ public static class DataProtectionKeyRing
                     provider => new ConfigureKeyManagement(provider));
             },
             contract => contract
+                .Requires<IDataProtectionKeyStore>(
+                    new NoeliaProviderHint("Noelia.Redis", "UseRedisCache(prefix)"),
+                    new NoeliaProviderHint("Noelia.InMemory", "UseInMemoryCache(prefix)"))
                 .Requires<IDistributedCacheService>(
                     new NoeliaProviderHint("Noelia.Redis", "UseRedisCache(prefix)"),
                     new NoeliaProviderHint("Noelia.InMemory", "UseInMemoryCache(prefix)"))
@@ -103,19 +107,18 @@ public static class DataProtectionKeyRing
     }
 }
 
-/// <summary>Stores the key ring through whichever cache provider is registered.</summary>
+/// <summary>Stores the key ring through a non-expiring atomic provider.</summary>
 internal sealed class NoeliaXmlRepository(
+    IDataProtectionKeyStore store,
     IDistributedCacheService cache,
     ILogger<NoeliaXmlRepository> logger) : IXmlRepository
 {
     /// <summary>
-    /// One key per element plus an index, rather than one document.
+    /// One immutable entry per element, rather than one replaceable document.
     /// </summary>
     /// <remarks>
-    /// Two replicas creating a key at the same moment would otherwise
-    /// read-modify-write the same document and one of them would lose its key —
-    /// which surfaces much later as a token that verifies on one instance and
-    /// not on another.
+    /// The provider's atomic append keeps concurrent replicas from losing a
+    /// key or revocation. The old cache index remains a migration source only.
     /// </remarks>
     private const string IndexKey = "noelia:dataprotection:index";
 
@@ -123,23 +126,19 @@ internal sealed class NoeliaXmlRepository(
 
     public IReadOnlyCollection<XElement> GetAllElements()
     {
+        // Import any still-readable pre-v2 cache entries on every read. This
+        // permits a coordinated upgrade without discarding existing cookies or
+        // revocations, and a second replica can repeat the import safely.
         var index = cache.GetAsync<KeyRingIndex>(IndexKey).GetAwaiter().GetResult();
-        if (index is null || index.Ids.Count == 0)
-        {
-            return [];
-        }
-
-        var elements = new List<XElement>(index.Ids.Count);
-        foreach (var id in index.Ids)
+        foreach (var id in index?.Ids ?? [])
         {
             var stored = cache.GetAsync<StoredElement>(ElementKey(id)).GetAwaiter().GetResult();
             if (stored is null)
             {
-                // The index outlived the element. Losing a key is worth a line
-                // in the log; refusing to start over it would take the service
-                // down for a key it can no longer use anyway.
-                logger.LogWarning("Data protection key {KeyId} is indexed but missing", id);
-                continue;
+                // It may be a revocation, so silently omitting it could make a
+                // revoked key usable again on a new replica.
+                logger.LogError("An indexed legacy data protection element is missing");
+                throw new InvalidDataException("The legacy data protection ring is incomplete; restore its indexed elements before migrating.");
             }
 
             if (string.IsNullOrWhiteSpace(stored.Xml))
@@ -147,14 +146,15 @@ internal sealed class NoeliaXmlRepository(
                 // An entry that came back empty is a store or serializer
                 // problem, not a key. Parsing it would fail with "Root element
                 // is missing", which names the symptom and not the cause.
-                logger.LogError("Data protection key {KeyId} came back empty from the store", id);
-                continue;
+                logger.LogError("An indexed legacy data protection element is empty");
+                throw new InvalidDataException("The legacy data protection ring contains an empty indexed element.");
             }
 
-            elements.Add(XElement.Parse(stored.Xml));
+            store.AppendAsync(id, stored.Xml).GetAwaiter().GetResult();
         }
 
-        return elements;
+        return store.ReadAllAsync().GetAwaiter().GetResult()
+            .Select(stored => XElement.Parse(stored.Xml)).ToArray();
     }
 
     public void StoreElement(XElement element, string friendlyName)
@@ -165,21 +165,8 @@ internal sealed class NoeliaXmlRepository(
             ? Guid.NewGuid().ToString("N")
             : friendlyName;
 
-        // No expiry. A key ring entry outlives everything protected with it, and
-        // an eviction here is a fleet-wide sign-out nobody asked for.
-        cache.SetAsync(
-                ElementKey(id),
-                new StoredElement { Xml = element.ToString(SaveOptions.DisableFormatting) })
+        store.AppendAsync(id, element.ToString(SaveOptions.DisableFormatting))
             .GetAwaiter().GetResult();
-
-        var index = cache.GetAsync<KeyRingIndex>(IndexKey).GetAwaiter().GetResult()
-                    ?? new KeyRingIndex();
-
-        if (!index.Ids.Contains(id, StringComparer.Ordinal))
-        {
-            index.Ids.Add(id);
-            cache.SetAsync(IndexKey, index).GetAwaiter().GetResult();
-        }
     }
 
     /// <summary>

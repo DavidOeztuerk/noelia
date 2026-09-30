@@ -61,6 +61,13 @@ Every client created through `IHttpClientFactory` is then guarded, and a call to
 anything else throws `EgressDeniedException` **before it leaves**. A log entry
 about data that already left is a record, not a control.
 
+When the policy enforces a boundary, automatic redirects are disabled. Redirect
+responses are returned for an explicit, separately policy-checked decision; an
+allowed host must not silently send a request or its body to another host.
+HttpClientHandler and SocketsHttpHandler are supported primary transports;
+custom primary transports are refused under an enforcing policy. This is an
+HTTP-client boundary, not process-wide network isolation.
+
 Declaring nothing keeps the previous behaviour, so adding this changes nothing
 until someone states an intent. Loopback and private ranges are opt-in rather
 than assumed: a collector on localhost is still a destination.

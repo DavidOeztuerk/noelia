@@ -6,7 +6,7 @@ namespace Noelia.Infrastructure.Audit;
 /// <summary>
 /// In-memory sovereign audit sink for tests and local development.
 /// </summary>
-public sealed class InMemorySovereignAuditSink : ISovereignAuditSink, IReadableSovereignAuditSink
+public sealed class InMemorySovereignAuditSink : ISovereignAuditSink, IStableAuditSnapshotReader
 {
     private readonly List<object> _events = [];
     private readonly List<StoredAuditEntry> _stored = [];
@@ -67,6 +67,17 @@ public sealed class InMemorySovereignAuditSink : ISovereignAuditSink, IReadableS
         lock (_lock)
         {
             return _events.OfType<AuditEvent<T>>().ToList();
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<AuditReadSnapshot?> TryCaptureSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_lock)
+        {
+            AuditReadSnapshot snapshot = new("inmemory", [.. _stored], _stored.LastOrDefault()?.Hash, true);
+            return Task.FromResult<AuditReadSnapshot?>(snapshot);
         }
     }
 

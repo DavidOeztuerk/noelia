@@ -1,3 +1,133 @@
+# Unveröffentlichte Sicherheitskorrekturen
+
+## Data-Protection-Schlüsselring: dedizierter atomarer Store
+
+`UseDataProtection(applicationName)` benötigt nun zusätzlich den providerfreien
+`IDataProtectionKeyStore`. `UseRedisCache(prefix)` und `UseInMemoryCache(prefix)`
+registrieren ihn automatisch. Redis verwendet ein atomisches `HSETNX`-Hash ohne
+TTL außerhalb des generischen Cache-Namensraums; gleichzeitige Schlüssel- und
+Widerrufsschreiber überschreiben einander nicht. Der InMemory-Store hat ebenfalls
+keinen 30-Minuten-Ablauf, bleibt aber prozesslokal. Bestehende XML-Verschlüsselung,
+AAD und `IMasterKeyProvider` bleiben unverändert.
+
+Bei jedem Lesen werden noch erreichbare Schlüssel und Widerrufe aus dem alten
+Cache-Index in den neuen Store übernommen. Vor einem koordinierten Upgrade den
+alten Ring und Master Key sichern und den neuen Dienst starten, solange der
+alte Cache-Index noch lesbar ist; abgelaufene oder bereits gelöschte Elemente
+können nicht aus dem Cache rekonstruiert werden. Fehlt ein indexiertes Element
+oder ist es leer, bricht die Migration ab, damit ein fehlender Widerruf nicht
+still verschwindet. Den vollständigen Ring dann aus dem Backup wiederherstellen.
+Während eines gemischten
+Rollouts könnten alte Instanzen neue Schlüssel nicht sehen; alte Instanzen
+vor neuer Schlüsselerzeugung ersetzen. Der neue Redis-Hash benötigt dauerhafte
+Redis-/Valkey-Persistenz, gesichertes Volume und eine No-Eviction-Policy.
+Das bisherige Demo-Valkey-Profil ist noch ephemer; dessen Umstellung gehört zu
+AP14. Keine vorhandenen Daten werden automatisch gelöscht.
+
+## Audit-Verifikation: versionierte Evidenz statt Vollständigkeit aus einem Boolean
+
+`AuditChainVerification` erhält additiv `evidence` (Version 1): Konsistenz
+(`Consistent`, `Broken`, `ReadFailed`, `Unknown`), Vollständigkeit
+(`Unknown`/`Partial`), Lesebereich sowie explizit fehlender Snapshot-/Checkpoint-
+Nachweis. Alte Ergebnisse ohne Evidenz behalten `null`; eine fehlende
+Evidenz-Schemaversion bleibt 0. `IsIntact` bleibt kompatibel ein Hash-/Linkflag,
+auch bei leerem erfolgreichem Walk, und darf nicht als Vollständigkeit angezeigt
+werden. Version 1 stellt keinen vollständigen Verlauf fest.
+
+Ein Walk ohne Zeitgrenze verweigert einen ersten Eintrag mit Vorgänger als
+`LinkBroken` (fehlende Genesis-Grenze). Historisch bewusst gekürzte Logs ohne
+Genesis können daher nicht mehr als ganze Kette gelten; explizite Zeitbereiche
+bleiben Teilprüfungen, nicht der Weg zu einer Vollständigkeitsbehauptung.
+Lesefehler werden im Verifier als `ReadFailed` zurückgegeben, ohne rohe
+Exceptiontexte. Cancellation propagiert weiter. Direkte Redis-Reader-Aufrufer
+erhalten weiterhin die unten dokumentierte Exception.
+
+Bei Senken mit geteiltem Head vergleicht der Verifier dessen Wert vor und nach
+dem Walk mit dem gelesenen letzten Eintrag. Ein entfernter Suffix bei erhaltenem
+Head oder ein konkurrierender Append wird `ReadFailed`, nicht `Consistent`.
+Dieser Vergleich ist ein Race-/Boundary-Check aus demselben veränderbaren Store,
+kein stabiler Snapshot oder unabhängiger Vollständigkeitsanker. Werden Index,
+Payloads und Head zusammen entfernt oder neu berechnet, bleibt Vollständigkeit
+unbekannt.
+
+Schema 2 meldet einen atomaren Voll-Snapshot mit Sequenzmetadaten. Redis begrenzt
+die Kopie standardmäßig auf 4096 Einträge und 4 MiB Payload; darüber bleibt der
+Stream-Pfad ohne Snapshot-Nachweis. Alte zeitbasierte Redis-Scores bleiben lesbar,
+werden aber nicht rückwirkend als lückenlose Sequenz anerkannt. Der optionale
+`ITrustedAuditCheckpointSource` muss ein außerhalb des Audit-Stores authentisiertes
+Dokument liefern. `SignedFileAuditCheckpointSource` prüft die P-256-Signatur gegen
+einen separat gepinnten PublicKey; das private Signiermaterial gehört nicht in
+den Dienst oder Redis. Nur ein passender Voll-Snapshot mit Genesis, Sequenz,
+Anzahl und Head erhält `Complete`. Ohne diesen Vertrag bleiben Bestandslogs
+`Unknown` oder bei Zeitgrenze `Partial`. `Complete` belegt den gespeicherten
+Verlauf relativ zum akzeptierten Signer, nicht die Erfassung aller echten Ereignisse.
+
+CP liest die neue Evidenz explizit vom Wire auch mit der veröffentlichten
+6.4.0-Abstractions-Abhängigkeit. UI trennt ReadFailed, Hash-/Linkkonsistenz und
+unbekannte Vollständigkeit; Legacy-Flags erhalten keinen neuen Nachweis.
+CP-Historie speichert nun den expliziten Konsistenzzustand samt unbekannter oder
+partieller Vollständigkeit; Legacy-Flags erscheinen als unbekannt. Alarmrouten
+melden Recovery nur bei belegtem positiven Zielzustand; Broken→Unknown oder
+ReadFailed ist keine Entwarnung. Die Dashboard-Übersicht kennzeichnet die lokale
+Write-Time-Prüfung und unterscheidet sie von Read-Back. Zuverlässige
+Alarmzustellung und Attestation-Formatmigration sind noch offen. Der vorhandene
+AP05-Docker-Kandidat enthält diese Änderungen nicht, keine Veröffentlichung.
+
+## Redis-Audit: ungültige indexierte Einträge brechen den Lesevorgang ab
+
+`RedisSovereignAuditSink.ReadAsync` überspringt fehlende, leere oder JSON-null
+Payloads nicht mehr. Auch ungültiges JSON und eine Abweichung zwischen
+Index-ID und Payload-ID führen zu `InvalidDataException`. Die Diagnose enthält
+nur Indexposition und Fehlerkategorie, keine Payloads oder inneren JSON-Fehler.
+Aufrufer müssen einen fehlgeschlagenen Lesevorgang als solchen behandeln und
+dürfen vorher gelesene Einträge nicht als erfolgreich vollständig geprüft melden.
+Vorhandene Daten werden weder automatisch repariert noch gelöscht.
+
+Das schließt eine stille Auslassung im Reader, beweist aber noch keine
+Kettenvollständigkeit. Atomare Snapshots und unabhängige signierte Checkpoints
+stehen nur unter den oben beschriebenen Grenzen zur Verfügung.
+Der AP05-Docker-Kandidat enthält diese spätere Änderung noch nicht; kein
+bestehender Kandidat und keine veröffentlichte Version wird überschrieben.
+
+## Operator-Bericht Schema 3: Deklaration, HTTP-Policy und Beobachtung trennen
+
+Der Runtime-Bericht erhält additiv `sovereignty.httpEgress` und
+`sovereignty.observedCalls`. `dependencies` bleibt das deklarierte Inventar,
+keine vollständige Reachability-Liste. Die beiden bisherigen Felder
+`egressIsEnforced`/`declaredHosts` bleiben erhalten und behalten ihre beschränkte
+Legacy-Bedeutung; sie beweisen keine Guard-Registrierung.
+
+Der neue Port `IHttpEgressPolicyReport` wird zusammen mit dem Factory-Guard
+registriert. Ein allein registriertes Policy-Objekt erzeugt diesen Nachweis
+nicht. Gemeldet wird Registrierung/Konfiguration (`RegistrationAndConfiguration`)
+für `HttpClientFactory`, keine ausgeführte Kontrollmessung oder prozessweite
+Netzwerkgrenze. Fehlende/faulted Reports sind ausdrücklich getrennte Zustände.
+Traffic wird nicht erfasst: `observedCalls.state=Unavailable`, `count=null`, nie
+eine erfundene Nullmessung. Alte Wire-Berichte werden nicht nachträglich um
+Scope-/Redirectnachweise ergänzt.
+
+Leser müssen Schema 3 ausdrücklich unterstützen. Schema 1/2 bleibt lesbar, hat
+aber keine entsprechenden Aussagen. Release-Version/VersionPrefix unverändert;
+lokale Kandidaten werden separat versioniert und nicht veröffentlicht.
+
+## Egress: keine automatischen Weiterleitungen unterhalb des Guards
+
+Eine durchsetzende Egress-Policy deaktiviert AutoRedirect für Factory-Clients.
+301/302/303/307/308 werden an den Aufrufer zurückgegeben. Bisher konnte ein
+erlaubter Host auf ein gesperrtes Ziel umleiten, bei 307/308 inklusive Body.
+Falls die Anwendung folgen muss, stellt sie einen neuen Request über den
+geschützten Client und entscheidet ausdrücklich, welche Header/Inhalte für die
+neue Origin geeignet sind. Keine blind kopierten Credentials.
+
+HttpClientHandler und SocketsHttpHandler werden unterstützt. Unbekannte
+PrimaryHandler werden bei durchsetzender Policy nicht mehr akzeptiert, weil ihre
+Weiterleitungen nicht abgesichert werden können. Named-Client-Konfigurationen
+bleiben erhalten; die Absicherung läuft nach deren Transportkonfiguration.
+Eine leere, nicht durchsetzende Policy ändert das Redirect-Verhalten nicht.
+
+Dies ist noch keine Veröffentlichung und keine prozessweite Netzwerkgarantie.
+Der Fortschritt steht in docs/UMSETZUNGSPLAN-SECURITY-2026-09.md.
+
 # Noelia 6.3.0 → 6.4.0
 
 Keine Breaking Changes. Alles Neue ist additiv, und das Schema des

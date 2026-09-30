@@ -1,4 +1,6 @@
 using Noelia.Abstractions.Caching;
+using Noelia.Abstractions.Security.Keys;
+using Noelia.Redis.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -26,6 +28,8 @@ public static class RedisCacheRegistration
             sp.GetRequiredService<ILogger<RedisDistributedCacheService>>(),
             keyPrefix: $"{prefix}:",
             tagPrefix: $"{prefix}:tag:"));
+        services.AddSingleton<IDataProtectionKeyStore>(sp => new RedisDataProtectionKeyStore(
+            sp.GetRequiredService<IConnectionMultiplexer>(), prefix));
 
         services.AddSingleton<IDistributedRateLimitStore>(sp => new RedisDistributedRateLimitStore(
             sp.GetRequiredService<IConnectionMultiplexer>(),

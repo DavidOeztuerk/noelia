@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
+using Noelia.Abstractions.Sovereignty;
 
 namespace Noelia.Infrastructure.Sovereignty;
 
@@ -93,6 +94,12 @@ public static class EgressPolicyExtensions
     /// cannot see a socket somebody opened without asking it — so it is a
     /// code-review matter, and <c>noelia.egress.guard</c> says so rather than
     /// implying a guarantee the guard cannot give.
+    /// When enforcing, the supported primary transports are
+    /// <see cref="HttpClientHandler"/> and <see cref="SocketsHttpHandler"/>.
+    /// Automatic redirects are disabled: callers receive the redirect response
+    /// and must make a new policy-checked request without forwarding credentials
+    /// or private content to a different origin. Unknown primary transports are
+    /// refused because their redirect behaviour cannot be controlled here.
     /// </remarks>
     public static IServiceCollection AddNoeliaEgressPolicy(
         this IServiceCollection services,
@@ -105,11 +112,33 @@ public static class EgressPolicyExtensions
 
         services.AddSingleton(builder.Build());
         services.AddTransient<EgressGuardHandler>();
+        services.AddSingleton<IHttpEgressPolicyReport, HttpEgressPolicyReport>();
 
-        services.ConfigureAll<HttpClientFactoryOptions>(options =>
+        // Post-configuration runs after named clients choose their transport,
+        // regardless of whether the policy was registered before or after them.
+        services.PostConfigureAll<HttpClientFactoryOptions>(options =>
             options.HttpMessageHandlerBuilderActions.Add(handlerBuilder =>
+            {
+                if (handlerBuilder.Services.GetRequiredService<IEgressPolicy>().IsEnforcing)
+                {
+                    switch (handlerBuilder.PrimaryHandler)
+                    {
+                        case HttpClientHandler handler:
+                            handler.AllowAutoRedirect = false;
+                            break;
+                        case SocketsHttpHandler handler:
+                            handler.AllowAutoRedirect = false;
+                            break;
+                        default:
+                            throw new InvalidOperationException(
+                                "An enforcing Noelia egress policy requires HttpClientHandler or "
+                                + "SocketsHttpHandler as the primary transport so automatic redirects "
+                                + "cannot bypass the guard. Custom primary transports are not supported.");
+                    }
+                }
                 handlerBuilder.AdditionalHandlers.Add(
-                    handlerBuilder.Services.GetRequiredService<EgressGuardHandler>())));
+                    handlerBuilder.Services.GetRequiredService<EgressGuardHandler>());
+            }));
 
         return services;
     }
