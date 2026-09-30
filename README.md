@@ -1716,13 +1716,31 @@ wherever Noelia does:
 
 | Check | What it answers |
 |---|---|
-| `noelia.ai.inventory` | Which configured destinations are model endpoints. Passes with the list, or passes with none. |
+| `noelia.ai.inventory` | Which configured destinations are model endpoints. Passes with the list; with none recognised and no declaration it is a `Warning` ("not determined"). |
 | `noelia.ai.transfer` | Whether any of them sits under a third country's access law, or under a name whose operator cannot be told. |
-| `noelia.ai.record-keeping` | Whether what the service records about its model calls is written automatically and can be shown not to have been edited. |
+| `noelia.ai.record-keeping` | Whether an audit sink is registered that is chained and can be read back. It does **not** observe that a model call produced an entry; the summary says so. |
 
-Where no model endpoint is configured, the last two report `NotApplicable`
-rather than passing: a green tick against an article that does not apply is
-noise in the one document meant to cut through it.
+"No known model host detected" is **not** "no model": recognition is by host
+name, so Ollama on `localhost:11434` or `https://llm.internal.example` is
+invisible. With nothing recognised and no declaration, inventory and
+record-keeping report `Warning` with "not determined" and a remediation to
+declare AI use. `transfer` stays `NotApplicable` (nothing to classify) and says
+that this is not proof that no model is reached.
+
+Declare it yourself:
+
+```csharp
+noelia.AddSovereignPlatform(p => p
+    .DeclareArtificialIntelligence(true, "http://localhost:11434"));   // uses a model, and where
+// or, on the service collection:
+services.DeclareNoeliaArtificialIntelligenceUse(false);                // uses none
+```
+
+A declared endpoint is listed in the inventory whatever its host is called. A
+declared "no" gives `NotApplicable` worded as *declared by the operator, not
+observed*; a declared "yes" without a recognised host keeps the checks asking
+(it never becomes "no duty"). This is evidence for a human reader, not a legal
+assessment; Art. 12 / 26 bind from 2 December 2027.
 
 ### What the inventory is not
 

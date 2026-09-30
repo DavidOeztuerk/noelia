@@ -107,6 +107,9 @@ public class ComplianceViewTests
         var html = await app.Client.GetStringAsync("/noelia/ai");
 
         html.Should().Contain("No configured destination is a recognised model");
+        html.Should().Contain("does not establish that the service uses no model");
+        html.Should().NotContain("class=\"pass\">No configured destination",
+            "an empty inventory is not a pass");
         html.Should().NotContain("db.internal",
             "the AI page lists model endpoints; a database on it would be noise that "
             + "teaches the reader to skim");
@@ -172,7 +175,7 @@ public class ComplianceViewTests
     }
 
     [Fact]
-    public async Task Without_a_model_endpoint_the_ai_checks_stand_down_rather_than_pass_loudly()
+    public async Task Without_a_model_endpoint_the_ai_checks_do_not_conclude_no_duty()
     {
         await using var app = await Open(new DeclaredDependency("Database", "Host=db.internal"));
 
@@ -182,10 +185,11 @@ public class ComplianceViewTests
         results.Single(result => result.Id == "noelia.ai.transfer")
             .Status.Should().Be(SecurityCheckStatus.NotApplicable);
 
-        results.Single(result => result.Id == "noelia.ai.record-keeping")
-            .Status.Should().Be(SecurityCheckStatus.NotApplicable,
-                "a green tick against an article that does not apply is noise in the one "
-                + "document meant to cut through it");
+        var recordKeeping = results.Single(result => result.Id == "noelia.ai.record-keeping");
+        recordKeeping.Status.Should().Be(SecurityCheckStatus.Warning,
+            "nothing recognised is not the same as nothing used");
+        recordKeeping.Summary.Should().Contain("Not determined")
+            .And.NotContain("no record-keeping duty");
     }
 
     [Fact]

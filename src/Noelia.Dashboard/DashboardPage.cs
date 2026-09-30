@@ -593,8 +593,10 @@ internal static class DashboardPage
 
         if (models.Length == 0)
         {
-            output.Append("<p class=\"pass\">No configured destination is a recognised model or ")
-                .Append("inference endpoint.</p>")
+            output.Append("<p class=\"warning\">No configured destination is a recognised model or ")
+                .Append("inference endpoint. That does not establish that the service uses no ")
+                .Append("model; unless the operator declared AI use explicitly ")
+                .Append("(<code>DeclareArtificialIntelligence</code>), it is not determined.</p>")
                 .Append("<p class=\"muted\">Recognition is by host name. A model served from a ")
                 .Append("name of your own choosing, or reached through a gateway, would not ")
                 .Append("appear here — so this is a floor, not a ceiling.</p></section>");

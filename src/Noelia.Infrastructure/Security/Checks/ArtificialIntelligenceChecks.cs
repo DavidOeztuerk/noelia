@@ -4,8 +4,42 @@ using Noelia.Abstractions.Compliance;
 using Noelia.Abstractions.Hosting;
 using Noelia.Abstractions.Security.Checks;
 using Noelia.Abstractions.Sovereignty;
+using Noelia.Infrastructure.Sovereignty;
 
 namespace Noelia.Infrastructure.Security.Checks;
+
+/// <summary>
+/// What the operator declared about AI use, read the same way by every check.
+/// </summary>
+internal static class ArtificialIntelligenceDeclaration
+{
+    /// <summary>
+    /// <c>null</c> when nothing was declared, otherwise the operator's last word.
+    /// A "yes" from any declaration wins over a "no".
+    /// </summary>
+    public static bool? Read(IServiceProvider services)
+    {
+        var declarations = services.GetServices<DeclaredArtificialIntelligenceUse>().ToArray();
+
+        if (declarations.Length == 0)
+        {
+            return null;
+        }
+
+        return declarations.Any(d => d.UsesArtificialIntelligence);
+    }
+
+    public const string NotDetermined =
+        "No model endpoint was recognised, and recognition is by host name: a local model, "
+        + "a self-hosted endpoint or a name the operator chose is not recognised. This does "
+        + "not establish that the service uses no model.";
+
+    public const string DeclareRemediation =
+        "State the service's AI use explicitly: DeclareArtificialIntelligence(true, endpoint) "
+        + "on the sovereign platform if it uses a model, or DeclareArtificialIntelligence(false) "
+        + "if it does not. The latter is recorded as the operator's declaration, not as an "
+        + "observation.";
+}
 
 /// <summary>
 /// Which model endpoints this service is configured to reach.
@@ -34,7 +68,7 @@ internal sealed class ArtificialIntelligenceInventoryCheck(
     public override string Remediation =>
         "List every model endpoint the service may reach as a DeclaredDependency, so that "
         + "the inventory an AI-Act assessment starts from is produced by the running "
-        + "configuration rather than assembled from memory.";
+        + "configuration rather than assembled from memory. " + ArtificialIntelligenceDeclaration.DeclareRemediation;
 
     public override IReadOnlyList<RegulatoryReference> References =>
     [
@@ -50,20 +84,40 @@ internal sealed class ArtificialIntelligenceInventoryCheck(
         if (report is null)
         {
             return Task.FromResult(Result(
-                SecurityCheckStatus.NotApplicable,
-                "No sovereignty report is registered, so no destination register exists to "
-                + "read model endpoints out of."));
+                SecurityCheckStatus.Warning,
+                "Not determined. No sovereignty report is registered, so no destination "
+                + "register exists to read model endpoints out of.",
+                SecurityCheckSeverity.Low));
         }
 
         var endpoints = report.Assess().ArtificialIntelligenceDependencies;
 
         if (endpoints.Count == 0)
         {
+            var declared = ArtificialIntelligenceDeclaration.Read(services);
+
+            if (declared == false)
+            {
+                return Task.FromResult(Result(
+                    SecurityCheckStatus.NotApplicable,
+                    "The operator declared that this service uses no model. This is a "
+                    + "declaration, not an observation: nothing here checked it."));
+            }
+
+            if (declared == true)
+            {
+                return Task.FromResult(Result(
+                    SecurityCheckStatus.Warning,
+                    "The operator declared that this service uses a model, and no model "
+                    + "endpoint was recognised by host name. The declaration stands; the "
+                    + "inventory is empty only because the endpoint is not recognisable.",
+                    SecurityCheckSeverity.Low));
+            }
+
             return Task.FromResult(Result(
-                SecurityCheckStatus.Pass,
-                "No configured destination is a recognised model or inference endpoint. A "
-                + "model served under a name of the operator's own choosing would not be "
-                + "recognised here."));
+                SecurityCheckStatus.Warning,
+                "Not determined. " + ArtificialIntelligenceDeclaration.NotDetermined,
+                SecurityCheckSeverity.Low));
         }
 
         var names = string.Join(", ", endpoints.Select(e => e.Name).Order(StringComparer.Ordinal));
@@ -120,9 +174,21 @@ internal sealed class ArtificialIntelligenceTransferCheck(
 
         if (endpoints.Count == 0)
         {
+            if (ArtificialIntelligenceDeclaration.Read(services) == true)
+            {
+                return Task.FromResult(Result(
+                    SecurityCheckStatus.Warning,
+                    "The operator declared model use, but no endpoint was recognised or "
+                    + "given, so where inference runs and whether a transfer occurs is not "
+                    + "known here.",
+                    SecurityCheckSeverity.Low));
+            }
+
             return Task.FromResult(Result(
                 SecurityCheckStatus.NotApplicable,
-                "No recognised model endpoint is configured."));
+                "No recognised model endpoint is configured, so there is nothing to "
+                + "classify. This does not establish that no model is reached; see "
+                + "noelia.ai.inventory."));
         }
 
         var abroad = endpoints
@@ -174,9 +240,15 @@ internal sealed class ArtificialIntelligenceTransferCheck(
 /// into something that survives being disputed, which is the only situation in
 /// which the logs are ever read.</para>
 ///
-/// <para>Reported only where a model endpoint exists. A service with no AI in
-/// it has no Article 12 duty, and a green tick against an article that does not
-/// apply is noise in the one document meant to cut through it.</para>
+/// <para>Not applicable only where the operator <em>declared</em> no model use.
+/// "No known model host detected" is not that: recognition is by host name, so a
+/// local or self-named model is invisible, and reading its absence as "no duty"
+/// would be exactly the conclusion the evidence cannot support. That case is
+/// reported as not determined.</para>
+///
+/// <para>A registered sink is capability, not evidence: nothing here observes
+/// that a model call produced an audit entry, so no summary says calls are
+/// recorded.</para>
 /// </remarks>
 internal sealed class ArtificialIntelligenceRecordKeepingCheck(
     IServiceProvider services) : SecurityCheckBase
@@ -188,8 +260,8 @@ internal sealed class ArtificialIntelligenceRecordKeepingCheck(
 
     public override string Remediation =>
         "Register a chained audit sink — UseRedisAudit() or the in-memory sink for a single "
-        + "process — so that what the service records about its model calls is written "
-        + "automatically and can be shown not to have been edited afterwards.";
+        + "process — and make the code that calls a model write an audit entry for each call; "
+        + "registering a sink alone does not record anything. " + ArtificialIntelligenceDeclaration.DeclareRemediation;
 
     public override IReadOnlyList<RegulatoryReference> References =>
     [
@@ -201,13 +273,30 @@ internal sealed class ArtificialIntelligenceRecordKeepingCheck(
         CancellationToken cancellationToken = default)
     {
         var report = services.GetService<ISovereigntyReport>();
+        var observed = report?.Assess().ArtificialIntelligenceDependencies.Count ?? 0;
 
-        if (report is null || report.Assess().ArtificialIntelligenceDependencies.Count == 0)
+        if (observed == 0)
         {
-            return Task.FromResult(Result(
-                SecurityCheckStatus.NotApplicable,
-                "No recognised model endpoint is configured, so no record-keeping duty "
-                + "follows from the AI Act."));
+            var declared = ArtificialIntelligenceDeclaration.Read(services);
+
+            if (declared == false)
+            {
+                return Task.FromResult(Result(
+                    SecurityCheckStatus.NotApplicable,
+                    "The operator declared that this service uses no model, so no AI-Act "
+                    + "record-keeping question is raised. This is a declaration, not an "
+                    + "observation."));
+            }
+
+            if (declared is null)
+            {
+                return Task.FromResult(Result(
+                    SecurityCheckStatus.Warning,
+                    "Not determined. " + ArtificialIntelligenceDeclaration.NotDetermined
+                    + " Whether an AI-Act record-keeping question arises cannot be told from here.",
+                    SecurityCheckSeverity.Low));
+            }
+            // Declared yes: the sink question below still has to be answered.
         }
 
         var probe = services.GetService<IServiceProviderIsService>();
@@ -216,8 +305,8 @@ internal sealed class ArtificialIntelligenceRecordKeepingCheck(
         {
             return Task.FromResult(Result(
                 SecurityCheckStatus.Warning,
-                "A model endpoint is configured and no audit sink is registered, so nothing "
-                + "the service does with it is recorded anywhere it could later be read."));
+                "Model use is observed or declared and no audit sink is registered, so nothing "
+                + "the service does with a model is recorded anywhere it could later be read."));
         }
 
         var chained = probe.IsService(typeof(IChainedSovereignAuditSink));
@@ -227,24 +316,24 @@ internal sealed class ArtificialIntelligenceRecordKeepingCheck(
         {
             return Task.FromResult(Result(
                 SecurityCheckStatus.Pass,
-                "Records are written automatically to a chained sink and can be read back "
-                + "and verified, so a claim that an entry was added or altered afterwards "
-                + "can be answered. How long they are kept is a property of the store, not "
-                + "of this process."));
+                "A chained audit sink is registered and can be read back and verified. Whether "
+                + "model calls are recorded in it is not observed: registering a sink is not "
+                + "evidence that a model call produced an entry. How long entries are kept is "
+                + "a property of the store, not of this process."));
         }
 
         if (chained)
         {
             return Task.FromResult(Result(
                 SecurityCheckStatus.Warning,
-                "Records are written to a chained sink, but nothing can read them back, so "
+                "A chained audit sink is registered, but nothing can read it back, so "
                 + "the chain cannot be verified from outside the process that wrote it.",
                 SecurityCheckSeverity.Low));
         }
 
         return Task.FromResult(Result(
             SecurityCheckStatus.Warning,
-            "Records are written to a sink that does not own the chain head. With more than "
+            "An audit sink is registered that does not own the chain head. With more than "
             + "one replica that produces a trail a verifier reports as broken on a system "
             + "where nothing was tampered with."));
     }

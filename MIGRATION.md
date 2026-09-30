@@ -1,5 +1,34 @@
 # Unveröffentlichte Sicherheitskorrekturen
 
+## KI-Prüfungen: "nichts erkannt" ist nicht "keine Pflicht" (R20)
+
+Die Erkennung von Modell-Endpunkten geht nach Hostnamen. Ein lokales oder
+selbst benanntes Modell (Ollama auf `localhost`, eigene Domain) blieb unerkannt,
+und `noelia.ai.record-keeping` schloss daraus "keine Aufzeichnungspflicht".
+Zudem klang ein registrierter Audit-Sink, als würden Modellaufrufe automatisch
+aufgezeichnet.
+
+**Geänderte Ergebnisse** (ohne Deklaration, ohne erkannten Host):
+
+- `noelia.ai.inventory`: `Pass` → `Warning` (Low), "Not determined".
+- `noelia.ai.record-keeping`: `NotApplicable` → `Warning` (Low), "Not determined".
+- `noelia.ai.transfer`: bleibt `NotApplicable`, Text sagt nun, dass das kein
+  Beleg für "kein Modell" ist.
+- Kein `ISovereigntyReport` registriert: `inventory` `NotApplicable` → `Warning`.
+- Sink-Texte behaupten keine Aufzeichnung mehr ("Whether model calls are recorded
+  in it is not observed"); ein registrierter Sink ist Fähigkeit, kein Beleg.
+- Dashboard-Seite `/ai`: leerer Bestand ist kein `pass` mehr, sondern eine Warnung.
+
+**Neu: Deklaration.** `SovereignPlatformBuilder.DeclareArtificialIntelligence(bool, string? modelEndpoint = null)`
+bzw. `services.DeclareNoeliaArtificialIntelligenceUse(...)` (Typ
+`DeclaredArtificialIntelligenceUse`). "Nein" ergibt `NotApplicable` mit dem
+Wortlaut "declared by the operator, not observed"; "Ja" ohne erkannten Host
+bleibt `Warning` und stellt weiter die Sink-Frage; ein angegebener Endpunkt
+erscheint im Inventar (`Declared model endpoint`), egal wie der Host heißt.
+Wer bisher auf grüne/`NotApplicable`-KI-Checks angewiesen war, deklariert seine
+KI-Nutzung; Gates, die auf `Warning` scheitern, müssen das berücksichtigen.
+Nur `SovereigntyReport`-Konstruktor: neuer optionaler Parameter am Ende.
+
 ## Outbox: Giftnachrichten, Backoff, Quarantäne und Fencing (R21)
 
 Bisher nahm `ClaimAsync` die ältesten offenen Zeilen, `ReleaseAsync` machte eine
