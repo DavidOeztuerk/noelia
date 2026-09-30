@@ -5,10 +5,10 @@ Auftrag: Die 28 Review-Befunde schrittweise korrigieren, wirksam testen und dies
 
 ## Sofort weiterlesen: Übergabe
 
-- **Aktuell:** AP09 ERLEDIGT: Collector isoliert fehlerhafte Reports, begrenzt parallele Anfragen/Body/Laufzeit, prüft Identität/Frische und erfasst ehrliche Source-/TLS-Evidenz. CP **242/242** gegen öffentliche 6.4.0 und Kandidat .20260930.4, 0 skipped. Synthetischer und echter Paketproduzent-Browserlauf erfolgreich. AP10 IN ARBEIT. Keine umfassende Security-/Releasefreigabe.
-- **Letztes abgeschlossenes Paket:** AP09 – siehe Abnahmejournal vom 30.09.; AP01–AP09 abgeschlossen.
-- **Nächster konkreter Schritt:** AP10: Zustellabsichten im selben SQLite-Commit wie Transition speichern, stabile Delivery-ID/Lease/Backoff/Status und unabhängigen Dispatcher implementieren; 500→Restart→200 und Timeout einer Route testen. Begrenzte regelmäßige Auditprüfung mit gespeichertem Prüfzeitpunkt, manuelle verifizierte Beobachtungen und Verlust von Coverage in History/Alarmen berücksichtigen. Danach AP11 Noelia-Outbox. Keine Veröffentlichung.
-- **Arbeitszweige:** vorhandenes main in beiden Repositories; keine Commits/Pushes/Tags/Publishes eigenständig veranlassen. Lokale Änderungen sind beabsichtigt.
+- **Aktuell:** AP10 und AP11 ERLEDIGT. Noelia **3568/3568** (138 Core + 3430 Infrastructure, inkl. Redis-Integration), CP **262/262** dreimal in Folge, jeweils 0 skipped. Keine umfassende Security-/Releasefreigabe.
+- **Letztes abgeschlossenes Paket:** AP11 – siehe Abnahmejournal vom 30.09.; AP01–AP11 abgeschlossen.
+- **Nächster konkreter Schritt:** AP13 (R19 CSV-Formelschutz in CP, R20 Wortlaut der KI-Checks in Noelia), danach AP16 (Security-Gate mit Sollmenge), AP14/AP15 schlank. AP12 (Lizenzen) erst vor dem ersten Verkauf. Keine Veröffentlichung.
+- **Arbeitszweige:** `security/review-2026-09` in beiden Repositories (lokal committet, nicht gepusht). Keine Pushes/Tags/Publishes ohne Freigabe.
 - **Baseline:** Noelia cf54577071cffbe15bc8231047117d4bf7c44a80; Control Plane 11304ca415f7ca9bfa4ee0e69e014b91080aedab.
 - **Nicht anfassen:** bereits vorhandene unversionierte NoeliaControlPlane/src/Noelia.ControlPlane/appsettings.WorkerTransfer.json. WorkerTransfer ist nicht im Auftrag.
 - **Laufende Umgebung:** CP-Abnahmeläufe beendet; isolierter Kandidatenlauf `/tmp/noelia-ap09-candidate-cp-dakR2G`. AP09-Produzent aus unverändertem .4 unter `/tmp/noelia-ap09-producer-7r7kqI`; eigener Prozess auf Port 59411 wird nach Browserabnahme gezielt beendet. Browserartefakte `noelia-browser-smoke-OHKPNT` (synthetisch), `noelia-browser-smoke-ybZMUu` (echter Produzent), beide Exit 0. Letzte komplette Demo-Docker-Abnahme bleibt AP05 vom 27.09.; keine fremden Stacks verändert.
@@ -54,8 +54,8 @@ Status: OFFEN / IN ARBEIT / IMPLEMENTIERT (Restabnahme offen) / ERLEDIGT.
 | AP07 Dauerhafter atomarer Schlüsselring | P1 | R09 | ERLEDIGT | AP00 |
 | AP08 Versionierte, vertrauenswürdige Nachweise | P1/P2 | R07, R08, R18 | ERLEDIGT | AP05, AP06 |
 | AP09 Robuster Collector | P2 | R13, R22 | ERLEDIGT | AP03, AP05 |
-| AP10 Zuverlässige Alarme und Kettenüberwachung | P2 | R14, R15 | IN ARBEIT | AP06, AP08, AP09 |
-| AP11 Outbox unter Fehlern/Nebenläufigkeit | P2 | R21 | OFFEN | AP00 |
+| AP10 Zuverlässige Alarme und Kettenüberwachung | P2 | R14, R15 | ERLEDIGT | AP06, AP08, AP09 |
+| AP11 Outbox unter Fehlern/Nebenläufigkeit | P2 | R21 | ERLEDIGT | AP00 |
 | AP12 Lizenz-/Entitlement-Konsistenz | P2 | R17 | OFFEN | AP02, AP05 |
 | AP13 Sichere Exporte und präzise KI-Checks | P2 | R19, R20 | OFFEN | AP05, AP08 |
 | AP14 Wahrheitsgetreue, dauerhafte Demo | P1/P2 | R11, R12, R26, R27 | OFFEN | AP05, AP07 |
@@ -259,6 +259,20 @@ Nicht schneller erneut starten als Auth-Rate-Limits erlauben; besser je Run isol
 Lokale Tests mit simuliertem IdP/HTTP-Server nicht auf externen Kundendiensten ausführen.
 
 ## Fortschrittsjournal
+
+### 30.09.2026 – AP11 – ERLEDIGT, Outbox mit Backoff, Quarantäne und Fencing
+- Dateien: `IOutbox.cs`, `EntityFrameworkOutbox.cs`, `NoeliaOutboxMessage.cs`, `OutboxDispatcher.cs`, `OutboxTests.cs`, `OutboxDispatcherTests.cs`, README (Outbox), MIGRATION (neuer Abschnitt).
+- Verhalten: neue Spalten `NextAttemptAt`, `QuarantinedAt`, `ClaimToken`; Claim nur für fällige, nicht quarantänierte Zeilen ohne lebende Lease, Rücklesen über ein Token je Claim. `MarkDelivered`/`Release`/`Quarantine` sind per Token gefenced und liefern bool. Dispatcher: Backoff `BaseRetryDelay·2^(n-1)` bis `MaxRetryDelay`, ab `MaxAttempts` Quarantäne (nie gelöscht), `RequeueAsync` als manuelle Wiederaufnahme mit Historie in `LastError`. `LastError`/Logs nur Exception-Typname.
+- Migration (brechend, kein Obsolete): EF-Migration für drei Spalten und Indizes; `IOutboxReader`-Signaturen und `OutboxMessage.ClaimToken` geändert; `AttemptsBeforeAlarm` ersetzt durch `MaxAttempts`/`BaseRetryDelay`/`MaxRetryDelay`, Validierung beim Start. Alte Dispatcher vor Rollout stoppen. Demo nutzt die Outbox nicht.
+- Tests: Poison-Batch blockiert keine gute Nachricht, Backoff, Quarantäne/Requeue, zwei Dispatcher mit Leaseablauf, Canary nicht in `LastError`/Log, Optionsvalidierung. Tests kompilieren gegen den alten Code nicht (neue Signaturen), daher kein realer Rot-Lauf. `dotnet test Noelia.slnx -c Release`: **138 + 3430**, 0 skipped. `git diff --check` sauber.
+- Offen: kein Jitter, keine Listen-API für Quarantäne, ContosoInvoicing nicht geprüft.
+
+### 30.09.2026 – AP10 – ERLEDIGT, dauerhafte Alarmzustellung und periodische Kettenprüfung
+- Dateien: CP `Severity.cs`, `AlertQueue.cs`, `Alerts.cs`, `FleetHistory.cs`, `FleetCollector.cs` (Optionen), `FleetRecorder.cs`, `Program.cs`, `Attestation.cs`; Tests `AlertDeliveryTests` (umgeschrieben), neu `AlertOutboxTests`, `FleetRecorderChainTests`, `AlertsEndpointTests`; README/MIGRATION.
+- Verhalten: Zustellabsicht im selben SQLite-Commit wie die Transition, Lease/Owner-Fencing, Backoff, stabiler Idempotency-Key (Empfänger deduplizieren). `Alerts:MaximumAttempts` (Default 20) → Endzustand `Failed`. `GET /alerts.json?fleet=` mit Leserecht je Fleet, no-store, ohne URL/Payload. `X→gone` ist Coverage-Verlust (Warning), keine Recovery. `ChainVerificationInterval` (Default 6 h, `00:00:00` = aus), letzte Prüfung je Fleet in SQLite; Zwischenrunden übernehmen den letzten Kettenzustand. Neue Tabellen `alert_deliveries`, `chain_verifications`.
+- Nebenbefund behoben: `AttestationSigner` erzeugte bei gleichzeitigen Erststarts auf macOS verschiedene Schlüssel (12/20 Läufe rot, bis zu 8 Identitäten), weil `File.Move(overwrite:false)` dort nicht exklusiv ist. Jetzt exklusives `FileMode.CreateNew` direkt auf der Schlüsseldatei; Verlierer warten höchstens 2 s auf die Bytes des Gewinners, nur bei Dateien jünger als 5 s. Danach 30/30 grün.
+- Tests: vier R15-Tests vor Fix rot. 500→Neustart→200 mit gleichem Idempotency-Key, veraltete Lease, Atomarität, Max-Versuche, Intervall/Persistenz der Kettenprüfung, Chain-Wechsel erzeugt Zustellung, Endpoint-Autorisierung. `dotnet test tests/Noelia.ControlPlane.Tests -c Release` dreimal **262/262**, 0 skipped. `git diff --check` sauber.
+- Offen: manuelle `?verify=1`/Attestation setzen `chain_verifications` nicht; Recorder beachtet `licence.MaxServices` weiterhin nicht (AP12). Kein Browser-/Docker-Lauf für AP10.
 
 ### 30.09.2026 – AP09 – ERLEDIGT, begrenzter Collector und Source-Evidenz
 - Dateien: `FleetCollector.cs`, neues `CollectionSourceEvidence.cs` mit gemeinsamem `CollectorConcurrency`, `Program.cs`, `FleetRecorder.cs`, `FleetCoverage.cs`, Services-Seite, Attestation-Caveats, README/MIGRATION, `CollectorIsolationTests.cs`, `CollectorTlsTests.cs`, angepasste vollständige Wire-Fixturn und Browserfixture. Keinen eingefrorenen Attestation-Vektor oder die V3-Shape geändert.
