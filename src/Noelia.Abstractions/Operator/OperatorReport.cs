@@ -277,12 +277,53 @@ public sealed record SovereigntyView
 /// <summary>Configuration evidence about the registered factory HTTP guard only.</summary>
 public sealed record HttpEgressPolicyView
 {
+    /// <summary>
+    /// Whether a factory HTTP guard report is registered, and whether it could
+    /// be read. <c>Absent</c> is a decision; <c>Faulted</c> means the report was
+    /// registered and reading it failed. The default, <c>Unavailable</c>, is what
+    /// a report written before schema 3 deserialises to: unknown, never verified.
+    /// </summary>
     public OperatorSectionState State { get; init; } = OperatorSectionState.Unavailable;
+
+    /// <summary>
+    /// A sentence saying why there is nothing to show, or what the configuration
+    /// evidence does and does not establish. Never a host name, credential or
+    /// exception text.
+    /// </summary>
     public string? Note { get; init; } = "HTTP guard registration was not reported.";
+
+    /// <summary>
+    /// Whether the guard's allow policy restricts requests. <c>null</c> means it
+    /// was not reported, which is not the same as <c>false</c>. This is
+    /// configuration, not proof that a request was blocked.
+    /// </summary>
     public bool? IsEnforcing { get; init; }
+
+    /// <summary>
+    /// What the guard covers, currently <c>HttpClientFactory</c>: clients created
+    /// through the factory, not direct <c>HttpClient</c> instances, SDK transports
+    /// or other protocols.
+    /// </summary>
     public string? Scope { get; init; }
+
+    /// <summary>
+    /// What the statement rests on, currently <c>RegistrationAndConfiguration</c>.
+    /// It is neither an observation of traffic nor a test of effective enforcement.
+    /// </summary>
     public string? Evidence { get; init; }
+
+    /// <summary>
+    /// How redirects are treated: <c>DisabledForSupportedTransports</c> when the
+    /// policy is enforcing (a redirect is returned to the caller instead of being
+    /// followed), <c>TransportDefault</c> when it is not.
+    /// </summary>
     public string? Redirects { get; init; }
+
+    /// <summary>
+    /// The host patterns and network categories the allow policy permits, in
+    /// ordinal order. These are allow-policy entries, not declared dependencies,
+    /// and can be broader than what the service actually calls.
+    /// </summary>
     public IReadOnlyList<string> AllowedTargets { get; init; } = [];
 }
 
@@ -290,8 +331,20 @@ public sealed record HttpEgressPolicyView
 /// <remarks>Noelia currently has no outbound-call observation collector.</remarks>
 public sealed record OutboundObservationView
 {
+    /// <summary>
+    /// Whether outbound calls are observed at all. <c>Unavailable</c>, the current
+    /// and default state, means nothing is collected; it says nothing about
+    /// whether calls happened.
+    /// </summary>
     public OperatorSectionState State { get; init; } = OperatorSectionState.Unavailable;
+
+    /// <summary>Why there is no observation, or what a count covers.</summary>
     public string? Note { get; init; } = "Outbound calls are not collected; declarations and allow-policy entries are not traffic observations.";
+
+    /// <summary>
+    /// The number of observed outbound calls, or <c>null</c> when none are
+    /// collected. <c>null</c> is not zero traffic.
+    /// </summary>
     public long? Count { get; init; }
 }
 

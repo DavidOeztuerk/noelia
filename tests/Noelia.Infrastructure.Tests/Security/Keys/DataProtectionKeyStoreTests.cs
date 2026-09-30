@@ -78,14 +78,14 @@ public sealed class RedisDataProtectionKeyStoreTests(RedisFixture fixture) : ICl
         await cache.SetAsync("noelia:dataprotection:key:legacy-revocation", new NoeliaXmlRepository.StoredElement
             { Xml = "<revocation id='legacy-key' />" });
 
-        var repository = new NoeliaXmlRepository(store, cache, NullLogger<NoeliaXmlRepository>.Instance);
+        var repository = new NoeliaXmlRepository(store, NullLogger<NoeliaXmlRepository>.Instance, cache);
         repository.GetAllElements().Should().HaveCount(2);
         await connection.GetDatabase().KeyDeleteAsync($"{prefix}:noelia:dataprotection:index");
         await connection.GetDatabase().KeyDeleteAsync($"{prefix}:noelia:dataprotection:key:legacy-key");
         await connection.GetDatabase().KeyDeleteAsync($"{prefix}:noelia:dataprotection:key:legacy-revocation");
 
-        var fresh = new NoeliaXmlRepository(new RedisDataProtectionKeyStore(connection, prefix), cache,
-            NullLogger<NoeliaXmlRepository>.Instance);
+        var fresh = new NoeliaXmlRepository(new RedisDataProtectionKeyStore(connection, prefix),
+            NullLogger<NoeliaXmlRepository>.Instance, cache);
         fresh.GetAllElements().Select(element => element.Name.LocalName)
             .Should().BeEquivalentTo(["key", "revocation"]);
     }

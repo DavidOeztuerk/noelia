@@ -390,6 +390,16 @@ use an atomic Redis compare-and-set when multiple processes append. Audit
 records from 4.4.2 and earlier need the separate migration described in
 [MIGRATION.md](MIGRATION.md).
 
+**Redis Cluster is not supported by the audit snapshot.** The atomic snapshot
+read (`IStableAuditSnapshotReader`) is a Lua script that reads event payloads
+under keys it builds itself from the index, so those keys are not declared in
+`KEYS[]`. Redis Cluster requires every key a script touches to be declared and
+to live in one slot, which a chain of independently keyed events cannot satisfy.
+Run the Redis audit trail on a single Redis primary (replication and Sentinel
+are fine, sharding is not). The append scripts declare their keys, but the
+event, index and head keys carry no common hash tag and so also span slots on a
+cluster; treat the Redis audit sink as a single-primary provider as a whole.
+
 Every in-memory registration documents what it costs: state is invisible to
 other instances, so a rate limit counts per process and an audit trail does not
 survive a restart. That is sound for tests and a single replica, and stated
@@ -1415,14 +1425,21 @@ indexes are checked for contiguous scores starting at zero. Legacy timestamp
 indexes remain readable but do not gain sequence verification or completeness.
 A stable snapshot alone still yields `Unknown` completeness.
 
-An operator may separately sign an accepted snapshot using
-`AuditCheckpointSignature.Sign(snapshot, privateKeyPem, issuedAt)` and supply
-the document through `SignedFileAuditCheckpointSource(path, trustedPublicKeyPem)`
-as `ITrustedAuditCheckpointSource`. Hold the private signing key outside the
-running service and Redis; pin the P-256 public key in trusted deployment
-configuration independently of the document. The verifier checks its signature,
-chain identity, genesis, sequence, count and head against a new atomic full
-snapshot. Only an exact match returns `completeness: Complete` and a checkpoint
+`completeness: Complete` is reachable only through an
+`ITrustedAuditCheckpointSource` that **you** register. Noelia ships the port
+(`Noelia.Abstractions`) and the verifier that consumes it, but no signer and no
+producer workflow: the signed-checkpoint helper types are implementation detail
+and are not public API. Implement the port over a document that an independent
+signer produces and that is authenticated against a separately pinned trust key
+(for instance an ECDSA P-256 signature over chain id, genesis, count, head and
+issue time). Hold the private signing key outside the audit store, the running
+service and Redis; pin the public key in trusted deployment configuration
+independently of the document. Without a registered source the verifier reports
+`Unknown` (full walk) or `Partial` (time suffix) by design, and says so in its
+note.
+
+The verifier checks the source's document (its chain identity, genesis,
+sequence, count and head) against a new atomic full snapshot. Only an exact match returns `completeness: Complete` and a checkpoint
 digest/issue time. Missing, stale, changed or untrusted checkpoints remain
 `Unknown`; a requested time suffix remains `Partial`. `Complete` means the
 stored chain matches that signer's accepted snapshot, not that every real-world
@@ -1922,9 +1939,12 @@ namespace; cache invalidation cannot remove it. Configure Redis/Valkey with
 durable persistence, a backed-up volume and a no-eviction policy for continuity
 across server restarts. `UseInMemoryCache` supplies a non-expiring but
 process-local ring; it does not preserve cookies across process replacement or
-share them with a second replica. Existing cache-backed ring elements are
-imported when still readable; complete the coordinated upgrade before their
-old cache TTL expires and retain the master key.
+share them with a second replica. A cache is not required: the ring needs only
+the store and the master key. If an `IDistributedCacheService` is registered,
+existing cache-backed ring elements are imported when still readable (at first
+read and then at most every five minutes, so an entry an old replica writes
+during a rolling upgrade arrives with that delay); complete the coordinated
+upgrade before their old cache TTL expires and retain the master key.
 
 `ISecretProvider` is the one secret-store seam; `IVersionedSecretProvider` adds
 history where a provider supports it. Redis and InMemory implement both. The old
@@ -2339,18 +2359,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 6.3.0. Consumers install anonymously from NuGet.org:
+version is 7.0.0. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 6.3.0
+dotnet add package Noelia.Infrastructure --version 7.0.0
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="6.3.0" />
-  <PackageReference Include="Noelia.Redis" Version="6.3.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="6.3.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="7.0.0" />
+  <PackageReference Include="Noelia.Redis" Version="7.0.0" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.0.0" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`

@@ -1,4 +1,35 @@
-# Unveröffentlichte Sicherheitskorrekturen
+# Noelia 6.4.0 → 7.0.0
+
+Eine Hauptversion, weil mehrere Verträge brechen. Es gibt dafür bewusst keine
+`[Obsolete]`-Vorstufe; jeder Bruch steht unten mit dem, was zu tun ist.
+
+## Brechend auf einen Blick
+
+- **Outbox:** `IOutboxReader` hat neue Signaturen, `OutboxMessage` einen letzten
+  Parameter `ClaimToken`, `noelia_outbox` drei neue Spalten (**EF-Migration
+  erforderlich**), und `AttemptsBeforeAlarm` ist durch `MaxAttempts`,
+  `BaseRetryDelay` und `MaxRetryDelay` ersetzt.
+- **Schlüsselring:** `UseDataProtection` braucht einen `IDataProtectionKeyStore`
+  (`UseRedisCache`/`UseInMemoryCache` liefern ihn). Einen Cache braucht es **nicht**
+  mehr; ein vorhandener dient nur noch als Migrationsquelle für alte Einträge.
+- **Redis-Audit:** der Reader wirft `InvalidDataException` bei fehlenden, leeren
+  oder ungültigen indexierten Einträgen, statt sie zu überspringen.
+- **Audit-Verifikation:** ein Walk über den ganzen Store, dessen erster Eintrag einen
+  Vorgänger hat, ist `LinkBroken`.
+- **Egress:** eine durchsetzende Policy lehnt unbekannte `PrimaryHandler` ab und gibt
+  Weiterleitungen (301/302/303/307/308) an den Aufrufer zurück.
+- **Operator-Bericht:** Schema **3**; Leser müssen es ausdrücklich unterstützen.
+- **KI-Prüfungen:** ohne Deklaration `noelia.ai.inventory` `Pass` → `Warning` und
+  `noelia.ai.record-keeping` `NotApplicable` → `Warning`; Gates, die auf `Warning`
+  scheitern, müssen das berücksichtigen (`DeclareArtificialIntelligence`).
+- **Checkpoint-Typen:** `SignedFileAuditCheckpointSource`, `AuditCheckpointSignature`
+  und `SignedAuditCheckpoint` sind `internal`. `Complete` setzt einen eigenen
+  `ITrustedAuditCheckpointSource` voraus; ohne ihn meldet der Verifier
+  `Unknown`/`Partial`, und das ist Absicht.
+- **Redis Cluster:** der atomare Audit-Snapshot ist nicht clusterfähig (siehe README,
+  Abschnitt Provider). Keine Verhaltensänderung, aber jetzt ausdrücklich dokumentiert.
+
+Nichts davon verlangt Datenmigration außer der Outbox-Schemaänderung.
 
 ## KI-Prüfungen: "nichts erkannt" ist nicht "keine Pflicht" (R20)
 
@@ -97,8 +128,15 @@ Widerrufsschreiber überschreiben einander nicht. Der InMemory-Store hat ebenfal
 keinen 30-Minuten-Ablauf, bleibt aber prozesslokal. Bestehende XML-Verschlüsselung,
 AAD und `IMasterKeyProvider` bleiben unverändert.
 
-Bei jedem Lesen werden noch erreichbare Schlüssel und Widerrufe aus dem alten
-Cache-Index in den neuen Store übernommen. Vor einem koordinierten Upgrade den
+**Der Cache ist optional.** Der Schlüsselring verlangt keinen
+`IDistributedCacheService` mehr; ohne einen arbeitet er allein mit dem Store. Ist
+einer registriert, werden noch erreichbare Schlüssel und Widerrufe aus dem alten
+Cache-Index in den neuen Store übernommen, und zwar einmal beim ersten Lesen und
+danach höchstens alle fünf Minuten erneut (jeder Eintrag nur einmal; ein
+fehlgeschlagener Import wird beim nächsten Lesen wiederholt, nicht als erledigt
+gemerkt). Abgewogen: ein Eintrag, den eine alte Instanz während eines gemischten
+Rollouts schreibt, erreicht diesen Prozess bis zu fünf Minuten später, statt pro
+Lesevorgang (zuvor ein Cache-GET und ein Append je Altbestand bei jedem Lesen). Vor einem koordinierten Upgrade den
 alten Ring und Master Key sichern und den neuen Dienst starten, solange der
 alte Cache-Index noch lesbar ist; abgelaufene oder bereits gelöschte Elemente
 können nicht aus dem Cache rekonstruiert werden. Fehlt ein indexiertes Element
@@ -108,8 +146,7 @@ Während eines gemischten
 Rollouts könnten alte Instanzen neue Schlüssel nicht sehen; alte Instanzen
 vor neuer Schlüsselerzeugung ersetzen. Der neue Redis-Hash benötigt dauerhafte
 Redis-/Valkey-Persistenz, gesichertes Volume und eine No-Eviction-Policy.
-Das bisherige Demo-Valkey-Profil ist noch ephemer; dessen Umstellung gehört zu
-AP14. Keine vorhandenen Daten werden automatisch gelöscht.
+Das Demo-Valkey-Profil ist persistent (AOF auf einem Volume). Keine vorhandenen Daten werden automatisch gelöscht.
 
 ## Audit-Verifikation: versionierte Evidenz statt Vollständigkeit aus einem Boolean
 
@@ -142,9 +179,13 @@ die Kopie standardmäßig auf 4096 Einträge und 4 MiB Payload; darüber bleibt 
 Stream-Pfad ohne Snapshot-Nachweis. Alte zeitbasierte Redis-Scores bleiben lesbar,
 werden aber nicht rückwirkend als lückenlose Sequenz anerkannt. Der optionale
 `ITrustedAuditCheckpointSource` muss ein außerhalb des Audit-Stores authentisiertes
-Dokument liefern. `SignedFileAuditCheckpointSource` prüft die P-256-Signatur gegen
-einen separat gepinnten PublicKey; das private Signiermaterial gehört nicht in
-den Dienst oder Redis. Nur ein passender Voll-Snapshot mit Genesis, Sequenz,
+Dokument liefern. **Noelia liefert dafür keine Implementierung**: die
+Typen `SignedFileAuditCheckpointSource`, `AuditCheckpointSignature`
+und `SignedAuditCheckpoint` sind `internal` (nie verdrahtet, ohne Erzeuger-Workflow).
+Wer `Complete` braucht, registriert einen eigenen `ITrustedAuditCheckpointSource`,
+gestützt auf einen Signer außerhalb des Audit-Stores, mit separat gepinntem
+PublicKey; das private Signiermaterial gehört nicht in den Dienst oder Redis.
+Nur ein passender Voll-Snapshot mit Genesis, Sequenz,
 Anzahl und Head erhält `Complete`. Ohne diesen Vertrag bleiben Bestandslogs
 `Unknown` oder bei Zeitgrenze `Partial`. `Complete` belegt den gespeicherten
 Verlauf relativ zum akzeptierten Signer, nicht die Erfassung aller echten Ereignisse.
@@ -157,8 +198,7 @@ partieller Vollständigkeit; Legacy-Flags erscheinen als unbekannt. Alarmrouten
 melden Recovery nur bei belegtem positiven Zielzustand; Broken→Unknown oder
 ReadFailed ist keine Entwarnung. Die Dashboard-Übersicht kennzeichnet die lokale
 Write-Time-Prüfung und unterscheidet sie von Read-Back. Zuverlässige
-Alarmzustellung und Attestation-Formatmigration sind noch offen. Der vorhandene
-AP05-Docker-Kandidat enthält diese Änderungen nicht, keine Veröffentlichung.
+Alarmzustellung und Attestation-Formatmigration sind noch offen.
 
 ## Redis-Audit: ungültige indexierte Einträge brechen den Lesevorgang ab
 
@@ -173,8 +213,6 @@ Vorhandene Daten werden weder automatisch repariert noch gelöscht.
 Das schließt eine stille Auslassung im Reader, beweist aber noch keine
 Kettenvollständigkeit. Atomare Snapshots und unabhängige signierte Checkpoints
 stehen nur unter den oben beschriebenen Grenzen zur Verfügung.
-Der AP05-Docker-Kandidat enthält diese spätere Änderung noch nicht; kein
-bestehender Kandidat und keine veröffentlichte Version wird überschrieben.
 
 ## Operator-Bericht Schema 3: Deklaration, HTTP-Policy und Beobachtung trennen
 
@@ -194,8 +232,7 @@ eine erfundene Nullmessung. Alte Wire-Berichte werden nicht nachträglich um
 Scope-/Redirectnachweise ergänzt.
 
 Leser müssen Schema 3 ausdrücklich unterstützen. Schema 1/2 bleibt lesbar, hat
-aber keine entsprechenden Aussagen. Release-Version/VersionPrefix unverändert;
-lokale Kandidaten werden separat versioniert und nicht veröffentlicht.
+aber keine entsprechenden Aussagen.
 
 ## Egress: keine automatischen Weiterleitungen unterhalb des Guards
 
@@ -212,8 +249,7 @@ Weiterleitungen nicht abgesichert werden können. Named-Client-Konfigurationen
 bleiben erhalten; die Absicherung läuft nach deren Transportkonfiguration.
 Eine leere, nicht durchsetzende Policy ändert das Redirect-Verhalten nicht.
 
-Dies ist noch keine Veröffentlichung und keine prozessweite Netzwerkgarantie.
-Der Fortschritt steht in docs/UMSETZUNGSPLAN-SECURITY-2026-09.md.
+Dies ist keine prozessweite Netzwerkgarantie.
 
 # Noelia 6.3.0 → 6.4.0
 

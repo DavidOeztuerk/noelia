@@ -8,6 +8,16 @@ namespace Noelia.Abstractions.Sovereignty;
 /// </remarks>
 public interface IHttpEgressPolicyReport
 {
+    /// <summary>
+    /// Reads the guard's current configuration.
+    /// </summary>
+    /// <returns>
+    /// Whether the allow policy restricts requests, and the host patterns and
+    /// network categories it permits. It must not include credentials, request
+    /// contents or exception text, and it reports what is configured, not what
+    /// was observed. The caller treats an exception as "could not be read", not
+    /// as "not enforcing".
+    /// </returns>
     HttpEgressPolicyAssessment Assess();
 }
 

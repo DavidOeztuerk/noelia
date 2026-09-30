@@ -36,6 +36,17 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IStabl
     // Redis executes this script without interleaving a writer. The hard limits
     // prevent an audit read from monopolising the server or its memory. Larger
     // logs retain the streaming contract without a stable-snapshot claim.
+    //
+    // Not Redis-Cluster-compatible, and knowingly so. The event keys are built
+    // inside the script (ARGV[1] .. id) from ids read out of the index, so they
+    // are not declared in KEYS[]. Cluster requires every key a script touches to
+    // be declared up front and to hash to one slot; an undeclared key is either
+    // rejected or, worse, read from a node that does not own it. Declaring them
+    // is impossible here: the ids are only known after reading the index, which
+    // is the very thing that has to happen atomically with reading the payloads.
+    // On a cluster the script therefore cannot give the stable snapshot, and the
+    // README says so; a deployment on one Redis primary (or Sentinel) is the
+    // supported shape. Behaviour is deliberately unchanged.
     private const string SnapshotScript = @"
         if redis.call('ZCARD', KEYS[1]) > tonumber(ARGV[2]) then return {0} end
         local ids = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')

@@ -12,7 +12,7 @@ namespace Noelia.Infrastructure.Audit;
 /// public verification key is pinned independently of this document. A caller
 /// must also check that the named chain is the one it intended to verify.
 /// </remarks>
-public sealed record SignedAuditCheckpoint
+internal sealed record SignedAuditCheckpoint
 {
     /// <summary>Supported checkpoint format.</summary>
     public int SchemaVersion { get; init; } = 1;
@@ -33,7 +33,7 @@ public sealed record SignedAuditCheckpoint
 }
 
 /// <summary>Creates and verifies signed checkpoint documents using a pinned P-256 key.</summary>
-public static class AuditCheckpointSignature
+internal static class AuditCheckpointSignature
 {
     private const string CurveOid = "1.2.840.10045.3.1.7";
 
@@ -117,7 +117,7 @@ public static class AuditCheckpointSignature
 }
 
 /// <summary>Reads a signed checkpoint file and pins its trusted public key outside the document.</summary>
-public sealed class SignedFileAuditCheckpointSource(string path, string trustedPublicKeyPem)
+internal sealed class SignedFileAuditCheckpointSource(string path, string trustedPublicKeyPem)
     : ITrustedAuditCheckpointSource
 {
     /// <inheritdoc />

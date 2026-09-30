@@ -86,9 +86,9 @@ public static class DataProtectionKeyRing
                 .Requires<IDataProtectionKeyStore>(
                     new NoeliaProviderHint("Noelia.Redis", "UseRedisCache(prefix)"),
                     new NoeliaProviderHint("Noelia.InMemory", "UseInMemoryCache(prefix)"))
-                .Requires<IDistributedCacheService>(
-                    new NoeliaProviderHint("Noelia.Redis", "UseRedisCache(prefix)"),
-                    new NoeliaProviderHint("Noelia.InMemory", "UseInMemoryCache(prefix)"))
+                // No IDistributedCacheService requirement: a registered cache is
+                // only read to import entries an older version wrote there, and a
+                // service without one simply has nothing to import.
                 .Requires<IMasterKeyProvider>(
                     new NoeliaProviderHint("Noelia.Infrastructure", "AddConfiguredMasterKey()"),
                     new NoeliaProviderHint("Noelia.Infrastructure", "AddSecretStoreMasterKey()"))
@@ -110,9 +110,12 @@ public static class DataProtectionKeyRing
 /// <summary>Stores the key ring through a non-expiring atomic provider.</summary>
 internal sealed class NoeliaXmlRepository(
     IDataProtectionKeyStore store,
-    IDistributedCacheService cache,
-    ILogger<NoeliaXmlRepository> logger) : IXmlRepository
+    ILogger<NoeliaXmlRepository> logger,
+    IDistributedCacheService? cache = null,
+    TimeProvider? time = null) : IXmlRepository
 {
+    internal static readonly TimeSpan LegacyRecheckInterval = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// One immutable entry per element, rather than one replaceable document.
     /// </summary>
@@ -124,37 +127,76 @@ internal sealed class NoeliaXmlRepository(
 
     private static string ElementKey(string id) => $"noelia:dataprotection:key:{id}";
 
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Lock _legacyGate = new();
+    private readonly HashSet<string> _imported = new(StringComparer.Ordinal);
+    private DateTimeOffset? _legacyCheckedAt;
+
     public IReadOnlyCollection<XElement> GetAllElements()
     {
-        // Import any still-readable pre-v2 cache entries on every read. This
-        // permits a coordinated upgrade without discarding existing cookies or
-        // revocations, and a second replica can repeat the import safely.
-        var index = cache.GetAsync<KeyRingIndex>(IndexKey).GetAwaiter().GetResult();
-        foreach (var id in index?.Ids ?? [])
-        {
-            var stored = cache.GetAsync<StoredElement>(ElementKey(id)).GetAwaiter().GetResult();
-            if (stored is null)
-            {
-                // It may be a revocation, so silently omitting it could make a
-                // revoked key usable again on a new replica.
-                logger.LogError("An indexed legacy data protection element is missing");
-                throw new InvalidDataException("The legacy data protection ring is incomplete; restore its indexed elements before migrating.");
-            }
-
-            if (string.IsNullOrWhiteSpace(stored.Xml))
-            {
-                // An entry that came back empty is a store or serializer
-                // problem, not a key. Parsing it would fail with "Root element
-                // is missing", which names the symptom and not the cause.
-                logger.LogError("An indexed legacy data protection element is empty");
-                throw new InvalidDataException("The legacy data protection ring contains an empty indexed element.");
-            }
-
-            store.AppendAsync(id, stored.Xml).GetAwaiter().GetResult();
-        }
+        ImportLegacyEntries();
 
         return store.ReadAllAsync().GetAwaiter().GetResult()
             .Select(stored => XElement.Parse(stored.Xml)).ToArray();
+    }
+
+    /// <summary>
+    /// Copies pre-store cache entries into the store, at most once per
+    /// <see cref="LegacyRecheckInterval"/> and never one entry twice.
+    /// </summary>
+    /// <remarks>
+    /// The cache is optional: a service that never had the legacy index has
+    /// nothing to import, and must not be made to register a cache for it.
+    /// Importing on <em>every</em> read cost one cache GET and one append per
+    /// legacy entry per <c>GetAllElements</c>, forever. The trade-off taken here
+    /// is that an entry an old replica writes <em>during a rolling upgrade</em>
+    /// reaches this process at the next re-check rather than at the next read.
+    /// That window is bounded by the interval, and the ring itself re-reads from
+    /// the store only on its own refresh schedule, so the extra delay is small
+    /// next to it. A failed import is not remembered as a completed one, so it
+    /// is retried by the very next read.
+    /// </remarks>
+    private void ImportLegacyEntries()
+    {
+        if (cache is null)
+            return;
+
+        lock (_legacyGate)
+        {
+            var now = _time.GetUtcNow();
+            if (_legacyCheckedAt is { } checkedAt && now - checkedAt < LegacyRecheckInterval)
+                return;
+
+            var index = cache.GetAsync<KeyRingIndex>(IndexKey).GetAwaiter().GetResult();
+            foreach (var id in index?.Ids ?? [])
+            {
+                if (_imported.Contains(id))
+                    continue;
+
+                var stored = cache.GetAsync<StoredElement>(ElementKey(id)).GetAwaiter().GetResult();
+                if (stored is null)
+                {
+                    // It may be a revocation, so silently omitting it could make a
+                    // revoked key usable again on a new replica.
+                    logger.LogError("An indexed legacy data protection element is missing");
+                    throw new InvalidDataException("The legacy data protection ring is incomplete; restore its indexed elements before migrating.");
+                }
+
+                if (string.IsNullOrWhiteSpace(stored.Xml))
+                {
+                    // An entry that came back empty is a store or serializer
+                    // problem, not a key. Parsing it would fail with "Root element
+                    // is missing", which names the symptom and not the cause.
+                    logger.LogError("An indexed legacy data protection element is empty");
+                    throw new InvalidDataException("The legacy data protection ring contains an empty indexed element.");
+                }
+
+                store.AppendAsync(id, stored.Xml).GetAwaiter().GetResult();
+                _imported.Add(id);
+            }
+
+            _legacyCheckedAt = now;
+        }
     }
 
     public void StoreElement(XElement element, string friendlyName)
