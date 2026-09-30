@@ -35,8 +35,11 @@ public sealed record OperatorReport
     /// for version 1 still parses a version 2 document and simply sees no
     /// citations — which is why the number went up rather than the shape
     /// changing.</para>
+    /// <para>Version 3 separates dependency declarations from factory HTTP guard
+    /// registration/configuration and unavailable outbound observations. Legacy
+    /// fields remain, but cannot establish a complete network boundary.</para>
     /// </remarks>
-    public int SchemaVersion { get; init; } = 2;
+    public int SchemaVersion { get; init; } = 3;
 
     /// <summary>When this report was taken.</summary>
     public DateTimeOffset GeneratedAt { get; init; }
@@ -70,7 +73,7 @@ public sealed record OperatorReport
     /// <summary>The latest run of the executable security assertions.</summary>
     public SecurityCheckView SecurityChecks { get; init; } = new();
 
-    /// <summary>Where this instance is allowed to reach, and under whose law.</summary>
+    /// <summary>Declared dependencies, allow-policy entries and reported host classifications.</summary>
     public SovereigntyView Sovereignty { get; init; } = new();
 
     /// <summary>The audit trail as this instance can account for it.</summary>
@@ -238,12 +241,13 @@ public sealed record RegulatoryReferenceView(
     string Obligation,
     string Reader);
 
-/// <summary>Where this instance may reach, and under whose jurisdiction.</summary>
+/// <summary>Dependency declarations, HTTP allow-policy entries and reported host classifications.</summary>
 /// <remarks>
-/// This is the section a fleet view exists for. It is complete rather than
-/// observed: every outbound destination is declared before the service starts
-/// and an undeclared call fails, so what is absent here is unreachable — which
-/// is the difference between a proof and an estimate.
+/// These are declarations and reported configuration, not observed traffic or
+/// a complete process/network boundary. Allowed hosts/ranges can exceed the
+/// declared dependencies. The HTTP guard covers configured factory-managed
+/// clients, not direct clients, SDK transports or other protocols. Host/address
+/// classification does not establish ownership, jurisdiction or data transfers.
 /// </remarks>
 public sealed record SovereigntyView
 {
@@ -253,14 +257,95 @@ public sealed record SovereigntyView
     /// <summary>Why, when there is nothing to show.</summary>
     public string? Note { get; init; }
 
-    /// <summary>Whether undeclared outbound calls actually fail.</summary>
+    /// <summary>Legacy policy configuration flag, not evidence of an installed guard.</summary>
     public bool EgressIsEnforced { get; init; }
 
-    /// <summary>The hosts and ranges this instance declared.</summary>
+    /// <summary>Legacy field name for allowed hosts/ranges, not the dependency inventory.</summary>
     public IReadOnlyList<string> DeclaredHosts { get; init; } = [];
 
     /// <summary>One entry per declared dependency.</summary>
     public IReadOnlyList<DependencyView> Dependencies { get; init; } = [];
+
+    /// <summary>Independent factory HTTP guard configuration, added in report schema 3.</summary>
+    /// <remarks>Old reports deserialize as unavailable, never as a verified guard.</remarks>
+    public HttpEgressPolicyView HttpEgress { get; init; } = new();
+
+    /// <summary>Outbound traffic observation availability; declarations are not observations.</summary>
+    public OutboundObservationView ObservedCalls { get; init; } = new();
+}
+
+/// <summary>Configuration evidence about the registered factory HTTP guard only.</summary>
+public sealed record HttpEgressPolicyView
+{
+    /// <summary>
+    /// Whether a factory HTTP guard report is registered, and whether it could
+    /// be read. <c>Absent</c> is a decision; <c>Faulted</c> means the report was
+    /// registered and reading it failed. The default, <c>Unavailable</c>, is what
+    /// a report written before schema 3 deserialises to: unknown, never verified.
+    /// </summary>
+    public OperatorSectionState State { get; init; } = OperatorSectionState.Unavailable;
+
+    /// <summary>
+    /// A sentence saying why there is nothing to show, or what the configuration
+    /// evidence does and does not establish. Never a host name, credential or
+    /// exception text.
+    /// </summary>
+    public string? Note { get; init; } = "HTTP guard registration was not reported.";
+
+    /// <summary>
+    /// Whether the guard's allow policy restricts requests. <c>null</c> means it
+    /// was not reported, which is not the same as <c>false</c>. This is
+    /// configuration, not proof that a request was blocked.
+    /// </summary>
+    public bool? IsEnforcing { get; init; }
+
+    /// <summary>
+    /// What the guard covers, currently <c>HttpClientFactory</c>: clients created
+    /// through the factory, not direct <c>HttpClient</c> instances, SDK transports
+    /// or other protocols.
+    /// </summary>
+    public string? Scope { get; init; }
+
+    /// <summary>
+    /// What the statement rests on, currently <c>RegistrationAndConfiguration</c>.
+    /// It is neither an observation of traffic nor a test of effective enforcement.
+    /// </summary>
+    public string? Evidence { get; init; }
+
+    /// <summary>
+    /// How redirects are treated: <c>DisabledForSupportedTransports</c> when the
+    /// policy is enforcing (a redirect is returned to the caller instead of being
+    /// followed), <c>TransportDefault</c> when it is not.
+    /// </summary>
+    public string? Redirects { get; init; }
+
+    /// <summary>
+    /// The host patterns and network categories the allow policy permits, in
+    /// ordinal order. These are allow-policy entries, not declared dependencies,
+    /// and can be broader than what the service actually calls.
+    /// </summary>
+    public IReadOnlyList<string> AllowedTargets { get; init; } = [];
+}
+
+/// <summary>Whether outbound calls were observed. Unavailable and null are not zero traffic.</summary>
+/// <remarks>Noelia currently has no outbound-call observation collector.</remarks>
+public sealed record OutboundObservationView
+{
+    /// <summary>
+    /// Whether outbound calls are observed at all. <c>Unavailable</c>, the current
+    /// and default state, means nothing is collected; it says nothing about
+    /// whether calls happened.
+    /// </summary>
+    public OperatorSectionState State { get; init; } = OperatorSectionState.Unavailable;
+
+    /// <summary>Why there is no observation, or what a count covers.</summary>
+    public string? Note { get; init; } = "Outbound calls are not collected; declarations and allow-policy entries are not traffic observations.";
+
+    /// <summary>
+    /// The number of observed outbound calls, or <c>null</c> when none are
+    /// collected. <c>null</c> is not zero traffic.
+    /// </summary>
+    public long? Count { get; init; }
 }
 
 /// <summary>One declared dependency and its jurisdiction.</summary>

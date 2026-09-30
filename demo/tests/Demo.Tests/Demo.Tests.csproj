@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../DemoBaselineAssertions.cs" Link="DemoBaselineAssertions.cs" />
+    <None Include="../../eng/composition-baselines.json" Link="composition-baselines.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -19,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../src/gateway/Gateway.Api/Gateway.Api.csproj" />
     <ProjectReference Include="../../src/services/UserService/UserService.Api/UserService.Api.csproj" />
     <ProjectReference Include="../../src/services/TodoService/TodoService.Api/TodoService.Api.csproj" />
   </ItemGroup>

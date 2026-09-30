@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Noelia.Abstractions.Audit;
@@ -27,10 +28,40 @@ namespace Noelia.Redis.Security.Audit;
 /// writer that also judged them would be the same party doing both, which is
 /// what a hash chain exists to avoid.</para>
 /// </remarks>
-public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReadableSovereignAuditSink
+public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IStableAuditSnapshotReader
 {
     /// <summary>How many ids to take out of the index at a time.</summary>
     private const int ReadPageSize = 500;
+
+    // Redis executes this script without interleaving a writer. The hard limits
+    // prevent an audit read from monopolising the server or its memory. Larger
+    // logs retain the streaming contract without a stable-snapshot claim.
+    //
+    // Not Redis-Cluster-compatible, and knowingly so. The event keys are built
+    // inside the script (ARGV[1] .. id) from ids read out of the index, so they
+    // are not declared in KEYS[]. Cluster requires every key a script touches to
+    // be declared up front and to hash to one slot; an undeclared key is either
+    // rejected or, worse, read from a node that does not own it. Declaring them
+    // is impossible here: the ids are only known after reading the index, which
+    // is the very thing that has to happen atomically with reading the payloads.
+    // On a cluster the script therefore cannot give the stable snapshot, and the
+    // README says so; a deployment on one Redis primary (or Sentinel) is the
+    // supported shape. Behaviour is deliberately unchanged.
+    private const string SnapshotScript = @"
+        if redis.call('ZCARD', KEYS[1]) > tonumber(ARGV[2]) then return {0} end
+        local ids = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')
+        local result = {1, redis.call('GET', KEYS[2]) or ''}
+        local bytes = 0
+        for i = 1, #ids, 2 do
+            local payload = redis.call('GET', ARGV[1] .. ids[i])
+            if not payload then return {-1, (i - 1) / 2} end
+            bytes = bytes + string.len(payload)
+            if bytes > tonumber(ARGV[3]) then return {0} end
+            table.insert(result, ids[i])
+            table.insert(result, ids[i + 1])
+            table.insert(result, payload)
+        end
+        return result";
 
     /// <summary>
     /// Store the event, advance the head, index it — or refuse, having changed
@@ -108,6 +139,8 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
     private readonly IConnectionMultiplexer _connection;
     private readonly ILogger<RedisSovereignAuditSink> _logger;
     private readonly string _prefix;
+    private readonly int _snapshotMaxEntries;
+    private readonly int _snapshotMaxBytes;
 
     /// <summary>Takes the shared connection and the prefix the chain lives under.</summary>
     /// <param name="connection">The shared multiplexer.</param>
@@ -117,18 +150,26 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
     /// deployments that should share a chain share this; two that should not,
     /// must not — a chain is only meaningful for the writers inside it.
     /// </param>
+    /// <param name="snapshotMaxEntries">Maximum entries copied in one atomic snapshot.</param>
+    /// <param name="snapshotMaxBytes">Maximum total payload bytes copied in one atomic snapshot.</param>
     public RedisSovereignAuditSink(
         IConnectionMultiplexer connection,
         ILogger<RedisSovereignAuditSink> logger,
-        string keyPrefix = "noelia")
+        string keyPrefix = "noelia",
+        int snapshotMaxEntries = 4096,
+        int snapshotMaxBytes = 4 * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyPrefix);
+        ArgumentOutOfRangeException.ThrowIfLessThan(snapshotMaxEntries, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(snapshotMaxBytes, 1);
 
         _connection = connection;
         _logger = logger;
         _prefix = keyPrefix.TrimEnd(':');
+        _snapshotMaxEntries = snapshotMaxEntries;
+        _snapshotMaxBytes = snapshotMaxBytes;
     }
 
     private string ChainKey => $"{_prefix}:audit:chain";
@@ -136,6 +177,54 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
     private string IndexKey => $"{_prefix}:audit:index";
 
     private string EventKey(string id) => $"{_prefix}:audit:event:{id}";
+
+    /// <inheritdoc />
+    public async Task<AuditReadSnapshot?> TryCaptureSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var raw = await _connection.GetDatabase().ScriptEvaluateAsync(SnapshotScript,
+            [IndexKey, ChainKey],
+            [$"{_prefix}:audit:event:", _snapshotMaxEntries, _snapshotMaxBytes]);
+        cancellationToken.ThrowIfCancellationRequested();
+        var values = (RedisResult[])raw!;
+        var status = (int)values[0];
+        if (status == 0) return null;
+        if (status == -1)
+            throw InvalidEntry((long)values[1], "payload is missing");
+        if (status != 1 || (values.Length - 2) % 3 != 0)
+            throw new InvalidDataException("The audit snapshot had an unsupported shape.");
+
+        var entries = new List<StoredAuditEntry>((values.Length - 2) / 3);
+        var sequenceVerified = true;
+        double previousScore = -1;
+        for (var position = 2; position < values.Length; position += 3)
+        {
+            var index = (position - 2) / 3;
+            var id = (string)values[position]!;
+            var scoreText = (string)values[position + 1]!;
+            if (!double.TryParse(scoreText, NumberStyles.Float, CultureInfo.InvariantCulture, out var score)
+                || !double.IsFinite(score))
+                throw InvalidEntry(index, "index sequence is invalid");
+            sequenceVerified &= score == previousScore + 1;
+            previousScore = score;
+
+            StoredAuditEntry? entry;
+            try
+            {
+                entry = JsonSerializer.Deserialize<StoredAuditEntry>((string)values[position + 2]!, Json);
+            }
+            catch (JsonException)
+            {
+                throw InvalidEntry(index, "payload is not a valid audit entry");
+            }
+            if (entry is null || !string.Equals(entry.Id, id, StringComparison.Ordinal))
+                throw InvalidEntry(index, "payload identity does not match its index entry");
+            entries.Add(entry);
+        }
+
+        var head = (string)values[1]!;
+        return new AuditReadSnapshot(_prefix, entries, head.Length == 0 ? null : head, sequenceVerified);
+    }
 
     /// <inheritdoc />
     public async Task<string?> HeadAsync(CancellationToken cancellationToken = default)
@@ -201,6 +290,10 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
     }
 
     /// <inheritdoc />
+    /// <exception cref="InvalidDataException">
+    /// An indexed payload is missing, malformed or belongs to another identity.
+    /// Entries already yielded do not make a failed read a complete result.
+    /// </exception>
     public async IAsyncEnumerable<StoredAuditEntry> ReadAsync(
         DateTimeOffset? since = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -223,22 +316,38 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
             var payloads = await database.StringGetAsync(
                 [.. ids.Select(id => (RedisKey)EventKey(id.ToString()))]);
 
-            foreach (var payload in payloads)
+            for (var offset = 0; offset < payloads.Length; offset++)
             {
+                var payload = payloads[offset];
+                var position = page + offset;
                 if (payload.IsNullOrEmpty)
                 {
-                    // Indexed but not stored. The append is atomic, so this is
-                    // an entry somebody removed — and skipping it silently
-                    // would hide exactly the edit the chain exists to expose.
-                    // The next entry's link will not match, and the verifier
-                    // will say so.
-                    continue;
+                    // A missing first/last entry has no adjacent pair that
+                    // necessarily reveals it. Never turn a failed read into a
+                    // shorter apparently valid chain, including an empty one.
+                    throw InvalidEntry(position, "payload is missing or empty");
                 }
 
-                var entry = JsonSerializer.Deserialize<StoredAuditEntry>((string)payload!, Json);
+                StoredAuditEntry? entry;
+                try
+                {
+                    entry = JsonSerializer.Deserialize<StoredAuditEntry>((string)payload!, Json);
+                }
+                catch (JsonException)
+                {
+                    // JSON diagnostics can include attacker-controlled paths.
+                    // Do not expose raw audit content through an inner error.
+                    throw InvalidEntry(position, "payload is not a valid audit entry");
+                }
+
                 if (entry is null)
                 {
-                    continue;
+                    throw InvalidEntry(position, "payload is null");
+                }
+
+                if (!string.Equals(entry.Id, ids[offset].ToString(), StringComparison.Ordinal))
+                {
+                    throw InvalidEntry(position, "payload identity does not match its index entry");
                 }
 
                 // A contiguous suffix, not a filter. Dropping individual
@@ -263,6 +372,9 @@ public sealed class RedisSovereignAuditSink : IChainedSovereignAuditSink, IReada
             }
         }
     }
+
+    private static InvalidDataException InvalidEntry(long position, string reason) =>
+        new($"Cannot read audit index position {position}: {reason}.");
 
     private bool Duplicate(string id)
     {

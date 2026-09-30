@@ -38,7 +38,7 @@ builder.Services.AddNoelia(
     builder.Configuration, builder.Environment, serviceName, noelia => noelia
         .UseDefaults()
         .Without(NoeliaModule.Jwt, "routes API traffic; never reads a token")
-        .UseDemoProviders(demo, serviceName)
+        .UseDemoProviders(demo, serviceName, downstreams: DemoDependencies.GatewayRoutes(builder.Configuration))
         .UseDemoDashboard(demo, builder.Environment, "GateCanary"));
 
 // Ocelot builds its own outgoing HTTP pipeline, so Noelia's correlation

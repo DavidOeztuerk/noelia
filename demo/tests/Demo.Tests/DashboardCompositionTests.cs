@@ -16,6 +16,29 @@ public sealed class DashboardCompositionTests : IDisposable
     }
 
     [Fact]
+    public async Task Actual_service_reports_match_the_reviewed_architecture_baselines()
+    {
+        using var users = _users.CreateClient();
+        using var todos = _todos.CreateClient();
+        await Demo.TestSupport.DemoBaselineAssertions.MatchAsync(users, "issuer-memory");
+        await Demo.TestSupport.DemoBaselineAssertions.MatchAsync(todos, "verifier-memory");
+    }
+
+    [Fact]
+    public async Task Dependency_reports_only_declare_sessions_on_the_host_that_owns_them()
+    {
+        using var users = _users.CreateClient();
+        using var todos = _todos.CreateClient();
+        using var userReport = System.Text.Json.JsonDocument.Parse(await users.GetStringAsync("/noelia/report.json"));
+        using var todoReport = System.Text.Json.JsonDocument.Parse(await todos.GetStringAsync("/noelia/report.json"));
+        static string[] Names(System.Text.Json.JsonDocument report) => report.RootElement
+            .GetProperty("sovereignty").GetProperty("dependencies").EnumerateArray()
+            .Select(dependency => dependency.GetProperty("name").GetString()!).ToArray();
+        Names(userReport).Should().Contain("Sessions (local SQLite)");
+        Names(todoReport).Should().NotContain(name => name.Contains("Session", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Service_dashboards_show_their_different_real_compositions()
     {
         var userHtml = await WholeDashboard(_users.CreateClient());

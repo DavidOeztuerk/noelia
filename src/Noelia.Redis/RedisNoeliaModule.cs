@@ -59,6 +59,8 @@ public static class RedisNoeliaModule
                 .Requires<IConnectionMultiplexer>(new NoeliaProviderHint(
                     "Noelia.Redis", "AddRedisConnection(connectionString, instanceName)"))
                 .Provides<IDistributedCacheService>("Noelia.Redis", "UseRedisCache(prefix)")
+                .Provides<Noelia.Abstractions.Security.Keys.IDataProtectionKeyStore>(
+                    "Noelia.Redis", "UseRedisCache(prefix)")
                 .Provides<IDistributedRateLimitStore>("Noelia.Redis", "UseRedisCache(prefix)"));
     }
 

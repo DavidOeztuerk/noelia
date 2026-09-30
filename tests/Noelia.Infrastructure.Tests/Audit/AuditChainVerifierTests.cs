@@ -17,6 +17,134 @@ namespace Noelia.Infrastructure.Tests.Audit;
 [Trait("Category", "Unit")]
 public sealed class AuditChainVerifierTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task A_full_walk_rejects_a_missing_genesis_prefix(int removed)
+    {
+        var entries = (await ChainOf(4)).Entries.Skip(removed).ToArray();
+        var result = await Verify(new ProbeSink(entries));
+        result.IsIntact.Should().BeFalse();
+        result.FirstBreak!.Kind.Should().Be(AuditChainBreakKind.LinkBroken);
+        result.FirstBreak.EntryId.Should().Be(entries[0].Id);
+        AssertEvidence(result, "Broken", "Unknown", "AvailableStore");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task An_unanchored_walk_cannot_prove_completeness_even_when_hashes_hold(int retained)
+    {
+        var entries = (await ChainOf(4)).Entries.Take(retained).ToArray();
+        var result = await Verify(new ProbeSink(entries));
+        // The legacy flag is a hash/link result, not a completeness verdict.
+        result.IsIntact.Should().BeTrue();
+        AssertEvidence(result, retained == 0 ? "Unknown" : "Consistent", "Unknown", "AvailableStore");
+    }
+
+    [Fact]
+    public async Task Recomputing_every_hash_is_not_an_independent_integrity_or_completeness_proof()
+    {
+        var entries = (await ChainOf(4)).Entries.ToArray();
+        string? previous = null;
+        for (var index = 0; index < entries.Length; index++)
+        {
+            var rewritten = (entries[index] with { Resource = "rewritten", PreviousHash = previous })
+                .AsEvent().WithComputedHash();
+            entries[index] = entries[index] with { Resource = "rewritten", PreviousHash = previous, Hash = rewritten.Hash };
+            previous = rewritten.Hash;
+        }
+        var result = await Verify(new ProbeSink(entries));
+        result.IsIntact.Should().BeTrue();
+        AssertEvidence(result, "Consistent", "Unknown", "AvailableStore");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task A_shared_store_head_exposes_a_missing_suffix_or_whole_index(int retained)
+    {
+        var entries = (await ChainOf(4)).Entries;
+        var result = await Verify(new HeadProbeSink(entries.Take(retained).ToArray(),
+            entries[^1].Hash, entries[^1].Hash));
+        result.Evidence!.Consistency.Should().Be(AuditChainConsistency.ReadFailed);
+        result.Evidence.Completeness.Should().Be(AuditChainCompleteness.Unknown);
+        result.Evidence.HasIndependentCheckpoint.Should().BeFalse();
+        result.Note.Should().Contain("head");
+    }
+
+    [Fact]
+    public async Task A_concurrent_append_does_not_yield_a_positive_verdict_from_a_moving_head()
+    {
+        var entries = (await ChainOf(4)).Entries;
+        var result = await Verify(new HeadProbeSink(entries.Take(3).ToArray(),
+            entries[2].Hash, entries[3].Hash));
+        result.Evidence!.Consistency.Should().Be(AuditChainConsistency.ReadFailed);
+        result.FirstBreak.Should().BeNull("a moving boundary is not a proven hash break");
+    }
+
+    [Fact]
+    public async Task A_stable_shared_head_allows_a_consistency_result_without_proving_completeness()
+    {
+        var entries = (await ChainOf(4)).Entries;
+        var result = await Verify(new HeadProbeSink(entries, entries[^1].Hash, entries[^1].Hash));
+        AssertEvidence(result, "Consistent", "Unknown", "AvailableStore");
+    }
+
+    [Fact]
+    public async Task An_explicit_time_suffix_reports_partial_scope_not_a_missing_genesis()
+    {
+        var sink = await ChainOf(4);
+        var result = await Verify(sink, sink.Entries[2].Timestamp);
+        result.IsIntact.Should().BeTrue();
+        result.IsPartial.Should().BeTrue();
+        AssertEvidence(result, "Consistent", "Partial", "TimeSuffix");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_read_fault_is_neither_consistency_nor_a_hash_break_and_does_not_leak(bool afterEntries)
+    {
+        const string canary = "synthetic-storage-exception-secret";
+        var entries = (await ChainOf(2)).Entries;
+        var result = await Verify(new FailingSink(afterEntries ? entries : [], new InvalidDataException(canary)));
+        result.IsSupported.Should().BeTrue();
+        result.IsIntact.Should().BeFalse();
+        result.FirstBreak.Should().BeNull();
+        result.EntriesVerified.Should().Be(afterEntries ? 2 : 0);
+        result.Note.Should().NotContain(canary);
+        AssertEvidence(result, "ReadFailed", "Unknown", "AvailableStore");
+    }
+
+    [Fact]
+    public async Task Cancellation_is_propagated_not_reported_as_a_storage_fault()
+    {
+        var invoke = () => Verify(new FailingSink([], new OperationCanceledException()));
+        await invoke.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public void Unsupported_verification_has_no_consistency_or_completeness_claim()
+    {
+        AssertEvidence(AuditChainVerification.Unsupported("No reader"), "Unknown", "Unknown", "Unknown");
+    }
+
+    private static void AssertEvidence(AuditChainVerification result, string consistency, string completeness, string scope)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        var evidence = document.RootElement.GetProperty("evidence");
+        evidence.GetProperty("schemaVersion").GetInt32().Should().Be(1);
+        evidence.GetProperty("consistency").GetString().Should().Be(consistency);
+        evidence.GetProperty("completeness").GetString().Should().Be(completeness);
+        evidence.GetProperty("scope").GetString().Should().Be(scope);
+        evidence.GetProperty("hasStableSnapshot").GetBoolean().Should().BeFalse();
+        evidence.GetProperty("hasIndependentCheckpoint").GetBoolean().Should().BeFalse();
+    }
+
     [Fact]
     public async Task An_untouched_chain_verifies()
     {
@@ -172,6 +300,12 @@ public sealed class AuditChainVerifierTests
         result.IsSupported.Should().BeTrue();
         result.IsIntact.Should().BeTrue();
         result.EntriesVerified.Should().Be(2);
+        result.Evidence!.SchemaVersion.Should().Be(2);
+        result.Evidence.HasStableSnapshot.Should().BeTrue();
+        result.Evidence.SequenceVerified.Should().BeTrue();
+        result.Evidence.SnapshotEntryCount.Should().Be(2);
+        result.Evidence.Completeness.Should().Be(AuditChainCompleteness.Unknown,
+            "an atomic copy is not an independent completeness checkpoint");
     }
 
     /// <summary>
@@ -262,6 +396,37 @@ public sealed class AuditChainVerifierTests
                 yield return entry;
             }
 
+            await Task.CompletedTask;
+        }
+    }
+
+    private sealed class FailingSink(IReadOnlyList<StoredAuditEntry> entries, Exception failure) : IReadableSovereignAuditSink
+    {
+        public Task WriteAsync<T>(AuditEvent<T> auditEvent, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async IAsyncEnumerable<StoredAuditEntry> ReadAsync(DateTimeOffset? since = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var entry in entries) yield return entry;
+            await Task.CompletedTask;
+            throw failure;
+        }
+    }
+
+    private sealed class HeadProbeSink(IReadOnlyList<StoredAuditEntry> entries, string? before, string? after)
+        : IReadableSovereignAuditSink, IChainedSovereignAuditSink
+    {
+        private int _headReads;
+        public Task<string?> HeadAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(Interlocked.Increment(ref _headReads) == 1 ? before : after);
+        public Task<bool> TryWriteAsync<T>(AuditEvent<T> auditEvent, string? expectedHead,
+            CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task WriteAsync<T>(AuditEvent<T> auditEvent,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public async IAsyncEnumerable<StoredAuditEntry> ReadAsync(DateTimeOffset? since = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var entry in entries) yield return entry;
             await Task.CompletedTask;
         }
     }

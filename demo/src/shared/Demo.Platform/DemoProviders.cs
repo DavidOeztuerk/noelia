@@ -11,6 +11,7 @@ using Noelia.Infrastructure.Security.Keys;
 using Noelia.Redis;
 using Noelia.Redis.Caching;
 using Noelia.Redis.Security;
+using Noelia.Infrastructure.Sovereignty;
 
 namespace Demo.Platform;
 
@@ -53,7 +54,9 @@ public static class DemoProviders
         this NoeliaBuilder noelia,
         DemoEnvironment environment,
         string serviceName,
-        bool readsTokens = false)
+        bool readsTokens = false,
+        bool ownsSessions = false,
+        IReadOnlyList<DeclaredDependency>? downstreams = null)
     {
         ArgumentNullException.ThrowIfNull(noelia);
         ArgumentNullException.ThrowIfNull(environment);
@@ -63,29 +66,22 @@ public static class DemoProviders
         // cannot.
         noelia.Services.AddSovereignAuditTrail();
 
-        // The argument this library makes, made visible. Without this the
-        // dashboard said "No sovereignty report is registered" — the headline
-        // feature missing from the one place a customer would look for it.
-        //
-        // The declarations are the point: an outbound call to a host nobody
-        // named fails, and the report says what this service reaches. Loopback
-        // and private networks are allowed because everything here is a
-        // container talking to its neighbour; a deployment that reaches the
-        // internet names those hosts one by one.
+        // Only state owned by this host and explicitly configured downstreams.
+        // Factory HTTP policy does not guard Redis, SQLite or Ocelot's private
+        // transport. Declarations are not observations or a network perimeter.
         noelia.AddSovereignPlatform(sovereign =>
         {
-            sovereign.DeclareDependency("Sessions", "sqlite:///data");
-
-            if (environment.UsesRedis)
+            // None of the demo's hosts calls a model. Without this declaration the
+            // AI checks answer "not determined" (a Warning), because host-name
+            // recognition cannot tell "no model" from "a model it does not know".
+            // A declaration, not an observation - and reported as one.
+            sovereign.DeclareArtificialIntelligence(false);
+            foreach (var dependency in DemoDependencies.State(environment, readsTokens, ownsSessions))
+                sovereign.DeclareDependency(dependency.Name, dependency.EndpointOrConnectionString);
+            foreach (var downstream in downstreams ?? [])
             {
-                sovereign
-                    .Allow(environment.RedisConnectionString!.Split(':')[0])
-                    .DeclareDependency("Cache, rate limits, revocation, audit chain",
-                        environment.RedisConnectionString);
-            }
-            else
-            {
-                sovereign.DeclareDependency("Cache, rate limits, revocation", "in-process");
+                sovereign.DeclareDependency(downstream.Name, downstream.EndpointOrConnectionString);
+                sovereign.Allow(new Uri(downstream.EndpointOrConnectionString!).Host);
             }
         });
 

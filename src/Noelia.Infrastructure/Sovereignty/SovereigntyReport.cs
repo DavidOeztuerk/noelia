@@ -13,15 +13,23 @@ public sealed class SovereigntyReport : ISovereigntyReport
     private readonly IConfiguration _configuration;
     private readonly IEgressPolicy _egressPolicy;
     private readonly IReadOnlyList<(string Name, string? Value)> _declared;
+    private readonly IReadOnlyList<string> _declaredAiEndpoints;
 
     public SovereigntyReport(
         IConfiguration configuration,
         IEgressPolicy egressPolicy,
-        IEnumerable<DeclaredDependency> declared)
+        IEnumerable<DeclaredDependency> declared,
+        IEnumerable<DeclaredArtificialIntelligenceUse>? aiUse = null)
     {
         _configuration = configuration;
         _egressPolicy = egressPolicy;
         _declared = [.. declared.Select(d => (d.Name, d.EndpointOrConnectionString))];
+        _declaredAiEndpoints =
+        [
+            .. (aiUse ?? [])
+                .Where(u => u.UsesArtificialIntelligence && !string.IsNullOrWhiteSpace(u.ModelEndpoint))
+                .Select(u => u.ModelEndpoint!)
+        ];
     }
 
     /// <inheritdoc />
@@ -37,6 +45,19 @@ public sealed class SovereigntyReport : ISovereigntyReport
         foreach (var (name, value) in _declared)
         {
             findings.Add(Examine(name, value));
+        }
+
+        // A model endpoint the operator declared is a model endpoint whatever its
+        // host is called: the name heuristic is a floor, and this is how an
+        // operator raises it for a local or self-named model.
+        foreach (var endpoint in _declaredAiEndpoints)
+        {
+            var host = ExtractHost(endpoint);
+            var (jurisdiction, note) = HostJurisdiction.Classify(host);
+            findings.Add(new DependencyFinding("Declared model endpoint", host, jurisdiction, note)
+            {
+                Kind = DependencyKind.ArtificialIntelligence
+            });
         }
 
         return new SovereigntyAssessment(
@@ -106,8 +127,36 @@ public sealed class SovereigntyReport : ISovereigntyReport
 /// </summary>
 public sealed record DeclaredDependency(string Name, string? EndpointOrConnectionString);
 
+/// <summary>
+/// The operator's own statement about whether the service uses a model, and
+/// optionally where it runs.
+/// </summary>
+/// <remarks>
+/// A declaration, never an observation: host-name recognition cannot see a
+/// local or self-named model, so the operator can say so here. A "no" is
+/// reported as declared, not as observed; a "yes" without a recognised host
+/// never turns into "no duty".
+/// </remarks>
+public sealed record DeclaredArtificialIntelligenceUse(
+    bool UsesArtificialIntelligence,
+    string? ModelEndpoint = null);
+
 public static class SovereigntyReportExtensions
 {
+    /// <summary>
+    /// Declares whether the service uses a model. A model endpoint given here is
+    /// listed in the inventory even when its host name is not a known provider.
+    /// </summary>
+    public static IServiceCollection DeclareNoeliaArtificialIntelligenceUse(
+        this IServiceCollection services,
+        bool usesArtificialIntelligence,
+        string? modelEndpoint = null)
+    {
+        services.AddSingleton(new DeclaredArtificialIntelligenceUse(
+            usesArtificialIntelligence, modelEndpoint));
+        return services;
+    }
+
     /// <summary>
     /// Registers the sovereignty report. Connection strings are picked up
     /// automatically; anything else is declared here.

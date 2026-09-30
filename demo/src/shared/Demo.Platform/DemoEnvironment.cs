@@ -28,7 +28,10 @@ public enum DashboardVisibility
     Open,
 
     /// <summary>A caller proving they are an operator.</summary>
-    Operator
+    Operator,
+
+    /// <summary>Operator-authenticated JSON reports only; no HTML or assets.</summary>
+    OperatorReports
 }
 
 /// <summary>Reads the demo's per-environment decisions out of configuration.</summary>
@@ -61,18 +64,32 @@ public sealed class DemoEnvironment
     public string? RedisConnectionString { get; }
 
     /// <summary>
-    /// The networks whose forwarded headers this service believes.
+    /// The proxy hops whose forwarded headers this service believes.
     /// </summary>
     /// <remarks>
     /// No service in the demo publishes a port: the only thing that can open a
-    /// connection to one is the compose network, and the only thing on it that
-    /// forwards is the edge. Trusting the private ranges is therefore trusting
-    /// the edge — but it is written down rather than assumed, because the day a
-    /// port is published the sentence stops being true and someone has to see
-    /// it.
+    /// connection to one is the compose network, and the only things on it that
+    /// forward are the edge and, for the two services behind it, the gateway.
+    /// docker-compose.yml gives each stage a fixed subnet and those two fixed
+    /// addresses, and writes them into <c>Demo:TrustedProxies</c>.
+    /// <para>
+    /// It used to be all of RFC 1918. That is "trust every container that can
+    /// reach me", which is one compromised or merely misconfigured neighbour
+    /// away from a caller choosing its own client address, and with it its own
+    /// rate-limit bucket. Naming the hop costs two lines of compose.
+    /// </para>
+    /// <para>
+    /// This is a pattern for a fixed-topology demo, not guidance for a real
+    /// deployment: there the proxy address comes from the platform (a load
+    /// balancer's range, a service-mesh identity), and an address written into
+    /// a compose file is exactly the thing that stops being true when the
+    /// topology moves. With nothing configured the default is loopback only —
+    /// a proxy in the same host — never a private range.
+    /// </para>
     /// </remarks>
-    public string[] TrustedProxies { get; private set; } =
-        ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+    public string[] TrustedProxies { get; private set; } = LoopbackOnly;
+
+    private static readonly string[] LoopbackOnly = ["127.0.0.1", "::1"];
 
     /// <summary>True when this stage keeps its state in Redis rather than in the process.</summary>
     public bool UsesRedis => !string.IsNullOrWhiteSpace(RedisConnectionString);
@@ -90,10 +107,10 @@ public sealed class DemoEnvironment
 
         var secret = section["Dashboard:OperatorSecret"];
 
-        if (visibility == DashboardVisibility.Operator && string.IsNullOrWhiteSpace(secret))
+        if (visibility is DashboardVisibility.Operator or DashboardVisibility.OperatorReports && string.IsNullOrWhiteSpace(secret))
         {
             throw new InvalidOperationException(
-                "Demo:Dashboard:Visibility is 'Operator' but Demo:Dashboard:OperatorSecret is "
+                "Demo:Dashboard:Visibility requires an operator but Demo:Dashboard:OperatorSecret is "
                 + "empty. A policy that cannot recognise an operator is a policy that admits "
                 + "everyone or no one, and which of the two is an accident.");
         }
@@ -108,7 +125,7 @@ public sealed class DemoEnvironment
         {
             TrustedProxies = configured is { Length: > 0 }
                 ? configured
-                : ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+                : LoopbackOnly
         };
     }
 
@@ -153,7 +170,9 @@ public sealed class DemoEnvironment
         }
         else
         {
-            dashboard.VisibleTo(IsOperator);
+            dashboard.VisibleTo(context => IsOperator(context)
+                && (Visibility != DashboardVisibility.OperatorReports
+                    || context.Request.Path.Value is "/noelia/report.json" or "/noelia/audit-chain.json"));
         }
 
         if (environment.IsProduction())

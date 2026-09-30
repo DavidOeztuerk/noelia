@@ -22,6 +22,12 @@ public sealed class MonolithTests : IDisposable
     }
 
     [Fact]
+    public async Task Monolith_report_matches_its_reviewed_baseline_without_gateway_modules()
+    {
+        await Demo.TestSupport.DemoBaselineAssertions.MatchAsync(_client, "monolith-memory");
+    }
+
+    [Fact]
     public async Task One_host_serves_authentication_and_todos_without_a_gateway()
     {
         var registration = await _client.PostAsJsonAsync("/api/auth/register",

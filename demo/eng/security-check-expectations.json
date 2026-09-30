@@ -1,0 +1,57 @@
+{
+  "SchemaVersion": 1,
+  "Scope": "What a running stack must report. A check is expected on a service when its Module is `Composition` (those run whether or not the module is composed) or is one of the modules the reviewed baseline role of that service lists in composition-baselines.json. One source of truth for the role -> modules half; this file adds only the check -> module mapping, the service -> role mapping and the scenarios.",
+  "Checks": {
+    "noelia.ai.inventory": "Composition",
+    "noelia.ai.record-keeping": "Composition",
+    "noelia.ai.transfer": "Composition",
+    "noelia.audit.chain-scope": "Composition",
+    "noelia.composition.providers": "Composition",
+    "noelia.cors.credentialed-origins": "Cors",
+    "noelia.dashboard.operator-access": "Dashboard",
+    "noelia.dataprotection.key-ring": "Composition",
+    "noelia.egress.guard": "Composition",
+    "noelia.headers.browser-baseline": "SecurityHeaders",
+    "noelia.health.readiness-coverage": "Composition",
+    "noelia.jwt.key-separation": "Jwt",
+    "noelia.ratelimit.degradation": "RateLimiting",
+    "noelia.revocation.degradation": "Jwt",
+    "noelia.sessions.refresh-cookie": "TokenSessions"
+  },
+  "Services": {
+    "gateway": "gateway",
+    "user": "issuer",
+    "todo": "verifier",
+    "mono": "monolith"
+  },
+  "Scenarios": {
+    "dev": {
+      "Providers": "memory",
+      "Services": [
+        "gateway",
+        "user",
+        "todo",
+        "mono"
+      ]
+    },
+    "staging": {
+      "Providers": "redis",
+      "Services": [
+        "gateway",
+        "user",
+        "todo",
+        "mono"
+      ]
+    },
+    "prod": {
+      "Providers": "redis",
+      "Services": [
+        "gateway",
+        "user",
+        "todo",
+        "mono"
+      ]
+    }
+  },
+  "OmittedModules": {}
+}

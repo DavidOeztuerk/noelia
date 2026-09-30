@@ -45,20 +45,32 @@ public interface IOutbox
 
 /// <summary>What a dispatcher needs to deliver what was recorded.</summary>
 /// <remarks>
-/// Separate from <see cref="IOutbox"/> because the two have different readers.
+/// <para>Separate from <see cref="IOutbox"/> because the two have different readers.
 /// Application code records; exactly one component delivers, and giving
 /// application code the ability to mark a message sent would let a handler
-/// silently drop one.
+/// silently drop one.</para>
+///
+/// <para><strong>Delivery is at-least-once.</strong> A publish that succeeded and
+/// a mark that did not, or a lease that expired mid-publish, delivers a message
+/// again. Consumers must deduplicate by <see cref="OutboxMessage.Id"/>.</para>
+///
+/// <para><strong>Claims are fenced.</strong> Every claim carries a token; a
+/// completion that names a token the store no longer holds changes nothing and
+/// reports <c>false</c>. A dispatcher that was slow enough to lose its lease
+/// therefore cannot overwrite the outcome of the one that took over.</para>
 /// </remarks>
 public interface IOutboxReader
 {
     /// <summary>
-    /// Claims up to <paramref name="batchSize"/> undelivered messages.
+    /// Claims up to <paramref name="batchSize"/> messages that are due.
     /// </summary>
     /// <remarks>
     /// Claiming, not reading: two dispatchers against one store must not both
     /// take the same message. An implementation that cannot claim atomically
-    /// has to say so rather than hand out duplicates and hope.
+    /// has to say so rather than hand out duplicates and hope. Only messages that
+    /// are undelivered, not quarantined, past their <c>notBefore</c> and not
+    /// under a live lease are taken; every message of one call shares one
+    /// <see cref="OutboxMessage.ClaimToken"/>.
     /// </remarks>
     /// <param name="batchSize">The most to take in one turn.</param>
     /// <param name="cancellationToken">Cancellation.</param>
@@ -66,23 +78,68 @@ public interface IOutboxReader
         int batchSize,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Records that a message reached the transport.</summary>
-    /// <param name="id">The message that was delivered.</param>
+    /// <summary>Records that a claimed message reached the transport.</summary>
+    /// <param name="claim">The message exactly as <see cref="ClaimAsync"/> returned it.</param>
     /// <param name="cancellationToken">Cancellation.</param>
-    Task MarkDeliveredAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// <c>true</c> when the claim was still current and the message is now
+    /// delivered; <c>false</c> when it had been taken over, in which case nothing
+    /// was changed.
+    /// </returns>
+    Task<bool> MarkDeliveredAsync(OutboxMessage claim, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a claimed message to the queue after a failed delivery.
+    /// Returns a claimed message to the queue after a failed delivery, not to be
+    /// claimed again before <paramref name="notBefore"/>.
     /// </summary>
     /// <remarks>
-    /// With the reason, because an operator looking at a message that has
-    /// failed nine times needs to know whether the broker was down or the
-    /// payload is unroutable — those call for different actions.
+    /// The store does not decide the schedule — retry policy is the dispatcher's —
+    /// it only refuses to hand the message out early. The reason is stored for an
+    /// operator, so it must be a classification and never a payload, a secret or
+    /// raw exception text.
     /// </remarks>
-    /// <param name="id">The message that did not reach the transport.</param>
-    /// <param name="reason">What the transport said, in one line.</param>
+    /// <param name="claim">The message exactly as <see cref="ClaimAsync"/> returned it.</param>
+    /// <param name="reason">A short, stable classification of the failure.</param>
+    /// <param name="notBefore">The earliest moment the message may be claimed again.</param>
     /// <param name="cancellationToken">Cancellation.</param>
-    Task ReleaseAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+    /// <returns><c>true</c> when the claim was current; <c>false</c> when it was stale and nothing changed.</returns>
+    Task<bool> ReleaseAsync(
+        OutboxMessage claim,
+        string reason,
+        DateTimeOffset notBefore,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Takes a claimed message out of circulation because retrying it is not
+    /// expected to help.
+    /// </summary>
+    /// <remarks>
+    /// Not a deletion: the row stays with its reason and attempt count. Until
+    /// <see cref="RequeueAsync"/> is called, <see cref="ClaimAsync"/> never
+    /// returns it, so a poison message cannot crowd out newer ones.
+    /// </remarks>
+    /// <param name="claim">The message exactly as <see cref="ClaimAsync"/> returned it.</param>
+    /// <param name="reason">A short, stable classification of the failure.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns><c>true</c> when the claim was current; <c>false</c> when it was stale and nothing changed.</returns>
+    Task<bool> QuarantineAsync(
+        OutboxMessage claim,
+        string reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Puts a quarantined message back in the queue, due immediately.
+    /// </summary>
+    /// <remarks>
+    /// The manual, deliberate way out of quarantine — call it after the cause has
+    /// been fixed. The attempt counter restarts so the message gets a full budget
+    /// again; the count and error it had are folded into the stored last error so
+    /// the history is not silently lost, and the store logs the requeue.
+    /// </remarks>
+    /// <param name="id">The message to resume.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns><c>false</c> when there is no quarantined, undelivered message with that id.</returns>
+    Task<bool> RequeueAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One recorded intent, as a dispatcher sees it.</summary>
@@ -102,10 +159,17 @@ public interface IOutboxReader
 /// How many times delivery has been tried. An operator reads this to tell a
 /// slow broker from a message nothing will ever accept.
 /// </param>
+/// <param name="ClaimToken">
+/// Names the claim that produced this instance. Hand the message back
+/// unchanged to <see cref="IOutboxReader.MarkDeliveredAsync"/>,
+/// <see cref="IOutboxReader.ReleaseAsync"/> or
+/// <see cref="IOutboxReader.QuarantineAsync"/>; a consumer has no use for it.
+/// </param>
 public sealed record OutboxMessage(
     Guid Id,
     string Type,
     string Payload,
     string? CorrelationId,
     DateTimeOffset RecordedAt,
-    int Attempts);
+    int Attempts,
+    Guid ClaimToken);

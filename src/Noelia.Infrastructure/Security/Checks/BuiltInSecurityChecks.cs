@@ -219,7 +219,7 @@ internal sealed class DataProtectionKeyRingSecurityCheck(
     public override SecurityCheckSeverity Severity => SecurityCheckSeverity.Medium;
     public override string Remediation =>
         "Call UseDataProtection(applicationName) to keep the key ring in the registered "
-        + "cache provider and encrypt it with the registered encryption provider.";
+        + "dedicated key-ring store and encrypt it with the configured master key.";
 
     /// <summary>
     /// Reports a key ring that does not outlive the process or is stored in the
@@ -251,14 +251,12 @@ internal sealed class DataProtectionKeyRingSecurityCheck(
 
         return Task.FromResult((persisted, encrypted) switch
         {
-            // "through the registered provider", not "outside the process":
-            // whether that provider is durable is the provider's property and
-            // is already visible in the composition. Claiming durability here
-            // would pass an in-process cache off as a shared store.
+            // Provider scope and disk durability must be evaluated separately;
+            // an in-memory store is still process-local.
             (true, true) => Result(
                 SecurityCheckStatus.Pass,
-                "The key ring is stored through the registered cache provider and encrypted "
-                + "with the registered encryption provider."),
+                "The key ring uses a registered XML store and encryption. Verify that the "
+                + "selected provider is durable and shared before relying on restart or replica continuity."),
             (false, _) => Result(
                 SecurityCheckStatus.Fail,
                 "The key ring is written to this container's filesystem; anything protected "

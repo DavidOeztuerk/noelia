@@ -15,12 +15,13 @@
       <p class="topbar__brand">Noelia&nbsp;Demo</p>
       <div class="topbar__session">
         <span data-session-name class="topbar__user"></span>
-        <button type="button" data-logout class="button button--ghost">Abmelden</button>
+        <button type="button" data-logout class="button button--ghost" disabled aria-disabled="true" title="Wird geladen …">Abmelden</button>
       </div>
     </header>
 
     <main id="main" class="shell">
       <p data-notice class="notice" role="status" aria-live="polite" hidden></p>
+      <p data-stage-hint class="notice" hidden></p>
 
       <section class="panel" aria-labelledby="new-todo-heading">
         <h2 id="new-todo-heading" class="panel__title">Neue Aufgabe</h2>

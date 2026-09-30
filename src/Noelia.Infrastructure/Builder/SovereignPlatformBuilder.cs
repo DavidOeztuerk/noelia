@@ -14,6 +14,7 @@ public sealed class SovereignPlatformBuilder
     private readonly NoeliaBuilder _noelia;
     private readonly List<Action<EgressPolicyBuilder>> _egressConfigurators = [];
     private readonly List<DeclaredDependency> _declaredDependencies = [];
+    private DeclaredArtificialIntelligenceUse? _declaredAi;
     private bool _allowLoopback = true;
     private bool _allowPrivateNetworks = true;
     private Action<IServiceCollection>? _sink;
@@ -91,6 +92,21 @@ public sealed class SovereignPlatformBuilder
     }
 
     /// <summary>
+    /// States whether the service uses a model, and optionally where it runs.
+    /// </summary>
+    /// <remarks>
+    /// Host-name recognition misses a local or self-named model. This is the
+    /// operator's declaration, reported as such: "no" is never presented as
+    /// observed, and "yes" keeps the AI checks asking their questions.
+    /// </remarks>
+    public SovereignPlatformBuilder DeclareArtificialIntelligence(
+        bool usesArtificialIntelligence, string? modelEndpoint = null)
+    {
+        _declaredAi = new DeclaredArtificialIntelligenceUse(usesArtificialIntelligence, modelEndpoint);
+        return this;
+    }
+
+    /// <summary>
     /// Configures a custom destination sink for the sovereign audit trail.
     /// </summary>
     public SovereignPlatformBuilder WithAuditSink<TSink>()
@@ -140,6 +156,12 @@ public sealed class SovereignPlatformBuilder
             });
 
             noelia.Services.AddNoeliaSovereigntyReport([.. _declaredDependencies]);
+
+            if (_declaredAi is not null)
+            {
+                noelia.Services.DeclareNoeliaArtificialIntelligenceUse(
+                    _declaredAi.UsesArtificialIntelligence, _declaredAi.ModelEndpoint);
+            }
 
             _sink?.Invoke(noelia.Services);
             noelia.Services.AddSovereignAuditTrail();

@@ -1,4 +1,5 @@
 import { Page } from "./Page.js";
+import { showStageHint } from "../ui/StageHint.js";
 import { AuthApi } from "../api/AuthApi.js";
 import { FormController } from "../ui/FormController.js";
 import { Session } from "../core/Session.js";
@@ -8,6 +9,7 @@ import { ApiError } from "../core/ApiError.js";
 class LoginPage extends Page {
   constructor() {
     super();
+    showStageHint(document.querySelector("[data-stage-hint]"), location.hostname);
     this.auth = new AuthApi(this.http);
     this.form = new FormController(
       document.querySelector("[data-auth-form]"),

@@ -236,7 +236,7 @@ internal static class DashboardPage
 
             DashboardSection.Sovereignty =>
                 report.Sovereignty.State is OperatorSectionState.Present
-                && (!report.Sovereignty.EgressIsEnforced
+                && (report.Sovereignty.HttpEgress.IsEnforcing is not true
                     || report.Sovereignty.Dependencies.Any(d => d.Jurisdiction == "ThirdCountryProvider")),
 
             DashboardSection.ArtificialIntelligence =>
@@ -336,9 +336,9 @@ internal static class DashboardPage
                 var abroad = report.Sovereignty.Dependencies
                     .Count(d => d.Jurisdiction == "ThirdCountryProvider");
 
-                return (report.Sovereignty.EgressIsEnforced ? "enforced" : "not enforced",
-                    $"{report.Sovereignty.Dependencies.Count} destination(s), "
-                    + $"{abroad} under third-country access law.");
+                return (report.Sovereignty.HttpEgress.IsEnforcing is true ? "HTTP guard configured" : "HTTP guard unknown/unrestricted",
+                    $"{report.Sovereignty.Dependencies.Count} declared dependency host(s), "
+                    + $"{abroad} classified as third-country providers. Traffic is not observed.");
 
             case DashboardSection.ArtificialIntelligence:
                 var models = report.Sovereignty.Dependencies
@@ -366,9 +366,10 @@ internal static class DashboardPage
                         report.Audit.Note ?? string.Empty);
                 }
 
-                return (report.Audit.IsChainValidAtWriteTime ? "intact" : "broken",
+                return (report.Audit.IsChainValidAtWriteTime
+                        ? "write-time chain status: valid" : "write-time chain status: invalid",
                     $"{report.Audit.Length.ToString(CultureInfo.InvariantCulture)} entries on "
-                    + "this instance.");
+                    + "this instance. Persisted history has not been read back on this page.");
 
             case DashboardSection.Sessions:
                 return report.Sessions.State is OperatorSectionState.Present
@@ -519,19 +520,31 @@ internal static class DashboardPage
     {
         output.Append("<section><h2>Sovereignty and egress</h2>");
 
+        var policy = sovereignty.HttpEgress;
+        output.Append("<h3>Factory HTTP policy</h3><p>").Append(H(policy.State.ToString()))
+            .Append(" · ").Append(H(policy.Note ?? string.Empty)).Append("</p>");
+        if (policy.State == OperatorSectionState.Present)
+        {
+            output.Append("<p>Scope: ").Append(H(policy.Scope ?? "unknown"))
+                .Append(". Restricting policy configured: ").Append(policy.IsEnforcing is true ? "yes" : "no")
+                .Append(". Redirects: ").Append(H(policy.Redirects ?? "unknown"))
+                .Append(".</p><p>Allowed targets: ")
+                .Append(policy.AllowedTargets.Count == 0 ? "none declared (unrestricted)" : H(string.Join(", ", policy.AllowedTargets)))
+                .Append("</p>");
+        }
+        output.Append("<h3>Observed outbound calls</h3><p>")
+            .Append(H(sovereignty.ObservedCalls.State.ToString())).Append(" · ")
+            .Append(H(sovereignty.ObservedCalls.Note ?? "Observation scope unknown."))
+            .Append("</p><h3>Declared dependencies</h3>");
+
         if (Note(output, sovereignty.State, sovereignty.Note))
         {
             output.Append("</section>");
             return;
         }
 
-        output.Append("<p>Egress enforcement: <span class=\"")
-            .Append(sovereignty.EgressIsEnforced ? "pass\">active" : "warning\">not active")
-            .Append("</span></p><p>Declared hosts: ")
-            .Append(sovereignty.DeclaredHosts.Count == 0
-                ? "none"
-                : H(string.Join(", ", sovereignty.DeclaredHosts)))
-            .Append("</p><table><thead><tr><th>Dependency</th><th>Host</th><th>Assessment</th><th>Reason</th></tr></thead><tbody>");
+        output.Append("<p>Declarations are not a complete network boundary or evidence of traffic.</p>")
+            .Append("<table><thead><tr><th>Dependency</th><th>Host</th><th>Assessment</th><th>Reason</th></tr></thead><tbody>");
 
         foreach (var dependency in sovereignty.Dependencies)
         {
@@ -542,7 +555,7 @@ internal static class DashboardPage
                 .Append("</td><td>").Append(H(dependency.Note)).Append("</td></tr>");
         }
 
-        output.Append("</tbody></table><p class=\"muted\">Undetermined is not a pass; a hostname cannot prove jurisdiction.</p></section>");
+        output.Append("</tbody></table><p class=\"muted\">Host/address classification does not establish ownership, jurisdiction or actual data transfers.</p></section>");
     }
 
     /// <summary>
@@ -580,8 +593,10 @@ internal static class DashboardPage
 
         if (models.Length == 0)
         {
-            output.Append("<p class=\"pass\">No configured destination is a recognised model or ")
-                .Append("inference endpoint.</p>")
+            output.Append("<p class=\"warning\">No configured destination is a recognised model or ")
+                .Append("inference endpoint. That does not establish that the service uses no ")
+                .Append("model; unless the operator declared AI use explicitly ")
+                .Append("(<code>DeclareArtificialIntelligence</code>), it is not determined.</p>")
                 .Append("<p class=\"muted\">Recognition is by host name. A model served from a ")
                 .Append("name of your own choosing, or reached through a gateway, would not ")
                 .Append("appear here — so this is a floor, not a ceiling.</p></section>");
@@ -743,8 +758,8 @@ internal static class DashboardPage
 
         output.Append("<p>Instance chain at write time: <span class=\"")
             .Append(audit.IsChainValidAtWriteTime ? "pass\">valid" : "fail\">invalid")
-            .Append("</span> · persisted sink: ")
-            .Append(audit.VerifiesPersistedSink ? "verified" : "not verified by this provider")
+            .Append("</span> · provider inspection: ")
+            .Append(audit.VerifiesPersistedSink ? "reports persisted read-back" : "local writes only")
             .Append(" · ")
             .Append(audit.Length.ToString(CultureInfo.InvariantCulture))
             .Append(" entries</p><table><thead><tr><th>Time</th><th>Actor</th><th>Capacity</th><th>Action</th><th>Resource</th></tr></thead><tbody>");
@@ -759,7 +774,7 @@ internal static class DashboardPage
                 .Append("</td><td>").Append(H(entry.Resource)).Append("</td></tr>");
         }
 
-        output.Append("</tbody></table><p class=\"muted\">This is the chain of the instance named above, not a cluster-wide claim.</p></section>");
+        output.Append("</tbody></table><p class=\"muted\">Persisted history has not been read back on this page. The write-time status is local to the named instance and cannot establish stored-chain consistency or completeness. Request audit-chain.json for an explicit read-back result.</p></section>");
     }
 
     private static void Sessions(StringBuilder output, SessionView sessions)

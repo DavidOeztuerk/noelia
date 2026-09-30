@@ -390,6 +390,16 @@ use an atomic Redis compare-and-set when multiple processes append. Audit
 records from 4.4.2 and earlier need the separate migration described in
 [MIGRATION.md](MIGRATION.md).
 
+**Redis Cluster is not supported by the audit snapshot.** The atomic snapshot
+read (`IStableAuditSnapshotReader`) is a Lua script that reads event payloads
+under keys it builds itself from the index, so those keys are not declared in
+`KEYS[]`. Redis Cluster requires every key a script touches to be declared and
+to live in one slot, which a chain of independently keyed events cannot satisfy.
+Run the Redis audit trail on a single Redis primary (replication and Sentinel
+are fine, sharding is not). The append scripts declare their keys, but the
+event, index and head keys carry no common hash tag and so also span slots on a
+cluster; treat the Redis audit sink as a single-primary provider as a whole.
+
 Every in-memory registration documents what it costs: state is invisible to
 other instances, so a rate limit counts per process and an audit trail does not
 survive a restart. That is sound for tests and a single replica, and stated
@@ -1095,11 +1105,27 @@ one store are safe, because claiming a batch is a conditional update with a
 five-minute lease, but each one is another connection holding messages.
 
 **Delivery is at-least-once and the dispatcher does not pretend otherwise.** It
-publishes first and marks second: a crash in between delivers a message twice,
-where the other order loses it. `OutboxMessage.Id` travels with the message so a
-consumer can decide. A message that has failed `AttemptsBeforeAlarm` times is
-logged as stuck and left in the table — never dropped, because a payload nothing
-will accept is a decision for an operator.
+publishes first and marks second: a crash in between, or a lease that expires
+mid-publish, delivers a message twice, where the other order loses it.
+**Consumers must deduplicate by `OutboxMessage.Id`**, which travels with the
+message.
+
+**A message nothing accepts cannot starve the rest.** A refused message is
+released with an exponential back-off (`Outbox:BaseRetryDelay`, doubling up to
+`Outbox:MaxRetryDelay`) and is not claimable before it is due, so failing
+messages stop occupying every batch. After `Outbox:MaxAttempts` (default 10) it
+is **quarantined**: never claimed again, logged once at error level, and never
+dropped. `IOutboxReader.RequeueAsync(id)` is the deliberate way back once the
+cause is fixed; it restarts the attempt budget and folds the old attempt count
+and error into `LastError`, and the store logs it. Quarantined rows are those
+with `QuarantinedAt` set in the outbox table. What is stored and logged about a
+failure is the exception's type name only — never its message or the payload.
+
+Claims are fenced: each `ClaimAsync` call stamps a token, and
+`MarkDeliveredAsync`, `ReleaseAsync` and `QuarantineAsync` take the claimed
+`OutboxMessage` and return `false` — changing nothing — when a newer claim has
+taken the message over. A dispatcher that lost its lease cannot overwrite the
+outcome of the one that replaced it.
 
 Turning a recorded payload back into an event is yours: `IOutboxPayloadReader`
 is a port, because deserialising an arbitrary named type out of a database row
@@ -1331,6 +1357,23 @@ Each section carries one of four states rather than an empty list —
 store and a service whose store stopped answering are not the same finding: one
 is a composition decision and the other is an outage.
 
+The unreleased report contract uses **schema 3**. Its sovereignty section keeps
+`dependencies` as declared/configured dependencies, separately from `httpEgress`
+(factory-guard registration and allow-policy configuration) and `observedCalls`
+(currently `Unavailable`, `count: null`). No traffic collector exists, so null is
+not zero calls. `httpEgress` names `HttpClientFactory` as its scope, the
+`RegistrationAndConfiguration` evidence basis, allowed targets and redirect
+configuration. It does not prove that application code uses that factory, that
+handlers were not overridden, or that SDKs/direct sockets/other protocols are
+confined. Allow entries and dependency declarations need not match.
+
+`IHttpEgressPolicyReport` is registered with `AddNoeliaEgressPolicy`, not by a
+standalone `IEgressPolicy` object. Guard and dependency-report availability are
+independent. Faulted reports expose a generic explanation, not raw exceptions.
+Legacy `egressIsEnforced` and `declaredHosts` remain for compatibility; readers
+must not promote them to schema-3 registration/scope evidence. Historical
+schema-1/2 reports lack these fields and remain unknown on those dimensions.
+
 Set `Dashboard:Fleet` to say which deployment a service belongs to. Noelia
 never invents one; a guessed name would group unrelated services and look
 authoritative doing it.
@@ -1346,16 +1389,65 @@ curl -s https://ops.internal/noelia/audit-chain.json
 
 ```json
 { "isSupported": true, "isIntact": true, "entriesVerified": 1284402,
-  "head": "aU5niZ…", "firstBreak": null }
+  "head": "aU5niZ…", "firstBreak": null,
+  "evidence": { "schemaVersion": 1, "consistency": "Consistent",
+    "completeness": "Unknown", "scope": "AvailableStore",
+    "hasStableSnapshot": false, "hasIndependentCheckpoint": false } }
 ```
 
-Two things are checked per entry, and they catch different edits. Recomputing
-the entry's own hash catches a record rewritten in place. Comparing its
-`previousHash` against the entry before it catches a record removed, inserted or
-moved — where every record is individually intact and only the sequence is a
-lie. A break is **named**, not merely counted: a verdict of "invalid" without a
-location sends an investigator back to the manual work they wanted a machine
-for.
+The verifier checks stored hashes and adjacent links. A whole-store request also
+requires the first available entry to have a null predecessor (the declared
+genesis); an explicitly requested time suffix does not. A detected mismatch is
+named, not merely counted. Missing or malformed indexed Redis payloads abort the
+read rather than silently shortening the chain. For a shared-head sink, the
+verifier compares the head before and after the walk with the last entry read.
+A missing suffix while the original head remains, or an append during the walk,
+returns `ReadFailed` rather than a positive result. This is a race/boundary
+check, not a stable snapshot or independent anchor.
+
+The additive `evidence` contract separates `Consistent`, `Broken`, `ReadFailed`
+and `Unknown` (including an empty walk). `IsIntact` remains a legacy hash/link
+flag, **not a completeness verdict**; it is true even for an empty successful
+walk. `completeness` is `Unknown`, or `Partial` for an explicit time suffix.
+Without an independent checkpoint and a defined stable snapshot, a removed
+tail or fully emptied store together with its head, or a rewritten and
+recomputed chain, cannot be distinguished from the available consistent data.
+Evidence v1 therefore never claims complete history or tamper resistance. A
+head read from the same mutable store alone does not establish either property.
+Legacy results without `evidence` must not acquire stronger claims through
+deserialization defaults.
+
+Evidence schema 2 is emitted when the sink captures index order, payloads and
+head atomically. The in-process sink copies under its lock. Redis uses one Lua
+operation, bounded by 4096 entries and 4 MiB of payload by default; a larger
+chain falls back to streaming and keeps `hasStableSnapshot: false`. New Redis
+indexes are checked for contiguous scores starting at zero. Legacy timestamp
+indexes remain readable but do not gain sequence verification or completeness.
+A stable snapshot alone still yields `Unknown` completeness.
+
+`completeness: Complete` is reachable only through an
+`ITrustedAuditCheckpointSource` that **you** register. Noelia ships the port
+(`Noelia.Abstractions`) and the verifier that consumes it, but no signer and no
+producer workflow: the signed-checkpoint helper types are implementation detail
+and are not public API. Implement the port over a document that an independent
+signer produces and that is authenticated against a separately pinned trust key
+(for instance an ECDSA P-256 signature over chain id, genesis, count, head and
+issue time). Hold the private signing key outside the audit store, the running
+service and Redis; pin the public key in trusted deployment configuration
+independently of the document. Without a registered source the verifier reports
+`Unknown` (full walk) or `Partial` (time suffix) by design, and says so in its
+note.
+
+The verifier checks the source's document (its chain identity, genesis,
+sequence, count and head) against a new atomic full snapshot. Only an exact match returns `completeness: Complete` and a checkpoint
+digest/issue time. Missing, stale, changed or untrusted checkpoints remain
+`Unknown`; a requested time suffix remains `Partial`. `Complete` means the
+stored chain matches that signer's accepted snapshot, not that every real-world
+event was recorded.
+
+Reader failures return `ReadFailed` with a generic note and any prefix count,
+not a successful partial verification or a demonstrated cryptographic break.
+Raw exception text is excluded; cancellation still propagates to the caller.
 
 It is deliberately not part of the report. Recomputing millions of entries on
 every page load would make opening the dashboard an attack on the store it
@@ -1512,7 +1604,7 @@ with none of the above configured makes no outbound call because Noelia is in it
 
 ### Limiting it
 
-Outbound destinations are declared, and undeclared calls fail:
+Factory-managed HTTP clients can be restricted to an explicit allow policy:
 
 ```csharp
 builder.Services.AddNoeliaEgressPolicy(p => p
@@ -1525,6 +1617,15 @@ With nothing declared everything is allowed — adding the package must not
 change behaviour on its own. Once anything is declared, the policy is
 enforcing, and it applies to every `HttpClient` the factory builds, including
 the ones Noelia's own modules use.
+
+With an enforcing policy, automatic redirects are disabled on the primary
+transport. A 301/302/303/307/308 response is returned to the caller, not silently
+followed below the guard. If following it is necessary, make a new factory-client
+request that passes the policy again; do not forward credentials or a private
+body to another origin. Both HttpClientHandler and SocketsHttpHandler are
+supported; unknown custom primary transports fail client construction because
+Noelia cannot establish their redirect behavior. A policy declaring nothing
+retains unrestricted transport behavior.
 
 A refused call throws where it was made, naming the host and the policy. That is
 deliberate: a call that silently returned nothing would look like an empty
@@ -1632,13 +1733,31 @@ wherever Noelia does:
 
 | Check | What it answers |
 |---|---|
-| `noelia.ai.inventory` | Which configured destinations are model endpoints. Passes with the list, or passes with none. |
+| `noelia.ai.inventory` | Which configured destinations are model endpoints. Passes with the list; with none recognised and no declaration it is a `Warning` ("not determined"). |
 | `noelia.ai.transfer` | Whether any of them sits under a third country's access law, or under a name whose operator cannot be told. |
-| `noelia.ai.record-keeping` | Whether what the service records about its model calls is written automatically and can be shown not to have been edited. |
+| `noelia.ai.record-keeping` | Whether an audit sink is registered that is chained and can be read back. It does **not** observe that a model call produced an entry; the summary says so. |
 
-Where no model endpoint is configured, the last two report `NotApplicable`
-rather than passing: a green tick against an article that does not apply is
-noise in the one document meant to cut through it.
+"No known model host detected" is **not** "no model": recognition is by host
+name, so Ollama on `localhost:11434` or `https://llm.internal.example` is
+invisible. With nothing recognised and no declaration, inventory and
+record-keeping report `Warning` with "not determined" and a remediation to
+declare AI use. `transfer` stays `NotApplicable` (nothing to classify) and says
+that this is not proof that no model is reached.
+
+Declare it yourself:
+
+```csharp
+noelia.AddSovereignPlatform(p => p
+    .DeclareArtificialIntelligence(true, "http://localhost:11434"));   // uses a model, and where
+// or, on the service collection:
+services.DeclareNoeliaArtificialIntelligenceUse(false);                // uses none
+```
+
+A declared endpoint is listed in the inventory whatever its host is called. A
+declared "no" gives `NotApplicable` worded as *declared by the operator, not
+observed*; a declared "yes" without a recognised host keeps the checks asking
+(it never becomes "no duty"). This is evidence for a human reader, not a legal
+assessment; Art. 12 / 26 bind from 2 December 2027.
 
 ### What the inventory is not
 
@@ -1799,23 +1918,33 @@ builder.Services
 
 ```csharp
 noelia.UseRedisCache("identity")
-      .UseRedisEncryption()
       .UseDataProtection("identity-service");
 ```
+
+Register `IMasterKeyProvider` with `AddConfiguredMasterKey()` or
+`AddSecretStoreMasterKey()` before composing this module. The same master key
+must remain available to every replica and after restart.
 
 Without this, ASP.NET creates its key ring itself and puts it in one container's
 filesystem in the clear — so every cookie and antiforgery token protected with
 it stops verifying the moment that container is replaced, and ASP.NET writes two
 warnings at every start that most deployments learn to ignore.
 
-`UseDataProtection(applicationName)` stores the ring through the registered
-cache provider and encrypts each element with a key derived from the registered
-master key (HKDF-SHA256, then AES-256-GCM with the envelope metadata as
-associated data). All three parts are required and each is a port: a master key
-opens the encryption provider, the encryption provider protects the ring, the
-cache provider keeps it where the next container can read it. In-process
-providers satisfy them too, which is what lets a development stage protect its
-ring instead of reporting a failure forever.
+`UseDataProtection(applicationName)` stores the ring through the dedicated
+`IDataProtectionKeyStore` supplied by the selected provider and encrypts each
+element with a key derived from the registered master key (HKDF-SHA256, then
+AES-256-GCM with authenticated envelope metadata). Redis appends keys and
+revocations atomically in a non-expiring hash outside the generic cache
+namespace; cache invalidation cannot remove it. Configure Redis/Valkey with
+durable persistence, a backed-up volume and a no-eviction policy for continuity
+across server restarts. `UseInMemoryCache` supplies a non-expiring but
+process-local ring; it does not preserve cookies across process replacement or
+share them with a second replica. A cache is not required: the ring needs only
+the store and the master key. If an `IDistributedCacheService` is registered,
+existing cache-backed ring elements are imported when still readable (at first
+read and then at most every five minutes, so an entry an old replica writes
+during a rolling upgrade arrives with that delay); complete the coordinated
+upgrade before their old cache TTL expires and retain the master key.
 
 `ISecretProvider` is the one secret-store seam; `IVersionedSecretProvider` adds
 history where a provider supports it. Redis and InMemory implement both. The old
@@ -1906,7 +2035,7 @@ integration suite is indistinguishable from a passing one.
   everyone on first sign-in is the state today.
 - **`DataProtectionSecretProvider` has no consumer** — resolved differently in
   5.2.0. `UseDataProtection(applicationName)` keeps the key ring in the
-  registered cache provider and encrypts it at the master key, so the provider
+  registered dedicated key-ring store and encrypts it at the master key, so the provider
   is no longer the answer to that question. Whether it is still worth shipping
   at all is open.
 - **`ILogSanitizer` has no consumer inside Noelia** since logging moved to
@@ -2230,18 +2359,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 6.3.0. Consumers install anonymously from NuGet.org:
+version is 7.0.0. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 6.3.0
+dotnet add package Noelia.Infrastructure --version 7.0.0
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="6.3.0" />
-  <PackageReference Include="Noelia.Redis" Version="6.3.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="6.3.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="7.0.0" />
+  <PackageReference Include="Noelia.Redis" Version="7.0.0" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.0.0" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`

@@ -64,6 +64,13 @@ jobs:
           npm ci
           npm test
 
+      # The security gate's own logic (fixture logs, no Docker). The stack itself
+      # and the browser matrix are NOT run here: that is demo/eng/release-gate.mjs,
+      # run locally before a release (demo/README.md, "The release gate").
+      - name: Security gate unit tests
+        working-directory: demo
+        run: python3 -m unittest discover -s eng -p 'test_*.py'
+
   vulnerabilities:
     runs-on: ubuntu-latest
     steps:

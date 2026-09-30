@@ -39,6 +39,38 @@ public sealed class NoeliaOutboxMessage
     /// </remarks>
     public DateTime? ClaimedAt { get; set; }
 
+    /// <summary>
+    /// Identifies the claim that currently owns the row, or null while it is free.
+    /// </summary>
+    /// <remarks>
+    /// Fencing. A dispatcher whose lease ran out and whose message was claimed by
+    /// another one still holds a reference to it; without a token its late
+    /// <c>Release</c> or <c>MarkDelivered</c> would overwrite the newer claim's
+    /// outcome. Every completion names the token it was given, and a row that
+    /// carries a different one is left alone.
+    /// </remarks>
+    public Guid? ClaimToken { get; set; }
+
+    /// <summary>
+    /// The earliest moment the message may be claimed again, or null when it is due.
+    /// </summary>
+    /// <remarks>
+    /// This is what stops a message nothing will accept from being retried in a
+    /// tight loop and from crowding newer messages out of every batch. The
+    /// schedule itself is the dispatcher's; the store only honours it.
+    /// </remarks>
+    public DateTime? NextAttemptAt { get; set; }
+
+    /// <summary>
+    /// When the dispatcher gave up on the message, or null while it is still in play.
+    /// </summary>
+    /// <remarks>
+    /// A quarantined message is never claimed. Only an explicit
+    /// <see cref="EntityFrameworkOutbox{TContext}.RequeueAsync"/> puts it back,
+    /// so the decision to try again is always a person's and is on record.
+    /// </remarks>
+    public DateTime? QuarantinedAt { get; set; }
+
     /// <summary>When it reached the transport, or null while it has not.</summary>
     public DateTime? DeliveredAt { get; set; }
 

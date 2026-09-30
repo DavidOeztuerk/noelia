@@ -131,9 +131,19 @@ public sealed class SecurityHeadersPackageTests
         var material = JsonSerializer.Serialize(report.Latest) + string.Join('\n', logs.Messages);
 
         material.Should().NotContain(Canary);
+        // Since the AI checks stopped reading "nothing recognised" as "no duty", a
+        // composition with no declaration answers Warning ("not determined") on these
+        // two. This probe deliberately composes ONE module, and a declaration needs the
+        // sovereign platform (a second module, which Composition_contains_only_the_module_under_test
+        // forbids). So exactly these two are expected to warn - and nothing else may.
+        string[] undeclared = ["noelia.ai.inventory", "noelia.ai.record-keeping"];
         report.Latest.Should().OnlyContain(result =>
             result.Status == SecurityCheckStatus.Pass
-            || result.Status == SecurityCheckStatus.NotApplicable);
+            || result.Status == SecurityCheckStatus.NotApplicable
+            || (result.Status == SecurityCheckStatus.Warning && undeclared.Contains(result.Id)));
+        report.Latest.Where(result => undeclared.Contains(result.Id))
+            .Should().OnlyContain(result => result.Status == SecurityCheckStatus.Warning,
+                "the probe declares nothing, so the AI checks must say 'not determined'");
     }
 
     private static async Task<WebApplication> CreateAppAsync(ILoggerProvider? loggerProvider = null)

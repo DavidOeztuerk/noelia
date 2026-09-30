@@ -1,4 +1,5 @@
 using Noelia.Abstractions.Caching;
+using Noelia.Abstractions.Security.Keys;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ public static class InMemoryCacheRegistration
             sp.GetRequiredService<IMemoryCache>(),
             sp.GetRequiredService<ILogger<InMemoryDistributedCacheService>>(),
             keyPrefix: $"{keyPrefix.ToLowerInvariant()}:"));
+        services.AddSingleton<IDataProtectionKeyStore, InMemoryDataProtectionKeyStore>();
 
         services.AddSingleton<IDistributedRateLimitStore, InMemoryRateLimitStore>();
 

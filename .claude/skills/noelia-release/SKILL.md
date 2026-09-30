@@ -93,9 +93,8 @@ noelia analyze .                        # the tool, on a real consumer
 - `MIGRATION.md` — a section per version, **German**, newest at the top
 - `CLAUDE.md` — the package count and version line
 
-A breaking change is announced as `[Obsolete]` in a minor release before it is
-removed in the next major. If a change has no migration note, it is either not
-released or not understood.
+If a change has no migration note, it is either not released or not
+understood.
 
 ## 7. Publish
 

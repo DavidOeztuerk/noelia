@@ -1,3 +1,256 @@
+# Noelia 6.4.0 → 7.0.0
+
+Eine Hauptversion, weil mehrere Verträge brechen. Es gibt dafür bewusst keine
+`[Obsolete]`-Vorstufe; jeder Bruch steht unten mit dem, was zu tun ist.
+
+## Brechend auf einen Blick
+
+- **Outbox:** `IOutboxReader` hat neue Signaturen, `OutboxMessage` einen letzten
+  Parameter `ClaimToken`, `noelia_outbox` drei neue Spalten (**EF-Migration
+  erforderlich**), und `AttemptsBeforeAlarm` ist durch `MaxAttempts`,
+  `BaseRetryDelay` und `MaxRetryDelay` ersetzt.
+- **Schlüsselring:** `UseDataProtection` braucht einen `IDataProtectionKeyStore`
+  (`UseRedisCache`/`UseInMemoryCache` liefern ihn). Einen Cache braucht es **nicht**
+  mehr; ein vorhandener dient nur noch als Migrationsquelle für alte Einträge.
+- **Redis-Audit:** der Reader wirft `InvalidDataException` bei fehlenden, leeren
+  oder ungültigen indexierten Einträgen, statt sie zu überspringen.
+- **Audit-Verifikation:** ein Walk über den ganzen Store, dessen erster Eintrag einen
+  Vorgänger hat, ist `LinkBroken`.
+- **Egress:** eine durchsetzende Policy lehnt unbekannte `PrimaryHandler` ab und gibt
+  Weiterleitungen (301/302/303/307/308) an den Aufrufer zurück.
+- **Operator-Bericht:** Schema **3**; Leser müssen es ausdrücklich unterstützen.
+- **KI-Prüfungen:** ohne Deklaration `noelia.ai.inventory` `Pass` → `Warning` und
+  `noelia.ai.record-keeping` `NotApplicable` → `Warning`; Gates, die auf `Warning`
+  scheitern, müssen das berücksichtigen (`DeclareArtificialIntelligence`).
+- **Checkpoint-Typen:** `SignedFileAuditCheckpointSource`, `AuditCheckpointSignature`
+  und `SignedAuditCheckpoint` sind `internal`. `Complete` setzt einen eigenen
+  `ITrustedAuditCheckpointSource` voraus; ohne ihn meldet der Verifier
+  `Unknown`/`Partial`, und das ist Absicht.
+- **Redis Cluster:** der atomare Audit-Snapshot ist nicht clusterfähig (siehe README,
+  Abschnitt Provider). Keine Verhaltensänderung, aber jetzt ausdrücklich dokumentiert.
+
+Nichts davon verlangt Datenmigration außer der Outbox-Schemaänderung.
+
+## KI-Prüfungen: "nichts erkannt" ist nicht "keine Pflicht" (R20)
+
+Die Erkennung von Modell-Endpunkten geht nach Hostnamen. Ein lokales oder
+selbst benanntes Modell (Ollama auf `localhost`, eigene Domain) blieb unerkannt,
+und `noelia.ai.record-keeping` schloss daraus "keine Aufzeichnungspflicht".
+Zudem klang ein registrierter Audit-Sink, als würden Modellaufrufe automatisch
+aufgezeichnet.
+
+**Geänderte Ergebnisse** (ohne Deklaration, ohne erkannten Host):
+
+- `noelia.ai.inventory`: `Pass` → `Warning` (Low), "Not determined".
+- `noelia.ai.record-keeping`: `NotApplicable` → `Warning` (Low), "Not determined".
+- `noelia.ai.transfer`: bleibt `NotApplicable`, Text sagt nun, dass das kein
+  Beleg für "kein Modell" ist.
+- Kein `ISovereigntyReport` registriert: `inventory` `NotApplicable` → `Warning`.
+- Sink-Texte behaupten keine Aufzeichnung mehr ("Whether model calls are recorded
+  in it is not observed"); ein registrierter Sink ist Fähigkeit, kein Beleg.
+- Dashboard-Seite `/ai`: leerer Bestand ist kein `pass` mehr, sondern eine Warnung.
+
+**Neu: Deklaration.** `SovereignPlatformBuilder.DeclareArtificialIntelligence(bool, string? modelEndpoint = null)`
+bzw. `services.DeclareNoeliaArtificialIntelligenceUse(...)` (Typ
+`DeclaredArtificialIntelligenceUse`). "Nein" ergibt `NotApplicable` mit dem
+Wortlaut "declared by the operator, not observed"; "Ja" ohne erkannten Host
+bleibt `Warning` und stellt weiter die Sink-Frage; ein angegebener Endpunkt
+erscheint im Inventar (`Declared model endpoint`), egal wie der Host heißt.
+Wer bisher auf grüne/`NotApplicable`-KI-Checks angewiesen war, deklariert seine
+KI-Nutzung; Gates, die auf `Warning` scheitern, müssen das berücksichtigen.
+Nur `SovereigntyReport`-Konstruktor: neuer optionaler Parameter am Ende.
+
+## Outbox: Giftnachrichten, Backoff, Quarantäne und Fencing (R21)
+
+Bisher nahm `ClaimAsync` die ältesten offenen Zeilen, `ReleaseAsync` machte eine
+fehlgeschlagene Nachricht sofort wieder claimbar, und `AttemptsBeforeAlarm`
+änderte nur die Logstufe. Ein Batch dauerhaft fehlerhafter Nachrichten verdrängte
+neuere, zustellbare Nachrichten dauerhaft. Zusätzlich konnte ein Dispatcher mit
+abgelaufenem Lease per spätem `Release`/`MarkDelivered` den Claim eines anderen
+überschreiben.
+
+**Schema (EF-Migration erforderlich).** `noelia_outbox` erhält
+`NextAttemptAt` (nullable, UTC), `QuarantinedAt` (nullable, UTC) und
+`ClaimToken` (nullable Guid). Der Index `(DeliveredAt, RecordedAt)` wird durch
+`(DeliveredAt, QuarantinedAt, NextAttemptAt, RecordedAt)` ersetzt, dazu kommt ein
+Index auf `ClaimToken`. Nach dem Update `dotnet ef migrations add …` ausführen;
+bestehende Zeilen bleiben gültig (alle neuen Spalten `NULL` = fällig, nicht
+in Quarantäne, kein Claim). Vor dem Rollout laufende Dispatcher der alten
+Version beenden, sonst schreiben sie ohne Token.
+
+**Signaturänderungen an `IOutboxReader`** (kein `[Obsolete]`, harter Bruch):
+
+- `MarkDeliveredAsync(Guid id, ct)` → `Task<bool> MarkDeliveredAsync(OutboxMessage claim, ct)`
+- `ReleaseAsync(Guid id, string reason, ct)` → `Task<bool> ReleaseAsync(OutboxMessage claim, string reason, DateTimeOffset notBefore, ct)`
+- neu: `Task<bool> QuarantineAsync(OutboxMessage claim, string reason, ct)`
+- neu: `Task<bool> RequeueAsync(Guid id, ct)`
+- `OutboxMessage` erhält als letzten Parameter `Guid ClaimToken`.
+
+`false` bedeutet: der Claim war veraltet (ein anderer Dispatcher hat die
+Nachricht übernommen); es wurde nichts geändert. Eigene `IOutboxReader`-
+Implementierungen müssen dieses Fencing selbst liefern.
+`EntityFrameworkOutbox<TContext>` erhält einen optionalen `ILogger`-Parameter
+(per DI aufgelöst; direkte Konstruktoraufrufe bleiben gültig).
+
+**Verhalten.** `ClaimAsync` liefert nur Nachrichten, die unzugestellt, nicht in
+Quarantäne, fällig (`NextAttemptAt` leer oder erreicht) und ohne lebenden Lease
+sind; ein Aufruf stempelt ein frisches Token. Die Retry-Politik liegt im
+Dispatcher: Fehlschlag → `ReleaseAsync` mit exponentiellem Backoff
+(`BaseRetryDelay`, verdoppelt bis `MaxRetryDelay`), ab `Attempts >= MaxAttempts`
+→ `QuarantineAsync` (einmal Error-Log, nie wieder geclaimt, nie gelöscht).
+`RequeueAsync(id)` hebt die Quarantäne auf, macht die Nachricht sofort fällig und
+setzt `Attempts` auf 0; der alte Zählerstand und Fehler werden in `LastError`
+vermerkt, der Store loggt das Requeue. Eine Zeile in Quarantäne findest du über
+`QuarantinedAt IS NOT NULL`.
+
+**Optionen (`Outbox`-Sektion).** `AttemptsBeforeAlarm` entfällt; ersetzt durch
+`MaxAttempts` (Default 10, ≥ 1), `BaseRetryDelay` (Default 5 s, > 0) und
+`MaxRetryDelay` (Default 15 min, ≥ `BaseRetryDelay`). Ungültige Werte, auch
+`BatchSize < 1` und `IdleInterval <= 0`, brechen den Start ab.
+
+**Keine Rohdaten in `LastError` und Logs.** Der Dispatcher speichert und loggt
+nur den Exception-Typnamen, nie `Exception.Message`, Stacktrace oder Payload.
+Wer bisher den Text in `LastError` las, findet dort jetzt z. B.
+`InvalidOperationException`; Details stehen im Log des Transports.
+
+**Zustellung ist at-least-once.** Konsumenten müssen über `OutboxMessage.Id`
+deduplizieren, auch nach Lease-Ablauf.
+
+**Demo.** `demo/` nutzt den Outbox nicht; nichts zu ändern.
+
+## Data-Protection-Schlüsselring: dedizierter atomarer Store
+
+`UseDataProtection(applicationName)` benötigt nun zusätzlich den providerfreien
+`IDataProtectionKeyStore`. `UseRedisCache(prefix)` und `UseInMemoryCache(prefix)`
+registrieren ihn automatisch. Redis verwendet ein atomisches `HSETNX`-Hash ohne
+TTL außerhalb des generischen Cache-Namensraums; gleichzeitige Schlüssel- und
+Widerrufsschreiber überschreiben einander nicht. Der InMemory-Store hat ebenfalls
+keinen 30-Minuten-Ablauf, bleibt aber prozesslokal. Bestehende XML-Verschlüsselung,
+AAD und `IMasterKeyProvider` bleiben unverändert.
+
+**Der Cache ist optional.** Der Schlüsselring verlangt keinen
+`IDistributedCacheService` mehr; ohne einen arbeitet er allein mit dem Store. Ist
+einer registriert, werden noch erreichbare Schlüssel und Widerrufe aus dem alten
+Cache-Index in den neuen Store übernommen, und zwar einmal beim ersten Lesen und
+danach höchstens alle fünf Minuten erneut (jeder Eintrag nur einmal; ein
+fehlgeschlagener Import wird beim nächsten Lesen wiederholt, nicht als erledigt
+gemerkt). Abgewogen: ein Eintrag, den eine alte Instanz während eines gemischten
+Rollouts schreibt, erreicht diesen Prozess bis zu fünf Minuten später, statt pro
+Lesevorgang (zuvor ein Cache-GET und ein Append je Altbestand bei jedem Lesen). Vor einem koordinierten Upgrade den
+alten Ring und Master Key sichern und den neuen Dienst starten, solange der
+alte Cache-Index noch lesbar ist; abgelaufene oder bereits gelöschte Elemente
+können nicht aus dem Cache rekonstruiert werden. Fehlt ein indexiertes Element
+oder ist es leer, bricht die Migration ab, damit ein fehlender Widerruf nicht
+still verschwindet. Den vollständigen Ring dann aus dem Backup wiederherstellen.
+Während eines gemischten
+Rollouts könnten alte Instanzen neue Schlüssel nicht sehen; alte Instanzen
+vor neuer Schlüsselerzeugung ersetzen. Der neue Redis-Hash benötigt dauerhafte
+Redis-/Valkey-Persistenz, gesichertes Volume und eine No-Eviction-Policy.
+Das Demo-Valkey-Profil ist persistent (AOF auf einem Volume). Keine vorhandenen Daten werden automatisch gelöscht.
+
+## Audit-Verifikation: versionierte Evidenz statt Vollständigkeit aus einem Boolean
+
+`AuditChainVerification` erhält additiv `evidence` (Version 1): Konsistenz
+(`Consistent`, `Broken`, `ReadFailed`, `Unknown`), Vollständigkeit
+(`Unknown`/`Partial`), Lesebereich sowie explizit fehlender Snapshot-/Checkpoint-
+Nachweis. Alte Ergebnisse ohne Evidenz behalten `null`; eine fehlende
+Evidenz-Schemaversion bleibt 0. `IsIntact` bleibt kompatibel ein Hash-/Linkflag,
+auch bei leerem erfolgreichem Walk, und darf nicht als Vollständigkeit angezeigt
+werden. Version 1 stellt keinen vollständigen Verlauf fest.
+
+Ein Walk ohne Zeitgrenze verweigert einen ersten Eintrag mit Vorgänger als
+`LinkBroken` (fehlende Genesis-Grenze). Historisch bewusst gekürzte Logs ohne
+Genesis können daher nicht mehr als ganze Kette gelten; explizite Zeitbereiche
+bleiben Teilprüfungen, nicht der Weg zu einer Vollständigkeitsbehauptung.
+Lesefehler werden im Verifier als `ReadFailed` zurückgegeben, ohne rohe
+Exceptiontexte. Cancellation propagiert weiter. Direkte Redis-Reader-Aufrufer
+erhalten weiterhin die unten dokumentierte Exception.
+
+Bei Senken mit geteiltem Head vergleicht der Verifier dessen Wert vor und nach
+dem Walk mit dem gelesenen letzten Eintrag. Ein entfernter Suffix bei erhaltenem
+Head oder ein konkurrierender Append wird `ReadFailed`, nicht `Consistent`.
+Dieser Vergleich ist ein Race-/Boundary-Check aus demselben veränderbaren Store,
+kein stabiler Snapshot oder unabhängiger Vollständigkeitsanker. Werden Index,
+Payloads und Head zusammen entfernt oder neu berechnet, bleibt Vollständigkeit
+unbekannt.
+
+Schema 2 meldet einen atomaren Voll-Snapshot mit Sequenzmetadaten. Redis begrenzt
+die Kopie standardmäßig auf 4096 Einträge und 4 MiB Payload; darüber bleibt der
+Stream-Pfad ohne Snapshot-Nachweis. Alte zeitbasierte Redis-Scores bleiben lesbar,
+werden aber nicht rückwirkend als lückenlose Sequenz anerkannt. Der optionale
+`ITrustedAuditCheckpointSource` muss ein außerhalb des Audit-Stores authentisiertes
+Dokument liefern. **Noelia liefert dafür keine Implementierung**: die
+Typen `SignedFileAuditCheckpointSource`, `AuditCheckpointSignature`
+und `SignedAuditCheckpoint` sind `internal` (nie verdrahtet, ohne Erzeuger-Workflow).
+Wer `Complete` braucht, registriert einen eigenen `ITrustedAuditCheckpointSource`,
+gestützt auf einen Signer außerhalb des Audit-Stores, mit separat gepinntem
+PublicKey; das private Signiermaterial gehört nicht in den Dienst oder Redis.
+Nur ein passender Voll-Snapshot mit Genesis, Sequenz,
+Anzahl und Head erhält `Complete`. Ohne diesen Vertrag bleiben Bestandslogs
+`Unknown` oder bei Zeitgrenze `Partial`. `Complete` belegt den gespeicherten
+Verlauf relativ zum akzeptierten Signer, nicht die Erfassung aller echten Ereignisse.
+
+CP liest die neue Evidenz explizit vom Wire auch mit der veröffentlichten
+6.4.0-Abstractions-Abhängigkeit. UI trennt ReadFailed, Hash-/Linkkonsistenz und
+unbekannte Vollständigkeit; Legacy-Flags erhalten keinen neuen Nachweis.
+CP-Historie speichert nun den expliziten Konsistenzzustand samt unbekannter oder
+partieller Vollständigkeit; Legacy-Flags erscheinen als unbekannt. Alarmrouten
+melden Recovery nur bei belegtem positiven Zielzustand; Broken→Unknown oder
+ReadFailed ist keine Entwarnung. Die Dashboard-Übersicht kennzeichnet die lokale
+Write-Time-Prüfung und unterscheidet sie von Read-Back. Zuverlässige
+Alarmzustellung und Attestation-Formatmigration sind noch offen.
+
+## Redis-Audit: ungültige indexierte Einträge brechen den Lesevorgang ab
+
+`RedisSovereignAuditSink.ReadAsync` überspringt fehlende, leere oder JSON-null
+Payloads nicht mehr. Auch ungültiges JSON und eine Abweichung zwischen
+Index-ID und Payload-ID führen zu `InvalidDataException`. Die Diagnose enthält
+nur Indexposition und Fehlerkategorie, keine Payloads oder inneren JSON-Fehler.
+Aufrufer müssen einen fehlgeschlagenen Lesevorgang als solchen behandeln und
+dürfen vorher gelesene Einträge nicht als erfolgreich vollständig geprüft melden.
+Vorhandene Daten werden weder automatisch repariert noch gelöscht.
+
+Das schließt eine stille Auslassung im Reader, beweist aber noch keine
+Kettenvollständigkeit. Atomare Snapshots und unabhängige signierte Checkpoints
+stehen nur unter den oben beschriebenen Grenzen zur Verfügung.
+
+## Operator-Bericht Schema 3: Deklaration, HTTP-Policy und Beobachtung trennen
+
+Der Runtime-Bericht erhält additiv `sovereignty.httpEgress` und
+`sovereignty.observedCalls`. `dependencies` bleibt das deklarierte Inventar,
+keine vollständige Reachability-Liste. Die beiden bisherigen Felder
+`egressIsEnforced`/`declaredHosts` bleiben erhalten und behalten ihre beschränkte
+Legacy-Bedeutung; sie beweisen keine Guard-Registrierung.
+
+Der neue Port `IHttpEgressPolicyReport` wird zusammen mit dem Factory-Guard
+registriert. Ein allein registriertes Policy-Objekt erzeugt diesen Nachweis
+nicht. Gemeldet wird Registrierung/Konfiguration (`RegistrationAndConfiguration`)
+für `HttpClientFactory`, keine ausgeführte Kontrollmessung oder prozessweite
+Netzwerkgrenze. Fehlende/faulted Reports sind ausdrücklich getrennte Zustände.
+Traffic wird nicht erfasst: `observedCalls.state=Unavailable`, `count=null`, nie
+eine erfundene Nullmessung. Alte Wire-Berichte werden nicht nachträglich um
+Scope-/Redirectnachweise ergänzt.
+
+Leser müssen Schema 3 ausdrücklich unterstützen. Schema 1/2 bleibt lesbar, hat
+aber keine entsprechenden Aussagen.
+
+## Egress: keine automatischen Weiterleitungen unterhalb des Guards
+
+Eine durchsetzende Egress-Policy deaktiviert AutoRedirect für Factory-Clients.
+301/302/303/307/308 werden an den Aufrufer zurückgegeben. Bisher konnte ein
+erlaubter Host auf ein gesperrtes Ziel umleiten, bei 307/308 inklusive Body.
+Falls die Anwendung folgen muss, stellt sie einen neuen Request über den
+geschützten Client und entscheidet ausdrücklich, welche Header/Inhalte für die
+neue Origin geeignet sind. Keine blind kopierten Credentials.
+
+HttpClientHandler und SocketsHttpHandler werden unterstützt. Unbekannte
+PrimaryHandler werden bei durchsetzender Policy nicht mehr akzeptiert, weil ihre
+Weiterleitungen nicht abgesichert werden können. Named-Client-Konfigurationen
+bleiben erhalten; die Absicherung läuft nach deren Transportkonfiguration.
+Eine leere, nicht durchsetzende Policy ändert das Redirect-Verhalten nicht.
+
+Dies ist keine prozessweite Netzwerkgarantie.
+
 # Noelia 6.3.0 → 6.4.0
 
 Keine Breaking Changes. Alles Neue ist additiv, und das Schema des

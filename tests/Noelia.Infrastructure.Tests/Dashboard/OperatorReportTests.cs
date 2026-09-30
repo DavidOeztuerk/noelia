@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Noelia.Abstractions.Audit;
 using Noelia.Abstractions.Caching;
 using Noelia.Abstractions.Operator;
 using Noelia.Infrastructure.Audit;
@@ -24,6 +25,42 @@ public sealed class OperatorReportTests
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     [Fact]
+    public async Task The_actual_chain_endpoint_exposes_read_failure_without_raw_exception_content()
+    {
+        await using var app = await Open(services =>
+        {
+            services.AddSovereignAuditTrail();
+            services.AddSingleton<ISovereignAuditSink, FailingAuditReader>();
+        });
+        using var response = await app.Client.GetAsync("/noelia/audit-chain.json");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(ConfigurationCanary);
+        var result = JsonSerializer.Deserialize<AuditChainVerification>(body, Json)!;
+        result.IsSupported.Should().BeTrue();
+        result.IsIntact.Should().BeFalse();
+        result.Evidence!.SchemaVersion.Should().Be(1);
+        result.Evidence.Consistency.Should().Be(AuditChainConsistency.ReadFailed);
+        result.Evidence.Completeness.Should().Be(AuditChainCompleteness.Unknown);
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("evidence").GetProperty("hasIndependentCheckpoint").GetBoolean().Should().BeFalse();
+    }
+
+    private sealed class FailingAuditReader : IReadableSovereignAuditSink
+    {
+        public Task WriteAsync<T>(AuditEvent<T> auditEvent, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async IAsyncEnumerable<StoredAuditEntry> ReadAsync(DateTimeOffset? since = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            // Keep the iterator shape without yielding a fabricated audit entry.
+            foreach (var entry in Array.Empty<StoredAuditEntry>()) yield return entry;
+            throw new InvalidDataException(ConfigurationCanary);
+        }
+    }
+
+    [Fact]
     public async Task The_report_is_json_and_deserialises_into_the_shipped_type()
     {
         await using var app = await Open();
@@ -38,7 +75,7 @@ public sealed class OperatorReportTests
 
         report.Should().NotBeNull();
         report!.Service.Should().Be("dashboard-probe");
-        report.SchemaVersion.Should().Be(2,
+        report.SchemaVersion.Should().Be(3,
             "a reader that has to infer the format is one version away from misreading it");
         report.GeneratedAt.Should().NotBe(default);
     }

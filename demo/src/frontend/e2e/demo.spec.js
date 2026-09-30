@@ -90,6 +90,36 @@ test("signing out sends the next visit back to the login page", async ({ page })
   expect(noise).toEqual([]);
 });
 
+test("the sign-out button is disabled until the session is ready", async ({ page }) => {
+  const noise = watchConsole(page);
+  await register(page, credentials());
+
+  // A reload has to exchange the refresh cookie before the page has a session.
+  // Hold that response back: in the gap the button used to be clickable and did
+  // nothing at all.
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  await page.route("**/api/auth/refresh", async (route) => {
+    await gate;
+    await route.continue();
+  });
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+
+  const logout = page.getByRole("button", { name: "Abmelden" });
+  await expect(logout).toBeDisabled();
+  await expect(logout).toHaveAttribute("aria-disabled", "true");
+
+  release();
+  await expect(logout).toBeEnabled();
+  await page.unroute("**/api/auth/refresh");
+
+  await logout.click();
+  await expect(page).toHaveURL(/\/login$/);
+
+  expect(noise).toEqual([]);
+});
+
 test("a failed sign-out says so instead of pretending", async ({ page }) => {
   const noise = watchConsole(page);
   await register(page, credentials());

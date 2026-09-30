@@ -350,6 +350,10 @@ public sealed class DashboardTests
         var html = await app.WholeDashboard();
 
         html.Should().Contain("Instance chain at write time:");
+        html.Should().Contain("write-time chain status");
+        html.Should().Contain("Persisted history has not been read back on this page");
+        html.Should().NotContain(">intact<").And.NotContain(">broken<");
+        html.Should().NotContain("persisted sink: verified");
         html.Should().Contain(signIn.Session.ToString());
         html.Should().Contain("<td>set</td>");
         html.Should().Contain("rejected");
