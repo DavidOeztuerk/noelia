@@ -131,7 +131,6 @@ public sealed class SecurityHeadersPackageTests
         var material = JsonSerializer.Serialize(report.Latest) + string.Join('\n', logs.Messages);
 
         material.Should().NotContain(Canary);
-#if NOELIA_DECLARES_AI
         // Since the AI checks stopped reading "nothing recognised" as "no duty", a
         // composition with no declaration answers Warning ("not determined") on these
         // two. This probe deliberately composes ONE module, and a declaration needs the
@@ -145,11 +144,6 @@ public sealed class SecurityHeadersPackageTests
         report.Latest.Where(result => undeclared.Contains(result.Id))
             .Should().OnlyContain(result => result.Status == SecurityCheckStatus.Warning,
                 "the probe declares nothing, so the AI checks must say 'not determined'");
-#else
-        report.Latest.Should().OnlyContain(result =>
-            result.Status == SecurityCheckStatus.Pass
-            || result.Status == SecurityCheckStatus.NotApplicable);
-#endif
     }
 
     private static async Task<WebApplication> CreateAppAsync(ILoggerProvider? loggerProvider = null)

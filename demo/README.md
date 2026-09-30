@@ -173,14 +173,14 @@ node eng/check-demo-baselines.mjs ../Noelia/demo/eng/composition-baselines.json
 Docker accepts an optional `NOELIA_VERSION` alongside `NOELIA_SOURCE`; both
 restore and publish use the requested version. If omitted, the committed
 `Directory.Packages.props` version remains in effect. Use a **new unique** version
-and feed directory when package contents change; never overwrite public 6.4.0
-or clear the global package cache. Example from the Noelia repository:
+and feed directory when package contents change; never overwrite a published
+version or clear the global package cache. Example from the Noelia repository:
 
 ```sh
-dotnet pack Noelia.slnx -c Release -p:Version=6.4.1-security.YOUR_UNIQUE_ID \
+dotnet pack Noelia.slnx -c Release -p:Version=7.0.1-security.YOUR_UNIQUE_ID \
   -o demo/.local-feed/YOUR_UNIQUE_ID
 cd demo
-NOELIA_VERSION=6.4.1-security.YOUR_UNIQUE_ID \
+NOELIA_VERSION=7.0.1-security.YOUR_UNIQUE_ID \
   NOELIA_SOURCE=/src/.local-feed/YOUR_UNIQUE_ID \
   docker compose --profile all build
 ```
@@ -198,7 +198,7 @@ all three stages with fresh synthetic keys, dynamic ports and a UUID project nam
 
 ```sh
 # From demo/, after packing a uniquely versioned local candidate as above:
-node eng/compose-report-smoke.mjs 6.4.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
+node eng/compose-report-smoke.mjs 7.0.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
 ```
 
 It ignores `.env` and inherited application credentials, checks the actual
@@ -218,7 +218,7 @@ each of the six fleets, first build the sibling CP in Release, then run:
 ```sh
 NOELIA_CP_SMOKE_MODULE=/absolute/path/to/NoeliaControlPlane/eng/demo-live-smoke.mjs \
 PLAYWRIGHT_MODULE=/absolute/path/to/demo/src/frontend/node_modules/playwright/index.mjs \
-node eng/compose-report-smoke.mjs 6.4.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
+node eng/compose-report-smoke.mjs 7.0.1-security.YOUR_UNIQUE_ID /src/.local-feed/YOUR_UNIQUE_ID
 ```
 
 The CP helper uses one fleet per fresh process (no licence bypass), the checked-in
@@ -375,11 +375,10 @@ created. Ctrl-C tears that project down too.
 **The AI declaration.** Since the AI checks stopped reading "nothing recognised" as
 "no duty", a service that says nothing gets `Warning` on `noelia.ai.inventory` and
 `noelia.ai.record-keeping`. The demo's hosts use no model, so they declare it
-(`DeclareArtificialIntelligence(false)`, in `Demo.Platform`). That API does not exist
-in the published 6.4.0, which is what the committed `NoeliaVersion` still is, so the
-call sits behind `NOELIA_DECLARES_AI`, which `Directory.Build.targets` defines for
-every version except 6.4.0. When the demo moves to the new version, delete that file
-and the `#if` blocks. The gate judges warnings like failures; the only acceptance is
+(`DeclareArtificialIntelligence(false)`, in `Demo.Platform`), and the security-headers
+probe, which composes one module and so cannot declare, allows exactly those two to warn.
+The API exists from 7.0.0, the version the demo pins. The gate judges warnings
+like failures; the only acceptance is
 `dev noelia.audit.chain-scope` in `eng/accepted-findings.txt`, with its reason.
 
 ## Building against a candidate

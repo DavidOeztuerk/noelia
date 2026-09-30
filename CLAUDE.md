@@ -8,7 +8,7 @@ Noelia is a set of 14 NuGet packages that form a shared foundation for .NET
 microservices (CQRS pipeline, security/identity, caching, messaging, health,
 resilience, observability), plus `Noelia.Cli` — a **tool** package (`noelia
 init`, `noelia analyze`, `noelia mcp`), not a library. Targets `net10.0`;
-version `6.4.0`.
+version `7.0.0`.
 
 The library itself has nothing to run but its tests. `demo/` holds a consumer:
 one todo application built twice (microservices behind a gateway, and a

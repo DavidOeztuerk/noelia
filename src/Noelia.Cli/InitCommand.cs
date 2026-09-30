@@ -214,7 +214,7 @@ internal static class InitCommand
         // "6.4.0+abc123" — the build metadata is not part of a NuGet version.
         return informational?.Split('+')[0]
             ?? typeof(InitCommand).Assembly.GetName().Version?.ToString(3)
-            ?? "6.4.0";
+            ?? "7.0.0";
     }
 
     private static bool Settings(
