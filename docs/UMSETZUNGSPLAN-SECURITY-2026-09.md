@@ -5,9 +5,9 @@ Auftrag: Die 28 Review-Befunde schrittweise korrigieren, wirksam testen und dies
 
 ## Sofort weiterlesen: Übergabe
 
-- **Aktuell:** AP10 und AP11 ERLEDIGT. Noelia **3568/3568** (138 Core + 3430 Infrastructure, inkl. Redis-Integration), CP **262/262** dreimal in Folge, jeweils 0 skipped. Keine umfassende Security-/Releasefreigabe.
-- **Letztes abgeschlossenes Paket:** AP11 – siehe Abnahmejournal vom 30.09.; AP01–AP11 abgeschlossen.
-- **Nächster konkreter Schritt:** AP13 (R19 CSV-Formelschutz in CP, R20 Wortlaut der KI-Checks in Noelia), danach AP16 (Security-Gate mit Sollmenge), AP14/AP15 schlank. AP12 (Lizenzen) erst vor dem ersten Verkauf. Keine Veröffentlichung.
+- **Aktuell:** AP10, AP11, AP13, AP14, AP16 ERLEDIGT; AP15 implementiert, volle Browsermatrix offen. Noelia **138 + 3438**, CP **279**, Demo **80**, Frontend **23**, Gate-Unittests **21**, jeweils 0 skipped. Keine umfassende Security-/Releasefreigabe.
+- **Letztes abgeschlossenes Paket:** AP16 – siehe Journal vom 30.09.
+- **Nächster konkreter Schritt:** AP17/AP18 schlank: ein lokales Release-Gate-Skript (Kandidat packen, Demo + CP gegen denselben Kandidaten, Compose-Smoke, Security-Gate, e2e je Stage), CI nur CP-Image-Start und Unit-Suites. Demo-Baseline an die neuen KI-Check-Ergebnisse anpassen, sobald sie gegen den Kandidaten läuft. Versionsentscheidung (brechende Änderungen → Major). AP12 (Lizenzen) vor dem ersten Verkauf. Keine Veröffentlichung.
 - **Arbeitszweige:** `security/review-2026-09` in beiden Repositories (lokal committet, nicht gepusht). Keine Pushes/Tags/Publishes ohne Freigabe.
 - **Baseline:** Noelia cf54577071cffbe15bc8231047117d4bf7c44a80; Control Plane 11304ca415f7ca9bfa4ee0e69e014b91080aedab.
 - **Nicht anfassen:** bereits vorhandene unversionierte NoeliaControlPlane/src/Noelia.ControlPlane/appsettings.WorkerTransfer.json. WorkerTransfer ist nicht im Auftrag.
@@ -57,10 +57,10 @@ Status: OFFEN / IN ARBEIT / IMPLEMENTIERT (Restabnahme offen) / ERLEDIGT.
 | AP10 Zuverlässige Alarme und Kettenüberwachung | P2 | R14, R15 | ERLEDIGT | AP06, AP08, AP09 |
 | AP11 Outbox unter Fehlern/Nebenläufigkeit | P2 | R21 | ERLEDIGT | AP00 |
 | AP12 Lizenz-/Entitlement-Konsistenz | P2 | R17 | OFFEN | AP02, AP05 |
-| AP13 Sichere Exporte und präzise KI-Checks | P2 | R19, R20 | OFFEN | AP05, AP08 |
-| AP14 Wahrheitsgetreue, dauerhafte Demo | P1/P2 | R11, R12, R26, R27 | OFFEN | AP05, AP07 |
-| AP15 Browser-/Gateway-Korrekturen | P2 | R25 | OFFEN | AP00 |
-| AP16 Vollständiges Security-Gate | P2 | R24 | OFFEN | AP05, AP14 |
+| AP13 Sichere Exporte und präzise KI-Checks | P2 | R19, R20 | ERLEDIGT | AP05, AP08 |
+| AP14 Wahrheitsgetreue, dauerhafte Demo | P1/P2 | R11, R12, R26, R27 | ERLEDIGT | AP05, AP07 |
+| AP15 Browser-/Gateway-Korrekturen | P2 | R25 | IMPLEMENTIERT (Restabnahme offen) | AP00 |
+| AP16 Vollständiges Security-Gate | P2 | R24 | ERLEDIGT | AP05, AP14 |
 | AP17 CI und reproduzierbares Release-Gate | P2 | R23 | OFFEN | AP01–AP16 |
 | AP18 Gesamtabnahme, Migration und Releasevorbereitung | P1 | alle | OFFEN | AP17 |
 
@@ -259,6 +259,14 @@ Nicht schneller erneut starten als Auth-Rate-Limits erlauben; besser je Run isol
 Lokale Tests mit simuliertem IdP/HTTP-Server nicht auf externen Kundendiensten ausführen.
 
 ## Fortschrittsjournal
+
+### 30.09.2026 – AP13, AP14, AP15, AP16 – schlanke Umsetzung
+- R19 (CP, ERLEDIGT): `Export.cs` stellt jeder CSV-Textzelle, die (auch nach führenden Leerzeichen) mit `= + - @`, Tab, CR oder Vollbreitenform beginnt, ein `'` voran; JSON unverändert. 17 neue Tests mit RFC-4180-Parser, 14 vorher rot. CP **279/279**.
+- R20 (Noelia, ERLEDIGT): „nichts erkannt" ohne Deklaration ist `Warning`/„Not determined" statt Pass bzw. „keine Aufzeichnungspflicht". Neu `DeclareArtificialIntelligence(bool, endpoint)`; deklariertes Nein wird als Erklärung ausgewiesen, eine Erkennung schlägt es. Sink-Text behauptet keine Aufzeichnung von Modellaufrufen. Sichtbar: `noelia.ai.inventory` Pass→Warning, `noelia.ai.record-keeping` NotApplicable→Warning ohne Deklaration. Tests nicht red-first geschrieben (Fix vor Test). Noelia **138 + 3438**.
+- Outbox-Testharness: zwei Rennen im Test (geteilte `:memory:`-Verbindung; Warten auf Claim statt Zustellung) behoben, 40/40 Läufe grün. Produktionscode unverändert.
+- R11/R26/R27 (AP14, ERLEDIGT, schlank): Valkey Staging/Prod mit AOF und Volume, Reset nur `rl:*` statt FLUSHALL; sichtbarer Hinweis auf In-Memory-Konten/Todos; Forwarded-Header nur vom Edge/Gateway in festen Subnetzen je Stage. Keine persistenten Fachprovider (bewusst).
+- R25 (AP15, IMPLEMENTIERT): Abmelden gesperrt bis Sitzung bereit, Fehlschlag behält Sitzung; Redirect trägt `NOELIA_HTTPS_PORT` (bei 0/443 ohne Port). Live gegen eigenen Stack geprüft (Redirect, Logout-Tests in mono-dev und micro-prod). Offen: volle e2e-Suite aller sechs Kombinationen, Stage-Hinweis im echten Browser; Ocelot-Timeout (R25c) nicht reproduziert, unverändert.
+- R24/R23 (AP16, ERLEDIGT): `security-checks.py` mit Sollmenge aus `security-check-expectations.json` + `composition-baselines.json`, letzter Lauf je Dienst, Freigaben je Stage/Dienst; fehlender Dienst/Check scheitert. Grenze: ohne Run-Marker ist ein nach der letzten erwarteten ID abgebrochener Lauf nicht erkennbar. `test-docker-health.sh` gelöscht. Demo **80/80**, Frontend **23/23**, Python **21/21**; Gate live grün für 12 Dienste, rot für erfundenen Dienst.
 
 ### 30.09.2026 – AP11 – ERLEDIGT, Outbox mit Backoff, Quarantäne und Fencing
 - Dateien: `IOutbox.cs`, `EntityFrameworkOutbox.cs`, `NoeliaOutboxMessage.cs`, `OutboxDispatcher.cs`, `OutboxTests.cs`, `OutboxDispatcherTests.cs`, README (Outbox), MIGRATION (neuer Abschnitt).
