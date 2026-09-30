@@ -76,7 +76,7 @@ An intentional second run omitted `Noelia.Redis`. Restore failed with `NU1101`
 inside the temporary workspace. Hashes of the original NuGet files and every
 existing `bin/obj` file were identical before and after the failure.
 
-`eng/test-docker-health.sh` built all four microservice containers and the
+The 5.0 gate script `eng/test-docker-health.sh` (since removed) built all four microservice containers and the
 separate monolith container from the same thirteen packages. Compose reported
 all containers healthy; `/health/live` and `/health/ready` succeeded on
 Gateway, User, Todo and Monolith; `/noelia` returned 404 for every Production

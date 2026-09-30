@@ -13,7 +13,15 @@ RUN apk add --no-cache openssl \
     && chmod 600 /etc/nginx/tls/demo.key \
     && apk del openssl
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# A template, not a finished config: the nginx image renders every
+# /etc/nginx/templates/*.template into conf.d at start, and the one thing that
+# has to be known only then is the HTTPS port the *outside* sees (the http->https
+# redirect must name it; 8443 inside the container says nothing about it). The
+# filter keeps envsubst away from every variable that is not ours, so nginx's
+# own $host, $uri and $request_uri survive untouched.
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+ENV NGINX_ENVSUBST_FILTER=^NOELIA_ \
+    NOELIA_EXTERNAL_HTTPS_PORT=8443
 COPY snippets /etc/nginx/snippets
 COPY index.html login.html register.html noelia.html favicon.png /usr/share/nginx/html/
 COPY css /usr/share/nginx/html/css

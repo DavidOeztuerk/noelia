@@ -89,10 +89,22 @@ services:
     build:
       context: ./src/frontend
     profiles: [dev, staging, prod, all]
-    networks: [dev, staging, prod]
+    # Fixed addresses (.2 in each stage's subnet, see `networks:` below) because
+    # the services trust forwarded headers from exactly this address and no
+    # other. A container cannot be named in a trust list by name.
+    networks:
+      dev:
+        ipv4_address: ${NOELIA_NET_DEV:-172.29.10}.2
+      staging:
+        ipv4_address: ${NOELIA_NET_STAGING:-172.29.20}.2
+      prod:
+        ipv4_address: ${NOELIA_NET_PROD:-172.29.30}.2
     ports:
       - "127.0.0.1:${NOELIA_HTTP_PORT:-8080}:8080"
       - "127.0.0.1:${NOELIA_HTTPS_PORT:-8443}:8443"
+    environment:
+      # What the browser sees, so the http->https redirect can name it.
+      NOELIA_EXTERNAL_HTTPS_PORT: ${NOELIA_HTTPS_PORT:-8443}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "--header", "Host: micro-dev.localhost", "http://127.0.0.1:8080/"]
@@ -116,8 +128,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Dashboard__Fleet: micro-dev
+      Demo__TrustedProxies__0: ${NOELIA_NET_DEV:-172.29.10}.2
     networks:
       dev:
+        ipv4_address: ${NOELIA_NET_DEV:-172.29.10}.3
         aliases: [gateway]
 
     secrets: *gateway-secrets
@@ -135,6 +149,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Dashboard__Fleet: micro-dev
+      Demo__TrustedProxies__0: ${NOELIA_NET_DEV:-172.29.10}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_DEV:-172.29.10}.3
       Database__Path: /data/user-service.db
     secrets: *issuer-secrets
     volumes:
@@ -157,6 +173,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Dashboard__Fleet: micro-dev
+      Demo__TrustedProxies__0: ${NOELIA_NET_DEV:-172.29.10}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_DEV:-172.29.10}.3
     secrets: *verifier-secrets
     networks:
       dev:
@@ -176,6 +194,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Dashboard__Fleet: mono-dev
+      Demo__TrustedProxies__0: ${NOELIA_NET_DEV:-172.29.10}.2
       Database__Path: /data/monolith.db
     secrets: *issuer-secrets
     volumes:
@@ -195,7 +214,15 @@ services:
     networks: [staging]
     profiles: [staging, all]
     restart: unless-stopped
-    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    # Append-only file on a named volume. This instance holds token revocations,
+    # the data protection key ring and the audit chain: with `--save "" --appendonly no`
+    # a restart of the container silently un-revoked every revoked token and
+    # started a new chain, in the stages that are supposed to be the durable ones.
+    # `everysec` bounds the loss on a crash to about a second; it is a demo
+    # trade-off, not a claim of zero loss.
+    command: ["valkey-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec", "--dir", "/data"]
+    volumes:
+      - valkey-staging-data:/data
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
@@ -216,12 +243,14 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       Dashboard__Fleet: micro-staging
+      Demo__TrustedProxies__0: ${NOELIA_NET_STAGING:-172.29.20}.2
       Demo__Providers__Redis: valkey-staging:6379
     depends_on:
       valkey-staging:
         condition: service_healthy
     networks:
       staging:
+        ipv4_address: ${NOELIA_NET_STAGING:-172.29.20}.3
         aliases: [gateway]
 
     secrets: *gateway-secrets
@@ -239,6 +268,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       Dashboard__Fleet: micro-staging
+      Demo__TrustedProxies__0: ${NOELIA_NET_STAGING:-172.29.20}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_STAGING:-172.29.20}.3
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *issuer-secrets
@@ -265,6 +296,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       Dashboard__Fleet: micro-staging
+      Demo__TrustedProxies__0: ${NOELIA_NET_STAGING:-172.29.20}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_STAGING:-172.29.20}.3
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *verifier-secrets
     depends_on:
@@ -288,6 +321,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Staging
       Dashboard__Fleet: mono-staging
+      Demo__TrustedProxies__0: ${NOELIA_NET_STAGING:-172.29.20}.2
       Database__Path: /data/monolith.db
       Demo__Providers__Redis: valkey-staging:6379
     secrets: *issuer-secrets
@@ -306,7 +340,10 @@ services:
     networks: [prod]
     profiles: [prod, all]
     restart: unless-stopped
-    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    # Same as staging: append-only file on a named volume, see valkey-staging.
+    command: ["valkey-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec", "--dir", "/data"]
+    volumes:
+      - valkey-prod-data:/data
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
@@ -327,12 +364,14 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Dashboard__Fleet: micro-prod
+      Demo__TrustedProxies__0: ${NOELIA_NET_PROD:-172.29.30}.2
       Demo__Providers__Redis: valkey-prod:6379
     depends_on:
       valkey-prod:
         condition: service_healthy
     networks:
       prod:
+        ipv4_address: ${NOELIA_NET_PROD:-172.29.30}.3
         aliases: [gateway]
 
     secrets: *gateway-secrets
@@ -350,6 +389,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Dashboard__Fleet: micro-prod
+      Demo__TrustedProxies__0: ${NOELIA_NET_PROD:-172.29.30}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_PROD:-172.29.30}.3
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *issuer-secrets
@@ -376,6 +417,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Dashboard__Fleet: micro-prod
+      Demo__TrustedProxies__0: ${NOELIA_NET_PROD:-172.29.30}.2
+      Demo__TrustedProxies__1: ${NOELIA_NET_PROD:-172.29.30}.3
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *verifier-secrets
     depends_on:
@@ -399,6 +442,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Dashboard__Fleet: mono-prod
+      Demo__TrustedProxies__0: ${NOELIA_NET_PROD:-172.29.30}.2
       Database__Path: /data/monolith.db
       Demo__Providers__Redis: valkey-prod:6379
     secrets: *issuer-secrets
@@ -412,13 +456,38 @@ services:
         aliases: [monolith]
 
 networks:
+  # One network per stage, each with a fixed, documented /24 (172.29.10.0 dev,
+  # 172.29.20.0 staging, 172.29.30.0 prod; `.2` is the edge, `.3` the stage's
+  # gateway, Docker keeps `.1`). The subnets are fixed so the services can say
+  # whose forwarded headers they believe — the edge and, for the two services
+  # behind it, the gateway — instead of every private range. If a subnet
+  # collides with something on your machine, set NOELIA_NET_DEV /
+  # NOELIA_NET_STAGING / NOELIA_NET_PROD to another three-octet prefix; the
+  # addresses and the trust lists follow.
+  #
+  # `ip_range` keeps Docker's own address assignment in the upper half (.128
+  # and up). Without it the first container to start took `.2` and the edge,
+  # which starts last, failed with "Address already in use".
+  #
   # One network per stage. Two reasons, and both matter more than the tidiness:
   # ocelot.json can keep naming `user-service` because that alias means
   # something different on each of the three, and a container in one stage
   # cannot open a connection to another stage at all.
   dev:
+    ipam:
+      config:
+        - subnet: ${NOELIA_NET_DEV:-172.29.10}.0/24
+          ip_range: ${NOELIA_NET_DEV:-172.29.10}.128/25
   staging:
+    ipam:
+      config:
+        - subnet: ${NOELIA_NET_STAGING:-172.29.20}.0/24
+          ip_range: ${NOELIA_NET_STAGING:-172.29.20}.128/25
   prod:
+    ipam:
+      config:
+        - subnet: ${NOELIA_NET_PROD:-172.29.30}.0/24
+          ip_range: ${NOELIA_NET_PROD:-172.29.30}.128/25
 
 volumes:
   # Only so a restart does not sign everyone out. The application owns the
@@ -429,3 +498,6 @@ volumes:
   mono-dev-data:
   mono-staging-data:
   mono-prod-data:
+  # Valkey's append-only file: revocations, key ring, audit chain, rate counters.
+  valkey-staging-data:
+  valkey-prod-data:

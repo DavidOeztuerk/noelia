@@ -5,6 +5,8 @@ import { TodoList } from "../ui/TodoList.js";
 import { FormController } from "../ui/FormController.js";
 import { Session } from "../core/Session.js";
 import { HttpClient } from "../core/HttpClient.js";
+import { LogoutButton } from "../ui/LogoutButton.js";
+import { showStageHint } from "../ui/StageHint.js";
 
 /** The signed-in view: one person's todos. */
 class DashboardPage extends Page {
@@ -25,11 +27,16 @@ class DashboardPage extends Page {
       ({ title }) => this.#create(title)
     );
 
-    document.querySelector("[data-logout]").addEventListener("click", () => this.#signOut());
+    // Enabled here, not in the markup: this constructor only runs once the
+    // refresh cookie has been exchanged, so a click always has a session to end.
+    this.logout = new LogoutButton(document.querySelector("[data-logout]"), () => this.#signOut());
+    this.logout.enable();
+    showStageHint(document.querySelector("[data-stage-hint]"), location.hostname);
   }
 
   /**
    * Withdraws the token on the server, and only then forgets it here.
+   * Resolves true when the session is gone, false when it is still there.
    *
    * It used to clear the local session in a `finally`, on the argument that
    * leaving someone signed in because the network was down is the worse
@@ -46,11 +53,12 @@ class DashboardPage extends Page {
       this.notice.error(
         "Abmelden fehlgeschlagen — du bist weiterhin angemeldet. Bitte erneut versuchen."
       );
-      return;
+      return false;
     }
 
     Session.clear();
     Page.redirectToLogin();
+    return true;
   }
 
   async start() {

@@ -85,5 +85,7 @@ The accepted 5.0 candidate produced zero matches.
 `eng/test-package-version.sh` also uses a fresh package cache and workspace. An
 intentional restore failure with `Noelia.Redis` missing proved the normal Demo
 configuration and existing build artifacts remain byte-for-byte unchanged.
-`eng/test-docker-health.sh` separately proves both architectures are healthy
-while every Production dashboard remains an empty 404.
+The compose stack's healthchecks (and `eng/security-checks.py` on the running
+stack) are what show both architectures healthy. The 5.0 acceptance used a
+separate script for that, `eng/test-docker-health.sh`; it is gone, because it
+depended on a compose file that no longer exists.

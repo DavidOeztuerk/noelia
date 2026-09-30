@@ -46,6 +46,22 @@ having a network each.
 certificate the image generates at build time for exactly these names, so the
 browser will warn — that warning is the honest signal that this is a local demo.
 
+The plain-HTTP redirect names the port the browser really uses for HTTPS: the
+edge reads `NOELIA_EXTERNAL_HTTPS_PORT`, which compose sets from
+`NOELIA_HTTPS_PORT` (default 8443). With `NOELIA_HTTPS_PORT=0` Docker picks the
+host port and the container cannot know it, so the redirect then omits the port
+— use a fixed port if you want to follow redirects.
+
+**Forwarded headers.** Each stage network has a fixed /24 (`172.29.10.0` dev,
+`172.29.20.0` staging, `172.29.30.0` prod; override the three-octet prefix with
+`NOELIA_NET_DEV`, `NOELIA_NET_STAGING`, `NOELIA_NET_PROD` if it collides with
+something on your machine). The edge is `.2` and each stage's gateway `.3`.
+Services believe `X-Forwarded-For`/`-Proto` only from those addresses (the
+gateway and monolith: the edge; user and todo service: edge and gateway), via
+`Demo__TrustedProxies__n`. Without configuration the default is loopback only.
+This is a pattern for a fixed-topology demo, not guidance for production, where
+the proxy address comes from the platform.
+
 No service publishes a port of its own. Everything arrives through the edge,
 because a gateway that can be walked around is not a boundary.
 
@@ -60,6 +76,19 @@ because a gateway that can be walked around is not a boundary.
 | Token revocation | in the process, per replica | Valkey |
 | Refresh tokens | SQLite | SQLite |
 | Data protection key ring | this container's filesystem | Valkey, encrypted with the master key |
+| Users and todos | in the process | **in the process too** — lost on a service restart, even in Production |
+
+**What survives a restart, and what does not.** Valkey runs with an append-only
+file (`appendonly yes`, `everysec`) on a named volume per stage
+(`valkey-staging-data`, `valkey-prod-data`), so revocations, the key ring, the
+audit chain and rate counters survive a restart of the Valkey container; a crash
+can lose about the last second. The SQLite session files survive on their own
+volumes. **User accounts and todos do not: those stores are in-memory in every
+stage, "Production" included** — they are lost when the user, todo or monolith
+service restarts, while the sessions that refer to them persist. The demo does
+not ship persistent providers for them; Staging and Production show a hint on
+the login, register and todo pages saying so. `docker compose down -v` removes
+the volumes, and with them all of the above.
 
 One line in `appsettings.{Environment}.json` — `Demo:Providers:Redis` — decides
 it. Nothing above the composition root knows which of the two it got, which is
@@ -239,10 +268,32 @@ npm run e2e     # browser, against http://mono-dev.localhost:8080
 DEMO_BASE_URL=https://micro-prod.localhost:8443 npm run e2e
 
 # What every running service says about its own security posture.
-# A Fail nobody allowed exits non-zero.
-python3 eng/security-checks.py
-python3 eng/security-checks.py --profile dev
+# Exits non-zero for an unallowed Fail, for a service that reported nothing,
+# for an expected check ID missing from a service's latest run, and for a
+# latest run that is incomplete. Only the latest run per service counts.
+python3 eng/security-checks.py                        # --profile all
+python3 eng/security-checks.py --profile staging
+python3 eng/security-checks.py -p my-project --env-file my.env   # a stack under its own project name
+
+# The gate's own tests (stdlib unittest, fixture logs)
+python3 -m unittest discover -s eng -p 'test_*.py'
 ```
+
+What the gate expects is written down once: `eng/security-check-expectations.json`
+lists the check IDs (with the module each belongs to), the services per stage and
+the provider set, and takes each service role's modules from
+`eng/composition-baselines.json`. A `Composition` check is expected everywhere; any
+other only where its module is in the role — so a module left out on purpose
+(`OmittedModules` in the expectations file) takes its checks with it and is not a
+failure, while the same absence undeclared is one.
+
+Acceptances are scoped, never global: `eng/accepted-findings.txt` lines read
+`<scope> <check id> <reason>`, scope being a stage (`prod`) or one service
+(`gateway-prod`); the command line takes `--allow gateway-prod/noelia.x.y=reason`.
+An acceptance covers a Fail — or, with `--fail-on-warning`, a Warning — of exactly
+that check and never a *missing* one. The runner writes no run marker, so a run is
+recognised by its check IDs restarting their ordinal order; a run truncated after
+its last expected ID cannot be told from a complete one.
 
 **The brake is real, and a repeated suite will find it.** The E2E run makes a
 few dozen requests per host, and `/api/auth/login` is limited to ten a minute
@@ -251,9 +302,15 @@ hosts back to back several times within a minute trips it, and the next run
 fails on something that is not a defect. Clear the counters between rounds:
 
 ```bash
-docker compose exec valkey-prod    valkey-cli FLUSHALL
-docker compose exec valkey-staging valkey-cli FLUSHALL
+# Only the rate-limit keys (`rl:*`). Never FLUSHALL: the same instance holds
+# token revocations, the data protection key ring and the audit chain, and
+# emptying it un-revokes tokens and starts a new chain.
+docker compose exec valkey-prod    sh -c "valkey-cli --scan --pattern 'rl:*' | xargs -r valkey-cli DEL"
+docker compose exec valkey-staging sh -c "valkey-cli --scan --pattern 'rl:*' | xargs -r valkey-cli DEL"
 ```
+
+(The demo's Valkey has no password and no TLS; it is reachable only from its own
+stage network. Add `-a`/`--tls` to both `valkey-cli` calls if you add either.)
 
 `eng/security-checks.py` exists because a release gate can be green next to a
 `noelia.headers.browser-baseline: Fail`, and was. It reads the checks out of the

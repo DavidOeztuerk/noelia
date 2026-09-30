@@ -155,15 +155,12 @@ second owner receives an empty list plus 404 when attempting to mutate it. This
 is the automated equivalent of the manual checks above and fails if either
 cross-service key agreement or ownership filtering is removed.
 
-The release-only container pass is:
-
-```bash
-./eng/test-docker-health.sh 5.0.0 /absolute/path/to/local-feed
-```
-
-It waits for the frontend, gateway, User and Todo healthchecks, verifies live
-and ready directly on every API, and requires `/noelia` to be an empty 404 in
-Production before starting the separate gatewayless Monolith gate.
+The release-only container pass is the compose stack itself: bring up the
+profile under a project name of your own (`docker compose -p <name> --profile
+all up -d --build --wait`), let the healthchecks answer for the frontend edge,
+gateway, User and Todo, and run `python3 eng/security-checks.py`. The old
+`eng/test-docker-health.sh` referenced a compose file and an env file that no
+longer exist and was removed.
 
 The frontend tests exist because of one bug. `FormController` disabled the form
 before reading it, and a disabled control is **left out of `FormData`
