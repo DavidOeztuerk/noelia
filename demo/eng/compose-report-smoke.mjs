@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -18,8 +18,29 @@ const source = process.argv[3] ?? 'https://api.nuget.org/v3/index.json';
 assert.match(version ?? '', /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/, 'Pass an explicit package version');
 assert.ok(source === 'https://api.nuget.org/v3/index.json' || source.startsWith('/src/.local-feed/'),
   'Use nuget.org or an explicit local feed inside the demo Docker context');
-const project = `noelia-report-smoke-${randomUUID()}`;
-const directory = await mkdtemp(path.join(tmpdir(), 'noelia-compose-reports-'));
+// Caller-owned mode, used by release-gate.mjs. Everything is opt-in through the
+// environment so the documented invocation above is unchanged:
+//   NOELIA_SMOKE_PROJECT     a unique project name chosen by the caller
+//   NOELIA_SMOKE_DIR         where the secret-free reports go (created if missing)
+//   NOELIA_SMOKE_HTTP_PORT / NOELIA_SMOKE_HTTPS_PORT   fixed loopback host ports
+//   NOELIA_SMOKE_KEEP_STATE  a directory that receives stack.json and stack.env
+//                            (synthetic credentials, mode 0600). Setting it means the
+//                            CALLER owns the stack: it stays up on success and on
+//                            failure, and the caller must `down -v` its own project.
+const ownedProject = process.env.NOELIA_SMOKE_PROJECT;
+assert.ok(ownedProject === undefined || /^noelia-[a-z0-9-]{8,60}$/.test(ownedProject),
+  'NOELIA_SMOKE_PROJECT must look like noelia-<unique>');
+const fixedPort = name => {
+  const value = process.env[name];
+  if (value === undefined) return '0';
+  assert.match(value, /^\d{4,5}$/, `${name} must be a port number`);
+  return value;
+};
+const keepState = process.env.NOELIA_SMOKE_KEEP_STATE;
+const project = ownedProject ?? `noelia-report-smoke-${randomUUID()}`;
+const directory = process.env.NOELIA_SMOKE_DIR
+  ? (await mkdir(process.env.NOELIA_SMOKE_DIR, { recursive: true, mode: 0o700 }), path.resolve(process.env.NOELIA_SMOKE_DIR))
+  : await mkdtemp(path.join(tmpdir(), 'noelia-compose-reports-'));
 const pair = generateKeyPairSync('ec', {
   namedCurve: 'prime256v1',
   privateKeyEncoding: { format: 'der', type: 'pkcs8' },
@@ -36,7 +57,8 @@ Object.assign(env, {
   NOELIA_MASTER_KEY: randomBytes(32).toString('base64'),
   NOELIA_DASHBOARD_OPERATOR_SECRET: randomBytes(32).toString('hex'),
   NOELIA_SOURCE: source, NOELIA_VERSION: version,
-  NOELIA_HTTP_PORT: '0', NOELIA_HTTPS_PORT: '0', COMPOSE_PARALLEL_LIMIT: '2',
+  NOELIA_HTTP_PORT: fixedPort('NOELIA_SMOKE_HTTP_PORT'), NOELIA_HTTPS_PORT: fixedPort('NOELIA_SMOKE_HTTPS_PORT'),
+  COMPOSE_PARALLEL_LIMIT: '2',
 });
 const secrets = [env.NOELIA_JWT_PRIVATE_KEY, env.NOELIA_MASTER_KEY, env.NOELIA_DASHBOARD_OPERATOR_SECRET];
 const redact = value => secrets.reduce((text, secret) => text.replaceAll(secret, '[REDACTED]'), String(value));
@@ -93,6 +115,16 @@ try {
   await compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '180');
   const httpPort = (await compose('port', 'edge', '8080')).split(':').at(-1);
   const httpsPort = (await compose('port', 'edge', '8443')).split(':').at(-1);
+  if (keepState) {
+    // Written as soon as the stack is up, before any assertion: a failed assertion
+    // must not take the stack away from the caller's later steps.
+    await mkdir(keepState, { recursive: true, mode: 0o700 });
+    const names = ['NOELIA_JWT_KID', 'NOELIA_JWT_PRIVATE_KEY', 'NOELIA_JWT_PUBLIC_KEY', 'NOELIA_MASTER_KEY',
+      'NOELIA_DASHBOARD_OPERATOR_SECRET', 'NOELIA_SOURCE', 'NOELIA_VERSION', 'NOELIA_HTTP_PORT', 'NOELIA_HTTPS_PORT',
+      'COMPOSE_PARALLEL_LIMIT'];
+    await writeFile(path.join(keepState, 'stack.env'), names.map(name => `${name}=${env[name]}`).join('\n') + '\n', { mode: 0o600 });
+    await writeFile(path.join(keepState, 'stack.json'), JSON.stringify({ project, httpPort, httpsPort, version }), { mode: 0o600 });
+  }
   const results = [];
   for (const stage of ['dev', 'staging', 'prod']) {
     const port = stage === 'dev' ? httpPort : httpsPort;
@@ -150,7 +182,7 @@ try {
   clearInterval(heartbeat);
   // Only this fresh UUID-labelled stack and its newly created synthetic volumes.
   // Images/reports are retained; never runs prune or stops another project.
-  if (started) {
+  if (started && !keepState) {
     await compose('down', '--volumes', '--timeout', '10');
     console.log(`Removed only synthetic containers/networks/volumes of ${project}; reports retained.`);
   }

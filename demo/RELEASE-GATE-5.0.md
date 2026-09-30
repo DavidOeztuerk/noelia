@@ -1,5 +1,9 @@
 # Local Noelia 5.0 release-gate state
 
+> Historical record of the 5.0 gate. The current gate is `eng/release-gate.mjs`
+> (README, "The release gate"); the scripts this file mentions that are gone are
+> replaced by it.
+
 **Recorded:** 2026-09-15 · **Candidate:** `5.0.0` · **Result:** passed
 
 This directory is not a Git repository. The work below is a local acceptance

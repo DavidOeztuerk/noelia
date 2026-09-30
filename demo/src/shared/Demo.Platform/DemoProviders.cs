@@ -71,6 +71,13 @@ public static class DemoProviders
         // transport. Declarations are not observations or a network perimeter.
         noelia.AddSovereignPlatform(sovereign =>
         {
+#if NOELIA_DECLARES_AI
+            // None of the demo's hosts calls a model. Without this declaration the
+            // AI checks answer "not determined" (a Warning), because host-name
+            // recognition cannot tell "no model" from "a model it does not know".
+            // A declaration, not an observation - and reported as one.
+            sovereign.DeclareArtificialIntelligence(false);
+#endif
             foreach (var dependency in DemoDependencies.State(environment, readsTokens, ownsSessions))
                 sovereign.DeclareDependency(dependency.Name, dependency.EndpointOrConnectionString);
             foreach (var downstream in downstreams ?? [])

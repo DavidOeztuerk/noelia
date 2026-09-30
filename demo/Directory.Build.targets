@@ -1,0 +1,20 @@
+<Project>
+
+  <!--
+    Version-dependent code, in one place.
+
+    DeclareArtificialIntelligence(...) on the sovereign platform exists from the
+    Noelia line that changed the AI checks (MIGRATION.md, "KI-Prüfungen: nichts
+    erkannt ist nicht keine Pflicht"). The published 6.4.0 does not have it, and
+    the committed NoeliaVersion is 6.4.0, so the demo has to stay buildable
+    against it. Every other version - a release candidate from the gate, or the
+    next published one - is assumed to have the API; a candidate that lacks it
+    fails to compile here, which is the right way for that to show up.
+
+    When the demo moves off 6.4.0, delete this file and the #if blocks it feeds.
+  -->
+  <PropertyGroup Condition="'$(NoeliaVersion)' != '6.4.0'">
+    <DefineConstants>$(DefineConstants);NOELIA_DECLARES_AI</DefineConstants>
+  </PropertyGroup>
+
+</Project>

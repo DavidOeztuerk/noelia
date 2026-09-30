@@ -16,3 +16,10 @@
 # the key ring started needing only a master key instead of a whole encryption
 # provider. An acceptance that outlives its reason is worse than none: it
 # teaches the next reader that the list is decoration.
+
+# Development keeps its audit chain in the process, on purpose: every Development
+# service is one replica on in-memory providers, so its chain is its own sequence and
+# there is no second replica to disagree with. Staging and Production use the Redis
+# sink and report Pass, which is the case the check exists for. Scoped to the stage,
+# and only this check, so a Warning anywhere else still fails the gate.
+dev noelia.audit.chain-scope Development runs one replica per service on in-memory providers; the in-process chain is that replica's own sequence

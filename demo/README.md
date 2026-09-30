@@ -317,6 +317,71 @@ stage network. Add `-a`/`--tls` to both `valkey-cli` calls if you add either.)
 logs — there is deliberately no endpoint to ask, since an anonymous URL listing
 a service's security posture is a reconnaissance surface.
 
+## The release gate
+
+One command proves the exact package set that would be published, and fails on
+anything less than a complete pass:
+
+```bash
+# From the Noelia repository. The Control Plane is expected next to it
+# (../NoeliaControlPlane); --cp-repo says otherwise.
+node demo/eng/release-gate.mjs                       # version <VersionPrefix>-gate.<UTC timestamp>
+node demo/eng/release-gate.mjs 6.5.0-rc.1            # or a version you name
+node demo/eng/release-gate.mjs --require-clean       # refuse a dirty working tree
+```
+
+**Prerequisites**, each of which is a hard failure when missing (never a skip):
+a reachable Docker daemon with Compose, .NET 10 SDK, Node 20+, npm, Python 3, git,
+`jq`, `rg` and `rsync` (used by `eng/test-package-version.sh`), the
+NoeliaControlPlane checkout, and a Chromium that Playwright can launch
+(`npx --prefix demo/src/frontend playwright install chromium`). A missing
+`node_modules` is filled by `npm ci`. Expect roughly 25 to 40 minutes.
+
+| Step | What runs | Passes only if |
+|---|---|---|
+| S0 | prerequisites | every tool present, Chromium launches |
+| S1 | `dotnet pack Noelia.slnx -c Release -p:Version=V` into a **new** `demo/.local-feed/gate-*` | one `.nupkg` of exactly V per shipped project |
+| S2 | `dotnet test Noelia.slnx -c Release` (Docker-backed Redis suites included) | 0 failed, 0 skipped |
+| S3 | `eng/test-package-version.sh`: demo tests in a copied workspace with its own restore path | 0 failed/skipped, and every `Noelia.*` in every `project.assets.json` is V |
+| S4 | Control Plane tests with `-p:NoeliaPackageVersion=V`, isolated `RestorePackagesPath` and `--artifacts-path` | 0 failed/skipped, restored `Noelia.*` packages are V |
+| S5 | `eng/compose-report-smoke.mjs`: unique project, free loopback ports, `--profile all` | all 12 hosts carry V in their `.deps.json`, reviewed baselines match |
+| S6 | `eng/security-checks.py --fail-on-warning` plus its unit tests | every expected check present, no unallowed Fail or Warning |
+| S7 | Playwright e2e in six combinations (micro/mono x dev http, staging/prod https) | 0 failed/skipped/flaky in each, including the stage hint and the sign-out gating |
+| S8 | the CP's `demo-live-smoke.mjs` against the running stack | 6 of 6 fleets: complete collection, matching roles, explicit v3 |
+| S9 | `down -v` of this gate's own project, also after a failure or Ctrl-C | no container, network or volume of that project remains |
+| S10 | `npm --prefix demo/src/frontend test` | 0 failed/skipped |
+
+A step whose prerequisite step failed is reported `BLOCKED`, and that is not a
+pass. The summary (version, git SHA of both repositories and whether the tree was
+dirty, per-step result with counts, duration) goes to stdout and to
+`summary.txt`/`summary.json` in the printed report directory, next to the full log of
+every step. Logs and the feed are kept; images are removed with the stack.
+
+**What a pass proves:** these packages, at exactly that version, restore and run in
+the demo (both topologies, three stages), in the Control Plane and in the library's
+own suite; every host reports the reviewed composition and its own security checks
+without an unaccepted Fail or Warning; the browser flows work in all six
+combinations; the CP collects all six fleets.
+
+**What it does not prove:** that the commit is what was tested when the tree was
+dirty (the summary says so); anything about nuget.org after publishing (restore the
+public packages once more afterwards); TLS trust (the demo certificate is
+self-signed), restart durability, audit completeness, load or resilience; the
+ContosoInvoicing consumer; and it is not run in CI, where only the Python gate and
+frontend unit tests run. The gate never uses `.env`, never prunes, never clears
+`~/.nuget/packages` and only removes the project named `noelia-gate-*` that it
+created. Ctrl-C tears that project down too.
+
+**The AI declaration.** Since the AI checks stopped reading "nothing recognised" as
+"no duty", a service that says nothing gets `Warning` on `noelia.ai.inventory` and
+`noelia.ai.record-keeping`. The demo's hosts use no model, so they declare it
+(`DeclareArtificialIntelligence(false)`, in `Demo.Platform`). That API does not exist
+in the published 6.4.0, which is what the committed `NoeliaVersion` still is, so the
+call sits behind `NOELIA_DECLARES_AI`, which `Directory.Build.targets` defines for
+every version except 6.4.0. When the demo moves to the new version, delete that file
+and the `#if` blocks. The gate judges warnings like failures; the only acceptance is
+`dev noelia.audit.chain-scope` in `eng/accepted-findings.txt`, with its reason.
+
 ## Building against a candidate
 
 Before a Noelia version is on nuget.org:
@@ -330,7 +395,9 @@ NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
 ```
 
 The cache has to be cleared by hand: a candidate keeps its version number while
-its contents change, and NuGet has no way to know that.
+its contents change, and NuGet has no way to know that. Prefer the release gate
+above, which gives every candidate a fresh version and an isolated restore path, so
+nothing global has to be deleted.
 
 ## What is in here
 
@@ -344,4 +411,4 @@ its contents change, and NuGet has no way to know that.
 | `src/frontend` | Plain HTML, CSS and ES modules. The edge proxy is built from here. |
 | `probes/` | One project per shipped package, each installing exactly that package. |
 | `tests/` | The application's own tests. |
-| `eng/` | The scripts the gate runs. |
+| `eng/` | The scripts the gate runs; `release-gate.mjs` runs them all. |
