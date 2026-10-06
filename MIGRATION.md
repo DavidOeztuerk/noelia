@@ -1,3 +1,19 @@
+# Noelia 7.0.0 → 7.0.1
+
+Eine Korrekturversion, kein Bruch. Es ist nichts zu tun.
+
+**Behoben: ein Sitzungswiderruf griff nie.** `JwtService` schreibt die Sitzung als
+Claim `session_id` ins Token; `TokenRevocationMiddleware` und
+`JwtService.ValidateTokenAsync` lasen sie als `sid`. `ITokenRevocationWriter.RevokeSessionAsync`
+legte also einen Eintrag an, den die Prüfung nie abfragte, und das Token blieb
+gültig. Beide Leser nehmen jetzt `session_id` und fallen auf den OIDC-Standardnamen
+`sid` zurück, sodass auch Token fremder Aussteller weiter wirken. Der ausgestellte
+Claim heißt unverändert `session_id`. Die Namen stehen an einer Stelle
+(`SessionClaims`), damit Aussteller und Leser nicht wieder auseinanderlaufen.
+
+Wer sich bisher mit `RevokeTokenAsync` (je Token) oder dem Subjekt-Stichtag
+beholfen hat, kann es weiter tun; beides war nie betroffen.
+
 # Noelia 6.4.0 → 7.0.0
 
 Eine Hauptversion, weil mehrere Verträge brechen. Es gibt dafür bewusst keine

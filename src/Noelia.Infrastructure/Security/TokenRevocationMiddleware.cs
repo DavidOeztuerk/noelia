@@ -12,7 +12,7 @@ namespace Noelia.Infrastructure.Security;
 /// </summary>
 /// <remarks>
 /// Reads <c>jti</c>, <c>sub</c>, <c>iat</c> and — when the issuer sets it —
-/// <c>sid</c> from the authenticated principal and asks the registered
+/// <c>session_id</c> (or the standard <c>sid</c>, see <see cref="SessionClaims"/>) from the authenticated principal and asks the registered
 /// <see cref="ITokenRevocationEvaluator"/>. A token missing any of the first
 /// three cannot be checked and is refused: an unidentifiable token must not be
 /// the one that slips through.
@@ -92,7 +92,7 @@ public class TokenRevocationMiddleware
             TokenId = jti,
             SubjectId = sub,
             IssuedAt = DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds),
-            SessionId = user.FindFirst("sid")?.Value
+            SessionId = SessionClaims.Read(user)
         };
 
         return true;

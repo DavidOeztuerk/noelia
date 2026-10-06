@@ -148,7 +148,7 @@ public class JwtService : IJwtService
         // Add session claim for concurrent session control
         if (!string.IsNullOrEmpty(user.SessionId))
         {
-            claims.Add(new("session_id", user.SessionId));
+            claims.Add(new(SessionClaims.Issued, user.SessionId));
         }
 
         // Emitted only when acting for a company. Its absence is what marks a
@@ -341,7 +341,7 @@ public class JwtService : IJwtService
             TokenId = jti,
             SubjectId = sub,
             IssuedAt = DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds),
-            SessionId = principal.FindFirst("sid")?.Value
+            SessionId = SessionClaims.Read(principal)
         };
     }
 
