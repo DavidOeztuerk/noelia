@@ -2359,18 +2359,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 7.0.0. Consumers install anonymously from NuGet.org:
+version is 7.0.1. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 7.0.0
+dotnet add package Noelia.Infrastructure --version 7.0.1
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="7.0.0" />
-  <PackageReference Include="Noelia.Redis" Version="7.0.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.0.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="7.0.1" />
+  <PackageReference Include="Noelia.Redis" Version="7.0.1" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.0.1" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`
