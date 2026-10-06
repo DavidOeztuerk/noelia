@@ -24,7 +24,7 @@ public readonly record struct TokenIdentity
     public required DateTimeOffset IssuedAt { get; init; }
 
     /// <summary>
-    /// Session or device the token belongs to, from the <c>sid</c> claim.
+    /// Session or device the token belongs to, from the <c>session_id</c> claim Noelia's issuer writes, or else the standard <c>sid</c>.
     /// Null when the issuer sets no such claim; session revocation is then
     /// unavailable and only token and cutoff revocation apply.
     /// </summary>
