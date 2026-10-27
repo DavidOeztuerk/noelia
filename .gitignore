@@ -485,3 +485,4 @@ $RECYCLE.BIN/
 .playwright-mcp/
 test-results/
 playwright-report/
+.monarch/local/

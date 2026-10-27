@@ -1,0 +1,28 @@
+version: 1
+theme: monarch                      # monarch | neutral
+project:
+  name: "Noelia-G-0000"
+mana:
+  plan: pro                         # pro | max5 | max20 | api-key
+  limits:
+    five_hour: { work_until_pct: 90, clamp: [90, 97] }
+    seven_day: { work_until_pct: 96, clamp: [96, 99] }
+  skip_recap_if_reset_within_min: 10
+  pacing_tolerance_pts: 15
+policy:
+  penalty_zone: block               # warn | block
+  scope_lock: true
+  refuse_high_rank_in_bypass_mode: true
+  risk_tags:
+    payment: { min_rank: S, paths: ["src/**/Payments/**"] }
+    auth: { min_rank: A, paths: ["src/**/Security/**", "src/**/Authentication/**", "src/**/Sessions/**", "src/**/Jwt*/**"] }
+    public-api: { min_rank: B, paths: ["src/Noelia.Abstractions/**"] }
+    secrets: { min_rank: S, paths: ["**/*.key", "demo/.env", "demo/.env.*"] }
+    infra: { min_rank: A, paths: ["deploy/**", ".github/workflows/**", "demo/docker-compose*.yml", "**/Dockerfile"] }
+    migration: { min_rank: B, paths: ["**/Migrations/**"] }
+  deny_bash: ["git push --force*", "git reset --hard*", "dotnet ef database drop*", "monarch permit*", "monarch promote*"]
+  protect_paths: [".monarch/ledger/**", ".monarch/local/**", ".monarch/shadows/*/shadow.yaml"]
+  protect_secrets_extra: []
+  read_only_shadows: ["warden", "scout"]
+recap:
+  path: .monarch/recap/
