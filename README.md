@@ -199,6 +199,9 @@ have to run.
 | `Principal` | the current principal, read from the request | — | ❌ |
 | `SovereignPlatform` | a declared egress boundary, the sovereignty report, the audit trail | — | ❌ |
 | `Dashboard` | read-only operator view of the actual composition and security posture | an explicit visibility policy | ❌ |
+| `ServiceTokenIssuing` | issues short-lived tokens to other services (`UseServiceTokenIssuer`) | `UseJwt(jwt => jwt.Issue(…))` | ❌ |
+| `ServiceCallers` | lets an endpoint answer only named calling services (`UseServiceCallers`) | `UseJwt(jwt => jwt.VerifyOnly(…))` | ❌ |
+| `ServiceTokenClient` | fetches a token per target service for outgoing calls (`UseServiceTokenClient`) | three environment variables | ❌ |
 
 Provider packages participate in that same composition instead of remaining
 invisible registrations:
@@ -1166,6 +1169,163 @@ not take traffic.
 
 Provider packages contribute their own checks; the aggregator names no driver.
 
+## Service-to-service rights (M2M)
+
+One service proves to another *who it is*, and an endpoint lets in only the
+services that need it. Three parts, each its own module, each opt-in:
+
+| Side | Composition | Mapping |
+|---|---|---|
+| Issuer (the service that signs people in) | `UseJwt(jwt => jwt.Issue(key, kid))` + `UseServiceTokenIssuer(…)` | `MapServiceTokenEndpoint().RequireRateLimiting(…)` |
+| Receiver | `UseJwt(jwt => jwt.VerifyOnly(key, kid))` + `UseServiceCallers("billing")` | `.RequireServiceCaller("advisor")` / `[ServiceCaller("advisor")]` + `MapServiceFallback()` |
+| Client | `UseServiceTokenClient()` | `AddServiceToken("billing")` on an `HttpClient`, or `IServiceCommunicationManager` |
+
+Nothing here changes a service that does not call it. The design and its
+limits are in [ADR-0002](docs/adr/0002-dienst-zu-dienst-rechte.md).
+
+### The issuer
+
+```csharp
+builder.Services.AddNoelia(config, env, "identity", noelia => noelia
+    .UseJwt(jwt => jwt.Issue(privateKey, kid))
+    .UseServiceTokenIssuer(issuer => issuer
+        .Clients(config, "advisor", "notification")   // who may ask: in code
+        .Audiences("billing", "identity")             // for whom: in code
+        .Lifetime(TimeSpan.FromMinutes(5))));         // the default
+
+app.MapServiceTokenEndpoint("/m2m/token")
+   .RequireRateLimiting("m2m-token");                 // the service decides what stands in front
+```
+
+The clients and audiences are written in code, so the list a reviewer reads in
+the pull request is the list that runs. The configuration holds only the
+**hashes** of the secrets. The endpoint is OAuth 2.0 client credentials: a form
+body with `grant_type`, `client_id`, `client_secret` and `audience`; success is
+`200` with `access_token`, `token_type` and `expires_in`, and every refusal is
+the same `401 {"error":"invalid_client"}`. A shared-secret key ring stops the
+host from starting: with one, every verifying service could mint these tokens.
+
+### The receiver
+
+```csharp
+noelia.UseJwt(jwt => jwt.VerifyOnly(publicKey, kid))
+      .UseServiceCallers("billing");                  // what this service calls itself in `aud`
+
+var internalApi = app.MapGroup("/internal");
+internalApi.MapGet("/account/{id}", Handler).RequireServiceCaller("advisor", "transfer");
+internalApi.MapServiceFallback();                     // the same 404 for paths with no door
+```
+
+On controllers, `[ServiceCaller("advisor")]` does the same. A request that
+does not qualify gets **one** answer, a `404` with no body, whatever the cause:
+no token, a bad token, an expired one, the wrong audience, a caller that is not
+on the list. A path that does not exist gets the same bytes, because the fallback
+runs through the same scheme and result handler. The refusal is hidden from the
+caller and visible to the operator: each one is logged and counted
+(`noelia.m2m.requests`) with a reason from a closed set (`no_token`,
+`invalid_token`, `expired`, `wrong_type`, `wrong_audience`, `caller_not_allowed`,
+`other_policy`); the caller's id appears only when the signature held, and
+nothing the caller sent is ever written.
+
+Rate limits, output caching and CORS go on the **group**, never on one door:
+anything that answers differently on a door than on the fallback tells a caller
+which paths exist. The check `noelia.m2m.caller-policy` (it is not applicable when nothing
+here is in use, so the dashboard shows one more row and no new warning) verifies
+the fallback, the 404 handler and the single token endpoint.
+
+### The client
+
+```csharp
+noelia.UseServiceTokenClient();   // reads the three NOELIA_M2M_* variables below
+
+services.AddHttpClient("billing", c => c.BaseAddress = new Uri("http://billing"))
+        .AddServiceToken("billing");   // the audience is the service called, in the code
+```
+
+`AddServiceToken` adds `Authorization: Bearer …` to each request. A request that
+already carries an `Authorization` header is an `InvalidOperationException`, never
+a silent overwrite. If no token can be had, `ServiceTokenUnavailableException` is
+thrown **before anything is sent**. `IServiceCommunicationManager` does the same
+once `UseServiceTokenClient()` is composed: its audience is the target service's
+name in lower case (also through the gateway), and **there is no fallback**: the
+`ServiceCommunication:BearerToken` / `SERVICE_COMMUNICATION_BEARER` credential is
+not consulted in this mode, and a missing token source is an error rather than an
+unauthenticated call.
+
+One token is kept per audience, **in the process only** (never in the distributed
+cache), renewed once and for all callers together when it is within the last
+`min(RefreshBeforeExpiry, expires_in / 5)` of its life, and fetched synchronously
+once it has expired. The cache is a singleton, so the transient typed client does
+not fetch again on each resolution. `UseServiceTokenClient()` sets
+`ServiceCommunication:M2M` to `Protocol = ClientCredentials` and takes the endpoint,
+client id and secret from the variables whatever the `ServiceCommunication`
+section says. A missing or malformed variable stops the host; the message names
+the variable and never the value.
+
+### Names in the environment
+
+Flat names, like `NOELIA_JWT_*`; one secret-store folder per service, so a
+plaintext secret exists only in its caller's folder and a hash only in the
+issuer's.
+
+| Variable | Where | Holds |
+|---|---|---|
+| `NOELIA_M2M_CLIENT_<ID>_SECRET_HASH` | the issuer only | current slot, `sha256:…` |
+| `NOELIA_M2M_CLIENT_<ID>_SECRET_HASH_PREVIOUS` | the issuer only, optional | previous slot, open during a rotation |
+| `NOELIA_M2M_TOKEN_ENDPOINT` | every caller | URL of the token endpoint (absolute http or https) |
+| `NOELIA_M2M_CLIENT_ID` | every caller | its own client id |
+| `NOELIA_M2M_CLIENT_SECRET` | every caller, **its own only** | the plaintext secret |
+
+`<ID>` is the client id in upper case with `-` as `_`.
+
+### Making a secret
+
+```csharp
+Console.WriteLine(ServiceClientSecret.Generate("notification").ToEnvironment());
+// NOELIA_M2M_CLIENT_SECRET=…                          -> the caller's folder
+// NOELIA_M2M_CLIENT_NOTIFICATION_SECRET_HASH=sha256:… -> the issuer's folder
+```
+
+Without .NET, the same value and the same hash:
+
+```bash
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+S=$(openssl rand 32 | b64url)                       # 43 characters
+echo "NOELIA_M2M_CLIENT_SECRET=$S"
+echo "NOELIA_M2M_CLIENT_NOTIFICATION_SECRET_HASH=sha256:$(printf %s "$S" | openssl dgst -sha256 -binary | b64url)"
+```
+
+Only these two ways are supported. The form says nothing about where a secret
+came from, and a chosen one makes the unsalted hash open to guessing.
+
+### Rotation, without an outage
+
+1. Make a new secret.
+2. Issuer: `…_SECRET_HASH_PREVIOUS` := the old hash, `…_SECRET_HASH` := the new
+   hash; roll out. Both secrets work.
+3. Caller: `NOELIA_M2M_CLIENT_SECRET` := the new secret; roll out.
+4. Issuer: clear `…_PREVIOUS`; roll out. Tokens fetched with the old secret run
+   out within one lifetime (five minutes by default).
+
+A stolen secret: replace both slots. New tokens are refused at once; tokens
+already issued are good until their `exp`.
+
+### Limits
+
+Short; ADR-0002 has the full list. The issuer is the root of trust: whoever
+takes it over holds the signing key. Tokens are bearer tokens and cannot be
+revoked, which is why they live minutes. A right is per door, not per record. A
+compromised caller has its own doors. The `404` is the same in content, not
+necessarily in time. The token endpoint does not insist on HTTPS, so a plain-text
+network is for network isolation to handle. An OIDC authority
+(`jwt.From(authority)`) is not supported for service tokens. In a fleet that mixes
+7.0 and 7.1, never give a service audience the same name as a person audience
+until every service is on 7.1.
+
+The original token format (`M2MConfiguration.Protocol = Legacy`) stays and is
+what an unconfigured service speaks. It is not marked obsolete, but it is not for
+new services: its token lives in the distributed cache and it has no audience.
+
 ## Security checks
 
 Security checks answer a different question from health checks: not “can this
@@ -1195,6 +1355,7 @@ var latest = app.Services.GetRequiredService<ISecurityCheckReport>().Latest;
 | `noelia.ratelimit.degradation` | `RateLimiting` | the limiter is enabled and never fails open |
 | `noelia.revocation.degradation` | `Jwt` | revocation is present and was not explicitly disabled |
 | `noelia.dashboard.operator-access` | `Dashboard` | an explicit operator policy and audit trail protect the page |
+| `noelia.m2m.caller-policy` | composition (always) | service doors have their fallback, the 404 handler is still in front, and one rate-limited token endpoint exists where tokens are issued; not applicable when none of it is in use |
 
 Only checks belonging to `NoeliaComposition.Included` run; composition itself is
 always checked. Results use `Pass`, `Warning`, `Fail` or `NotApplicable` and
@@ -1593,7 +1754,7 @@ a named cause:
 | What calls out | When | Where to |
 |---|---|---|
 | `ServiceCommunicationManager` | `Communication`, on every `GetAsync` / `SendRequestAsync` | the services in `ServiceEndpoints`, or the gateway |
-| `ServiceTokenProvider` | `Communication`, to get a machine token | the token endpoint in `ServiceCommunication:M2M` |
+| `ServiceTokenProvider` | `Communication` or `UseServiceTokenClient`, to get a machine token | the token endpoint in `ServiceCommunication:M2M` (see [Service-to-service rights](#service-to-service-rights-m2m)) |
 | `OpenBaoSecretProvider` | the OpenBao secret provider only | the address configured for it |
 | `Noelia.Redis` | whenever a Redis provider is registered | the connection string you passed |
 | `Noelia.Messaging.MassTransit` | `AddMessaging` | the broker you configured |
@@ -2359,18 +2520,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 7.0.1. Consumers install anonymously from NuGet.org:
+version is 7.1.0. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 7.0.1
+dotnet add package Noelia.Infrastructure --version 7.1.0
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="7.0.1" />
-  <PackageReference Include="Noelia.Redis" Version="7.0.1" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.0.1" />
+  <PackageReference Include="Noelia.Infrastructure" Version="7.1.0" />
+  <PackageReference Include="Noelia.Redis" Version="7.1.0" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.1.0" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`

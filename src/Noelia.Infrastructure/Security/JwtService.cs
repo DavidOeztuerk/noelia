@@ -13,6 +13,7 @@ using Noelia.Infrastructure.Security.Identity;
 using System.Text.RegularExpressions;
 
 using Noelia.Infrastructure.Security.Keys;
+using Noelia.Infrastructure.Security.ServiceTokens;
 
 namespace Noelia.Infrastructure.Security;
 
@@ -215,6 +216,7 @@ public class JwtService : IJwtService
     public async Task<ClaimsPrincipal?> GetPrincipalFromExpiredTokenAsync(string token)
     {
         var tokenValidationParameters = _keys.ValidationParameters(_jwtSettings.Issuer, _jwtSettings.Audience, validateLifetime: false);
+        ServiceTokenTypeGuard.Apply(tokenValidationParameters);
 
         var tokenHandler = new JwtSecurityTokenHandler();
 
@@ -248,6 +250,7 @@ public class JwtService : IJwtService
         }
 
         var tokenValidationParameters = _keys.ValidationParameters(_jwtSettings.Issuer, _jwtSettings.Audience);
+        ServiceTokenTypeGuard.Apply(tokenValidationParameters);
 
         var tokenHandler = new JwtSecurityTokenHandler();
 

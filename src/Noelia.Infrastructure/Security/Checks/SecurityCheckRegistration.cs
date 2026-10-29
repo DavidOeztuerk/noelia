@@ -33,6 +33,7 @@ internal static class SecurityCheckRegistration
         Add<EncryptionSecurityCheck>(services);
         Add<RateLimitDegradationSecurityCheck>(services);
         Add<RevocationDegradationSecurityCheck>(services);
+        Add<ServiceCallerPolicySecurityCheck>(services);
 
         return services;
     }

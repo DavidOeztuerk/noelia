@@ -139,6 +139,28 @@ public readonly record struct NoeliaModule(string Name)
     /// <summary>The read-only, operator-authorised Noelia dashboard.</summary>
     public static NoeliaModule Dashboard => new(nameof(Dashboard));
 
+    /// <summary>
+    /// Issuing short-lived tokens to other services that present a registered
+    /// client secret. Bound by exactly one service, the one that signs people in.
+    /// </summary>
+    /// <remarks>
+    /// Needs the signing half of an asymmetric key pair: with a shared secret
+    /// every verifying service could mint service tokens for any caller.
+    /// </remarks>
+    public static NoeliaModule ServiceTokenIssuing => new(nameof(ServiceTokenIssuing));
+
+    /// <summary>
+    /// Letting an endpoint answer only the named calling services, and pretending
+    /// not to exist for everyone else.
+    /// </summary>
+    public static NoeliaModule ServiceCallers => new(nameof(ServiceCallers));
+
+    /// <summary>
+    /// Fetching service tokens for outgoing calls with the client credentials
+    /// this service was given.
+    /// </summary>
+    public static NoeliaModule ServiceTokenClient => new(nameof(ServiceTokenClient));
+
     /// <inheritdoc />
     public override string ToString() => Name;
 }

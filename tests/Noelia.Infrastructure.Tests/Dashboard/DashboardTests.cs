@@ -378,11 +378,15 @@ public sealed class DashboardTests
 
         composition.Included.Should().Equal(NoeliaModule.Dashboard);
         report.Latest.Select(result => result.Module).Should()
-            // Eight Composition-category checks run everywhere: providers,
+            // Nine Composition-category checks run everywhere: providers,
             // readiness coverage, the data protection key ring, the scope of
-            // the audit chain, the egress guard, and the three that answer for
-            // model endpoints — inventory, transfer and record-keeping.
+            // the audit chain, the egress guard, the three that answer for
+            // model endpoints — inventory, transfer and record-keeping — and
+            // the service-caller policy (noelia.m2m.caller-policy), which has to
+            // run precisely in a service that mapped a door without composing
+            // the module.
             .BeEquivalentTo([
+                NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,
                 NoeliaModule.Composition,

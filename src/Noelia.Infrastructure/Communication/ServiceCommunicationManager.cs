@@ -11,6 +11,7 @@ using Noelia.Infrastructure.Communication.Telemetry;
 using Noelia.Infrastructure.Communication.Deduplication;
 using Noelia.Infrastructure.Security.M2M;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Net;
 using Noelia.Abstractions.Observability;
@@ -27,6 +28,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
     private readonly Resilience.IRetryPolicy? _retryPolicy;
     private readonly IServiceResponseCache? _cache;
     private readonly IServiceTokenProvider? _tokenProvider;
+    private readonly IServiceTokenSource? _tokenSource;
     private readonly IServiceCommunicationMetrics? _metrics;
     private readonly IRequestDeduplicator? _deduplicator;
     private readonly Dictionary<string, string> _serviceUrls;
@@ -35,6 +37,37 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ServiceCommunicationOptions _options;
 
+    /// <summary>
+    /// The 7.0 constructor, kept with its exact signature so an assembly compiled
+    /// against 7.0 still binds to it.
+    /// </summary>
+    /// <remarks>
+    /// No default values here on purpose: with them, a call naming only the first
+    /// four arguments would match both constructors and stop compiling.
+    /// </remarks>
+    public ServiceCommunicationManager(
+        HttpClient httpClient,
+        IEventBus eventBus,
+        ILogger<ServiceCommunicationManager> logger,
+        IConfiguration configuration,
+        ICircuitBreakerFactory? circuitBreakerFactory,
+        IRetryPolicyFactory? retryPolicyFactory,
+        IHttpContextAccessor? httpContextAccessor,
+        IOptions<ServiceCommunicationOptions>? options,
+        IServiceResponseCache? cache,
+        IServiceTokenProvider? tokenProvider,
+        IServiceCommunicationMetrics? metrics,
+        IRequestDeduplicator? deduplicator)
+        : this(httpClient, eventBus, logger, configuration, circuitBreakerFactory, retryPolicyFactory,
+            httpContextAccessor, options, cache, tokenProvider, metrics, deduplicator, tokenSource: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates the manager. The container picks this constructor, so a registered
+    /// per-audience token source is the one used.
+    /// </summary>
+    [ActivatorUtilitiesConstructor]
     public ServiceCommunicationManager(
         HttpClient httpClient,
         IEventBus eventBus,
@@ -47,7 +80,8 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         IServiceResponseCache? cache = null,
         IServiceTokenProvider? tokenProvider = null,
         IServiceCommunicationMetrics? metrics = null,
-        IRequestDeduplicator? deduplicator = null)
+        IRequestDeduplicator? deduplicator = null,
+        IServiceTokenSource? tokenSource = null)
     {
         _httpClient = httpClient;
         _eventBus = eventBus;
@@ -59,6 +93,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         _options = options?.Value ?? new ServiceCommunicationOptions();
         _cache = cache;
         _tokenProvider = tokenProvider;
+        _tokenSource = tokenSource ?? tokenProvider as IServiceTokenSource;
         _metrics = metrics;
         _deduplicator = deduplicator;
 
@@ -193,7 +228,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         try
         {
             using var httpRequest = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            await AttachHeadersAsync(httpRequest, headers, cancellationToken);
+            await AttachHeadersAsync(httpRequest, serviceName, headers, cancellationToken);
 
             _logger.LogDebug("Sending GET to {ServiceName} at {RequestUri}", serviceName, requestUri);
 
@@ -248,7 +283,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             {
                 Content = JsonContent.Create(request, options: _jsonOptions)
             };
-            await AttachHeadersAsync(httpRequest, headers, cancellationToken);
+            await AttachHeadersAsync(httpRequest, serviceName, headers, cancellationToken);
 
             _logger.LogDebug("Sending request to {ServiceName} at {RequestUri}", serviceName, requestUri);
 
@@ -355,7 +390,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         return default;
     }
 
-    private async Task AttachHeadersAsync(HttpRequestMessage httpRequest, Dictionary<string, string>? headers, CancellationToken cancellationToken = default)
+    private async Task AttachHeadersAsync(HttpRequestMessage httpRequest, string serviceName, Dictionary<string, string>? headers, CancellationToken cancellationToken = default)
     {
         if (headers != null)
         {
@@ -368,6 +403,66 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             }
         }
 
+        if (_options.M2M.Enabled && _options.M2M.Protocol == ServiceTokenProtocol.ClientCredentials)
+        {
+            await AttachServiceTokenAsync(httpRequest, serviceName, cancellationToken);
+        }
+        else
+        {
+            await AttachLegacyAuthorizationAsync(httpRequest, cancellationToken);
+        }
+
+        AttachCorrelationHeaders(httpRequest);
+    }
+
+    /// <summary>
+    /// Client-credentials mode (ADR-0002, F3): the target's token or no call. A token that
+    /// cannot be had throws, and the configured bearer fallback is not consulted, because
+    /// a call that quietly went out with a shared credential is the failure this mode
+    /// exists to remove.
+    /// </summary>
+    private async Task AttachServiceTokenAsync(
+        HttpRequestMessage httpRequest, string serviceName, CancellationToken cancellationToken)
+    {
+        if (httpRequest.Headers.Contains("Authorization"))
+        {
+            throw new InvalidOperationException(
+                "The request already carries an Authorization header. Service calls carry the service "
+                + "token and nothing else; a person's token is not forwarded.");
+        }
+
+        if (_tokenSource is null)
+        {
+            _logger.LogError("M2M uses client credentials but no token source is registered");
+            throw new InvalidOperationException(
+                "M2M is set to client credentials, but no IServiceTokenSource is registered. "
+                + "Call UseServiceTokenClient() on the Noelia composition.");
+        }
+
+        // The audience is the target service, also when the call goes through the gateway:
+        // the gateway forwards the request, it is not the service the token is for.
+        string? token;
+        try
+        {
+            token = await _tokenSource.GetTokenAsync(serviceName.ToLowerInvariant(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("No service token for {ServiceName}: {Exception}", serviceName, ex.GetType().Name);
+            throw;
+        }
+
+        if (string.IsNullOrEmpty(token))
+        {
+            throw new ServiceTokenUnavailableException("The token source returned no token.");
+        }
+
+        httpRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+        _logger.LogDebug("Using service token for service-to-service communication");
+    }
+
+    private async Task AttachLegacyAuthorizationAsync(HttpRequestMessage httpRequest, CancellationToken cancellationToken)
+    {
         // ServiceCommunicationManager is ONLY for Service-to-Service calls
         // ALWAYS use M2M token, NEVER forward user tokens
         if (_options.M2M.Enabled && _tokenProvider != null)
@@ -404,6 +499,10 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             }
         }
 
+    }
+
+    private void AttachCorrelationHeaders(HttpRequestMessage httpRequest)
+    {
         // Propagate correlation ID for cross-service tracing
         var correlationId = _httpContextAccessor?.HttpContext?.Items[CorrelationId.BaggageKey]?.ToString();
         if (!string.IsNullOrEmpty(correlationId))

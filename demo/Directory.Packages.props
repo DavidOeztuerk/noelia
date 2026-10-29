@@ -3,7 +3,7 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
-    <NoeliaVersion>7.0.1</NoeliaVersion>
+    <NoeliaVersion>7.1.0</NoeliaVersion>
   </PropertyGroup>
 
   <ItemGroup>
