@@ -4,6 +4,6 @@ type: standard
 title: "Noelia – Dienst-zu-Dienst-Rechte (M2M): Service-Token-Ausstellung und Aufrufer-Policy je Endpoint"
 rank: A
 state: proposed
-quests: [Q-0047, Q-0048, Q-0049]
+quests: [Q-0047, Q-0048]
 ---
 # Noelia – Dienst-zu-Dienst-Rechte (M2M): Service-Token-Ausstellung und Aufrufer-Policy je Endpoint
