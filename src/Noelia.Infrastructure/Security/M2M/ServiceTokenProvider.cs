@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Noelia.Infrastructure.Communication.Configuration;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Noelia.Infrastructure.Security.ServiceTokens;
 
 namespace Noelia.Infrastructure.Security.M2M;
@@ -31,6 +32,28 @@ public class ServiceTokenProvider : IServiceTokenProvider, IServiceTokenSource
     private readonly TimeProvider _time;
     private const string CacheKeyPrefix = "m2m:token:";
 
+    /// <summary>
+    /// The 7.0 constructor, kept with its exact signature so an assembly compiled
+    /// against 7.0 still binds to it.
+    /// </summary>
+    /// <remarks>
+    /// No default values here on purpose: with them, a call naming only the first
+    /// three arguments would match both constructors and stop compiling.
+    /// </remarks>
+    public ServiceTokenProvider(
+        HttpClient httpClient,
+        ILogger<ServiceTokenProvider> logger,
+        IOptions<ServiceCommunicationOptions> options,
+        IDistributedCache? cache)
+        : this(httpClient, logger, options, cache, tokenCache: null, timeProvider: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates the provider. The container picks this constructor, so the shared
+    /// token cache and the clock are the registered ones.
+    /// </summary>
+    [ActivatorUtilitiesConstructor]
     public ServiceTokenProvider(
         HttpClient httpClient,
         ILogger<ServiceTokenProvider> logger,

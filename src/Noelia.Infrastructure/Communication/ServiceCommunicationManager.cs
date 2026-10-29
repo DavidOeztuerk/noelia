@@ -11,6 +11,7 @@ using Noelia.Infrastructure.Communication.Telemetry;
 using Noelia.Infrastructure.Communication.Deduplication;
 using Noelia.Infrastructure.Security.M2M;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Net;
 using Noelia.Abstractions.Observability;
@@ -36,6 +37,37 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ServiceCommunicationOptions _options;
 
+    /// <summary>
+    /// The 7.0 constructor, kept with its exact signature so an assembly compiled
+    /// against 7.0 still binds to it.
+    /// </summary>
+    /// <remarks>
+    /// No default values here on purpose: with them, a call naming only the first
+    /// four arguments would match both constructors and stop compiling.
+    /// </remarks>
+    public ServiceCommunicationManager(
+        HttpClient httpClient,
+        IEventBus eventBus,
+        ILogger<ServiceCommunicationManager> logger,
+        IConfiguration configuration,
+        ICircuitBreakerFactory? circuitBreakerFactory,
+        IRetryPolicyFactory? retryPolicyFactory,
+        IHttpContextAccessor? httpContextAccessor,
+        IOptions<ServiceCommunicationOptions>? options,
+        IServiceResponseCache? cache,
+        IServiceTokenProvider? tokenProvider,
+        IServiceCommunicationMetrics? metrics,
+        IRequestDeduplicator? deduplicator)
+        : this(httpClient, eventBus, logger, configuration, circuitBreakerFactory, retryPolicyFactory,
+            httpContextAccessor, options, cache, tokenProvider, metrics, deduplicator, tokenSource: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates the manager. The container picks this constructor, so a registered
+    /// per-audience token source is the one used.
+    /// </summary>
+    [ActivatorUtilitiesConstructor]
     public ServiceCommunicationManager(
         HttpClient httpClient,
         IEventBus eventBus,

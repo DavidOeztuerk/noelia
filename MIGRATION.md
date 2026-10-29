@@ -20,7 +20,10 @@ Neue Bausteine: `ServiceClientSecret`, `IServiceTokenSource`,
 `ServiceTokenUnavailableException`, `ServiceTokenProtocol`, und die Properties
 `M2MConfiguration.Protocol` (Standard `Legacy`) und `M2MConfiguration.Audience`.
 `IServiceTokenProvider` ist unverändert; `ServiceTokenProvider` kann zusätzlich
-`IServiceTokenSource`. Keine neuen Pakete, die Budget-Tabelle bleibt.
+`IServiceTokenSource`. Die 7.0-Konstruktoren von `ServiceTokenProvider` und
+`ServiceCommunicationManager` bleiben mit genau ihrer Signatur erhalten (ein gegen
+7.0 kompiliertes Assembly bindet weiter); der Container nimmt die neue
+Überladung. Keine neuen Pakete, die Budget-Tabelle bleibt.
 
 **Die einzige Verhaltensänderung an Bestehendem:** der Personen-Scheme und
 `JwtService` lehnen ein Token mit `typ = noelia-service+jwt` ab. Dieses Token
