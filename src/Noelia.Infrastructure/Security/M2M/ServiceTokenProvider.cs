@@ -9,7 +9,7 @@ namespace Noelia.Infrastructure.Security.M2M;
 /// <summary>
 /// Service token provider implementation using client credentials flow
 /// </summary>
-public class ServiceTokenProvider : IServiceTokenProvider
+public class ServiceTokenProvider : IServiceTokenProvider, IServiceTokenSource
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<ServiceTokenProvider> _logger;
@@ -22,7 +22,9 @@ public class ServiceTokenProvider : IServiceTokenProvider
         HttpClient httpClient,
         ILogger<ServiceTokenProvider> logger,
         IOptions<ServiceCommunicationOptions> options,
-        IDistributedCache? cache = null)
+        IDistributedCache? cache = null,
+        ServiceTokenCache? tokenCache = null,
+        TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -58,6 +60,10 @@ public class ServiceTokenProvider : IServiceTokenProvider
         // Cache miss or expired - get new token
         return await RefreshTokenAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    public Task<string> GetTokenAsync(string audience, CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException();
 
     public async Task<string?> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {

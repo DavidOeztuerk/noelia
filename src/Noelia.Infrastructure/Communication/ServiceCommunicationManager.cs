@@ -27,6 +27,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
     private readonly Resilience.IRetryPolicy? _retryPolicy;
     private readonly IServiceResponseCache? _cache;
     private readonly IServiceTokenProvider? _tokenProvider;
+    private readonly IServiceTokenSource? _tokenSource;
     private readonly IServiceCommunicationMetrics? _metrics;
     private readonly IRequestDeduplicator? _deduplicator;
     private readonly Dictionary<string, string> _serviceUrls;
@@ -47,7 +48,8 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         IServiceResponseCache? cache = null,
         IServiceTokenProvider? tokenProvider = null,
         IServiceCommunicationMetrics? metrics = null,
-        IRequestDeduplicator? deduplicator = null)
+        IRequestDeduplicator? deduplicator = null,
+        IServiceTokenSource? tokenSource = null)
     {
         _httpClient = httpClient;
         _eventBus = eventBus;
@@ -59,6 +61,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         _options = options?.Value ?? new ServiceCommunicationOptions();
         _cache = cache;
         _tokenProvider = tokenProvider;
+        _tokenSource = tokenSource ?? tokenProvider as IServiceTokenSource;
         _metrics = metrics;
         _deduplicator = deduplicator;
 
