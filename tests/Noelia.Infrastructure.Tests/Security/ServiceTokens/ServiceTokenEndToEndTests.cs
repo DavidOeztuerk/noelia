@@ -39,8 +39,10 @@ public class ServiceTokenEndToEndTests
             doors.MapServiceFallback();
         });
 
-        using var advisorClient = Client("advisor", advisor.Secret, issuer, receiver);
-        using var notificationClient = Client("notification", notification.Secret, issuer, receiver);
+        var (advisorClient, advisorServices) = Client("advisor", advisor.Secret, issuer, receiver);
+        var (notificationClient, notificationServices) = Client("notification", notification.Secret, issuer, receiver);
+        using var _ = advisorServices;
+        using var __ = notificationServices;
 
         var allowed = await advisorClient.GetAsync("/internal/ping");
         var refused = await notificationClient.GetAsync("/internal/ping");
@@ -71,7 +73,8 @@ public class ServiceTokenEndToEndTests
             });
             doors.MapServiceFallback();
         });
-        using var client = Client("advisor", impostor.Secret, issuer, receiver);
+        var (client, services) = Client("advisor", impostor.Secret, issuer, receiver);
+        using var _ = services;
 
         var call = () => client.GetAsync("/internal/ping");
 
@@ -79,7 +82,7 @@ public class ServiceTokenEndToEndTests
         reached.Should().Be(0);
     }
 
-    private static HttpClient Client(string id, string secret, IAsyncDisposable issuer, ServiceCallerHost receiver)
+    private static (HttpClient Client, ServiceProvider Provider) Client(string id, string secret, IAsyncDisposable issuer, ServiceCallerHost receiver)
     {
         var issuerHost = (IssuerHost)issuer;
         var config = Config(
@@ -94,7 +97,7 @@ public class ServiceTokenEndToEndTests
             .ConfigurePrimaryHttpMessageHandler(() => ((TestServer)receiver.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()).CreateHandler());
 
         var provider = services.BuildServiceProvider();
-        return new OwnedClient(provider.GetRequiredService<IHttpClientFactory>().CreateClient("receiver"), provider);
+        return (provider.GetRequiredService<IHttpClientFactory>().CreateClient("receiver"), provider);
     }
 
     private static async Task<IssuerHost> StartIssuer(ServiceClientSecret advisor, ServiceClientSecret notification)
@@ -132,29 +135,6 @@ public class ServiceTokenEndToEndTests
         {
             await host.StopAsync();
             host.Dispose();
-        }
-    }
-
-    /// <summary>Disposing the client disposes the provider that built it.</summary>
-    private sealed class OwnedClient(HttpClient inner, ServiceProvider provider) : HttpClient(new Forward(inner))
-    {
-        protected override void Dispose(bool disposing)
-        {
-            base.Dispose(disposing);
-            if (disposing)
-            {
-                provider.Dispose();
-            }
-        }
-
-        private sealed class Forward(HttpClient inner) : DelegatingHandler(new Pass(inner))
-        {
-        }
-
-        private sealed class Pass(HttpClient inner) : HttpMessageHandler
-        {
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-                inner.SendAsync(request, ct);
         }
     }
 }

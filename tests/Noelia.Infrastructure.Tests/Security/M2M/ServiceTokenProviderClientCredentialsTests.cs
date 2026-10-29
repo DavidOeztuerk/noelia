@@ -184,7 +184,7 @@ public class ServiceTokenProviderClientCredentialsTests
     [Fact]
     public async Task The_distributed_cache_is_neither_read_nor_written()
     {
-        var provider = Provider();
+        var provider = Provider(m => m.Audience = "identity");
 
         await provider.GetTokenAsync("identity");
         await provider.GetTokenAsync();

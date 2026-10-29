@@ -52,9 +52,10 @@ public static class ServiceCommunicationExtensions
         // Register M2M token provider if enabled
         if (options.M2M.Enabled)
         {
-            // AddHttpClient already registers the service as singleton with HttpClient injected
-            // No need for additional AddSingleton which would override and break HttpClient injection
-            services.AddHttpClient<Security.M2M.IServiceTokenProvider, Security.M2M.ServiceTokenProvider>();
+            // One registration, shared with UseServiceTokenClient: the typed client, the
+            // process-wide token cache and the per-audience source. Registering the typed client
+            // here a second time would leave two descriptors where the last silently wins.
+            Security.M2M.ServiceTokenClientRegistration.Add(services);
         }
 
         // Register metrics if enabled

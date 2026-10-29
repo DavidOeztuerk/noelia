@@ -196,7 +196,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         try
         {
             using var httpRequest = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            await AttachHeadersAsync(httpRequest, headers, cancellationToken);
+            await AttachHeadersAsync(httpRequest, serviceName, headers, cancellationToken);
 
             _logger.LogDebug("Sending GET to {ServiceName} at {RequestUri}", serviceName, requestUri);
 
@@ -251,7 +251,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             {
                 Content = JsonContent.Create(request, options: _jsonOptions)
             };
-            await AttachHeadersAsync(httpRequest, headers, cancellationToken);
+            await AttachHeadersAsync(httpRequest, serviceName, headers, cancellationToken);
 
             _logger.LogDebug("Sending request to {ServiceName} at {RequestUri}", serviceName, requestUri);
 
@@ -358,7 +358,7 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
         return default;
     }
 
-    private async Task AttachHeadersAsync(HttpRequestMessage httpRequest, Dictionary<string, string>? headers, CancellationToken cancellationToken = default)
+    private async Task AttachHeadersAsync(HttpRequestMessage httpRequest, string serviceName, Dictionary<string, string>? headers, CancellationToken cancellationToken = default)
     {
         if (headers != null)
         {
@@ -371,6 +371,66 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             }
         }
 
+        if (_options.M2M.Enabled && _options.M2M.Protocol == ServiceTokenProtocol.ClientCredentials)
+        {
+            await AttachServiceTokenAsync(httpRequest, serviceName, cancellationToken);
+        }
+        else
+        {
+            await AttachLegacyAuthorizationAsync(httpRequest, cancellationToken);
+        }
+
+        AttachCorrelationHeaders(httpRequest);
+    }
+
+    /// <summary>
+    /// Client-credentials mode (ADR-0002, F3): the target's token or no call. A token that
+    /// cannot be had throws, and the configured bearer fallback is not consulted, because
+    /// a call that quietly went out with a shared credential is the failure this mode
+    /// exists to remove.
+    /// </summary>
+    private async Task AttachServiceTokenAsync(
+        HttpRequestMessage httpRequest, string serviceName, CancellationToken cancellationToken)
+    {
+        if (httpRequest.Headers.Contains("Authorization"))
+        {
+            throw new InvalidOperationException(
+                "The request already carries an Authorization header. Service calls carry the service "
+                + "token and nothing else; a person's token is not forwarded.");
+        }
+
+        if (_tokenSource is null)
+        {
+            _logger.LogError("M2M uses client credentials but no token source is registered");
+            throw new InvalidOperationException(
+                "M2M is set to client credentials, but no IServiceTokenSource is registered. "
+                + "Call UseServiceTokenClient() on the Noelia composition.");
+        }
+
+        // The audience is the target service, also when the call goes through the gateway:
+        // the gateway forwards the request, it is not the service the token is for.
+        string? token;
+        try
+        {
+            token = await _tokenSource.GetTokenAsync(serviceName.ToLowerInvariant(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("No service token for {ServiceName}: {Exception}", serviceName, ex.GetType().Name);
+            throw;
+        }
+
+        if (string.IsNullOrEmpty(token))
+        {
+            throw new ServiceTokenUnavailableException("The token source returned no token.");
+        }
+
+        httpRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+        _logger.LogDebug("Using service token for service-to-service communication");
+    }
+
+    private async Task AttachLegacyAuthorizationAsync(HttpRequestMessage httpRequest, CancellationToken cancellationToken)
+    {
         // ServiceCommunicationManager is ONLY for Service-to-Service calls
         // ALWAYS use M2M token, NEVER forward user tokens
         if (_options.M2M.Enabled && _tokenProvider != null)
@@ -407,6 +467,10 @@ public class ServiceCommunicationManager : IServiceCommunicationManager
             }
         }
 
+    }
+
+    private void AttachCorrelationHeaders(HttpRequestMessage httpRequest)
+    {
         // Propagate correlation ID for cross-service tracing
         var correlationId = _httpContextAccessor?.HttpContext?.Items[CorrelationId.BaggageKey]?.ToString();
         if (!string.IsNullOrEmpty(correlationId))
