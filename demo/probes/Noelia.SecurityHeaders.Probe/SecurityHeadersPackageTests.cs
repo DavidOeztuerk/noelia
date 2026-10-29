@@ -52,7 +52,8 @@ public sealed class SecurityHeadersPackageTests
             "noelia.dataprotection.key-ring",
             "noelia.egress.guard",
             "noelia.headers.browser-baseline",
-            "noelia.health.readiness-coverage");
+            "noelia.health.readiness-coverage",
+            "noelia.m2m.caller-policy");
         report.Latest.Should().OnlyContain(result =>
             result.Module == NoeliaModule.Composition
             || result.Module == NoeliaModule.SecurityHeaders);
