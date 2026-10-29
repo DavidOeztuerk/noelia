@@ -62,6 +62,7 @@ public static class ServiceTokenEndpoint
         var route = endpoints.MapPost(pattern, (Delegate)HandleAsync);
 
         route.AllowAnonymous();
+        route.WithMetadata(ServiceTokenEndpointMarker.Instance);
         route.DisableAntiforgery();
         return route;
     }

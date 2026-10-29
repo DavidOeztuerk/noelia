@@ -250,7 +250,7 @@ public class ServiceCallerDoorTests
             "wrong-type" => Wire.Service(type: "JWT"),
             "person" => Wire.Person(),
             "person-with-client-id" => Wire.Person(clientIdClaim: "advisor"),
-            "stranger" => await Wire.Issued("notification"),
+            "stranger" => Wire.Service("profile"),
             "wrong-issuer" => Wire.Service(issuer: "https://someone-else.test"),
             _ => null
         };

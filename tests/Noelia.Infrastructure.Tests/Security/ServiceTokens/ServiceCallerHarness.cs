@@ -81,7 +81,8 @@ internal sealed class ServiceCallerHost : IAsyncDisposable
                     services.AddRouting();
                     services.AddNoelia(configuration, new Env(), "billing", noelia =>
                     {
-                        noelia.UseDefaults();
+                        // Serilog replaces the logger factory; the audit is read from the test's own provider.
+                        noelia.UseDefaults().Without(NoeliaModule.Logging, "the test captures log events itself");
                         if (settings.Compose is null)
                         {
                             noelia.UseJwt(jwt => jwt.VerifyOnly(KeyPair.PublicKey, KeyPair.Kid))
@@ -200,7 +201,11 @@ internal static class Wire
     {
         var headers = response.Headers.Concat(response.Content.Headers)
             .Where(header => !string.Equals(header.Key, "Date", StringComparison.OrdinalIgnoreCase)
-                             && !string.Equals(header.Key, "X-Correlation-ID", StringComparison.OrdinalIgnoreCase))
+                             && !string.Equals(header.Key, "X-Correlation-ID", StringComparison.OrdinalIgnoreCase)
+                             // The limiter counts every request, so these two differ by construction between
+                             // any two requests; the limit itself (X-RateLimit-Limit) stays compared.
+                             && !string.Equals(header.Key, "X-RateLimit-Remaining", StringComparison.OrdinalIgnoreCase)
+                             && !string.Equals(header.Key, "X-RateLimit-Reset", StringComparison.OrdinalIgnoreCase))
             .OrderBy(header => header.Key, StringComparer.OrdinalIgnoreCase)
             .Select(header => $"{header.Key}: {string.Join(",", header.Value)}");
         var body = Convert.ToHexString(await response.Content.ReadAsByteArrayAsync());

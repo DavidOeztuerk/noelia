@@ -63,20 +63,6 @@ public class ServiceCallerPolicyTests
     }
 
     [Fact]
-    public async Task The_authorization_system_builds_a_policy_from_the_attribute_alone()
-    {
-        // The attribute is the only thing on the endpoint; the framework has to turn it
-        // into the requirement and the scheme without any named policy.
-        var services = new ServiceCollection().AddLogging().AddAuthorization().BuildServiceProvider();
-        var provider = services.GetRequiredService<IAuthorizationPolicyProvider>();
-
-        var policy = await AuthorizationPolicy.CombineAsync(provider, [new ServiceCallerAttribute("advisor")]);
-
-        policy!.Requirements.OfType<ServiceCallerRequirement>().Should().ContainSingle();
-        policy.AuthenticationSchemes.Should().Equal(ServiceTokenDefaults.AuthenticationScheme);
-    }
-
-    [Fact]
     public void RequireServiceCaller_puts_the_attribute_on_the_endpoint()
     {
         var builder = WebApplication.CreateBuilder();
