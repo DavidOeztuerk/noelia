@@ -1,6 +1,6 @@
 # ADR-0002 — Dienst-zu-Dienst-Rechte: Service-Tokens und Aufrufer je Endpoint
 
-**Status:** Vorgeschlagen, Warden-Freigabe Design (Delta-Runde approve), User-Freigabe ausstehend · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv
+**Status:** Angenommen (Warden-Freigabe Design nach Delta-Runde; Freigabe des Users am 2026-10-29 über projects-74, wörtlich „Ja“) · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv
 
 Fassung 2 arbeitet die Design-Runde des Wardens ein (approve-with-conditions,
 sechs Auflagen B1–B6 und vier Grenzen). Was sich geändert hat, steht unter
@@ -562,3 +562,11 @@ gehen als Auflagen in die Umsetzung:
 - **F4 → Q-0047.** Verglichen wird nur der Media-Type, sodass `; charset=utf-8`
   zulässig ist. Das Secret wird strikt als kanonisches Base64url dekodiert: die
   ungenutzten Bits der 43. Stelle sind 0, sonst Ablehnung.
+
+## Freigabe
+
+- Warden, Design-Phase: Runde 1 approve-with-conditions, Delta-Runde approve
+  (29.10.2026).
+- **User: freigegeben am 29.10.2026, Quelle „User über projects-74“**, auf eine
+  Zusammenfassung in fünf Punkten hin; die Antwort war wörtlich „Ja“. Gilt
+  für den Stand von Draft-PR #50 nach der Delta-Runde (Commit 3dd6930).
