@@ -17,20 +17,35 @@ zuschaltbar, keines in `UseDefaults()`:
   `NOELIA_M2M_CLIENT_SECRET`.
 
 Neue Bausteine: `ServiceClientSecret`, `IServiceTokenSource`,
-`ServiceTokenUnavailableException`, `ServiceTokenProtocol`, und die Properties
-`M2MConfiguration.Protocol` (Standard `Legacy`) und `M2MConfiguration.Audience`.
+`ServiceTokenUnavailableException`, `ServiceTokenProtocol`, `ServiceTokenCache`
+(öffentlich nur, damit der Container ihn als Singleton einsetzen kann; seine
+Mitglieder sind intern), und die Properties `M2MConfiguration.Protocol`
+(Standard `Legacy`) und `M2MConfiguration.Audience`.
 `IServiceTokenProvider` ist unverändert; `ServiceTokenProvider` kann zusätzlich
 `IServiceTokenSource`. Die 7.0-Konstruktoren von `ServiceTokenProvider` und
 `ServiceCommunicationManager` bleiben mit genau ihrer Signatur erhalten (ein gegen
 7.0 kompiliertes Assembly bindet weiter); der Container nimmt die neue
 Überladung. Keine neuen Pakete, die Budget-Tabelle bleibt.
 
-**Die einzige Verhaltensänderung an Bestehendem:** der Personen-Scheme und
-`JwtService` lehnen ein Token mit `typ = noelia-service+jwt` ab. Dieses Token
-erzeugt kein bestehender Aussteller; es gibt es erst durch
-`UseServiceTokenIssuer`. In einer gemischten Flotte 7.0.x/7.1 gilt die Sperre nur
-in Diensten ab 7.1: Dienst-Audiences und Personen-Audiences nie gleich benennen
-und erst alle Dienste auf 7.1 heben, dann den Aussteller einschalten.
+**Verhaltensänderungen an Bestehendem**, beide ohne Handlungsbedarf für einen
+Dienst, der die neuen Bausteine nicht nutzt:
+
+- Der Personen-Scheme und `JwtService` lehnen ein Token mit
+  `typ = noelia-service+jwt` ab. Dieses Token erzeugt kein bestehender
+  Aussteller; es gibt es erst durch `UseServiceTokenIssuer`. In einer gemischten
+  Flotte 7.0.x/7.1 gilt die Sperre nur in Diensten ab 7.1: Dienst-Audiences und
+  Personen-Audiences nie gleich benennen und erst alle Dienste auf 7.1 heben,
+  dann den Aussteller einschalten.
+- `AddServiceCommunication` registriert `IServiceTokenProvider` nur noch, wenn
+  noch keiner registriert ist. In 7.0 ersetzte es eine vorher registrierte
+  eigene Implementierung still; jetzt bleibt die eigene stehen. Wer sich darauf
+  verlassen hat, dass Noelias `ServiceTokenProvider` gewinnt, entfernt die eigene
+  Registrierung.
+
+**Grenze des Startschutzes:** `UseServiceCallers` prüft beim Start über einen
+`IStartupFilter`, dass die Pipeline `UseAuthorization()` aufruft. Ein Host ohne
+Web-Pipeline (ohne Startup-Filter) wird davon nicht erfasst; dort hätte eine Tür
+ohnehin keinen Endpoint, auf den sie antworten könnte.
 
 **Neuer Check `noelia.m2m.caller-policy`.** Er läuft immer und ist `NotApplicable`, solange
 nichts davon genutzt wird („Service callers are not in use“); das Dashboard zeigt
