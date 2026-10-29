@@ -1,7 +1,6 @@
-# G-0014 Stand (laufende Quest Q-0046)
+# G-0014 Stand
 
-- 2026-10-29 06:40: ADR-0002 Fassung 1 (8f67fce), Draft-PR #50 nach develop.
-- Warden Design-Runde 1: approve-with-conditions (B1–B6 + Grenzen) → Fassung 2 (c76de5b). Scopes Q-0047/Q-0048 per gate_plan nachgezogen (JwtService.cs, Dashboard-Tests).
-- Warden Delta-Runde: **approve**, Auflagen F1–F4 für die Umsetzung im ADR (3dd6930).
-- 06:50: Freigabe des Users über projects-74 angefragt (SendMessage). **Warten auf Antwort.** Keine weitere Design-Runde.
-- Nach Freigabe: ADR-Status auf „Angenommen“, Q-0046 submit; Q-0047 accept/start; Knight (Sonnet) TDD im Scope; dann Q-0048 (braucht Aussteller aus Q-0047 als Test-Helfer), Q-0049. Warden Code-Phase eine Runde. `monarch gate merge` nach develop (develop vorher/nachher grün). Danach Meldung an projects-74: Release 7.1.0 ist Sache des Users.
+- Q-0046 Design: ADR-0002 angenommen. Warden Runde 1 + Delta approve; **User-Freigabe 29.10.2026 über projects-74 („Ja“)**, vermerkt in ADR (53f5f08) und PR #50. Q-0046 submit → inreview.
+- **Q-0047 in_progress** (seit ~08:40): Knight (Sonnet) implementiert per TDD (Ausstellung, typ-Sperre). Danach: Orchestrator prüft Bericht + Diff, Tests selbst laufen lassen, push, submit.
+- **Q-0050** (CI-Trigger `branches: [main, develop]` für push und pull_request, Scope nur `.github/workflows/ci.yml`): angelegt, Entscheid projects-74 (a). Accept verweigert (eine aktive Quest je Projekt). **Reihenfolge bestätigt: Q-0047 submit → Q-0050 → Q-0048 → Q-0049.** Erste-Mal-Regel „develop vorher grün“: develop = main = dcafaca, CI auf main für dcafaca grün; erkennt gate merge das nicht → projects-74 melden, nicht umgehen.
+- Danach: Warden Code-Phase (eine Runde, inkl. ci.yml), `monarch gate merge G-0014`, Quests clearen, Meldung an projects-74. Release 7.1.0 macht der User.

@@ -3,7 +3,7 @@ id: Q-0046
 gate: G-0014
 kind: main
 rank: A
-state: in_progress
+state: in_review
 dod:
   - ADR deckt Ausstellung ab: Client-ID + gehashtes Secret je Dienst, 2 Rotations-Slots, kurze Laufzeit, Audience, Aufrufer-Claim, Token-Endpoint als einbindbarer Baustein
   - ADR deckt Empfänger-Policy je Endpoint ab: nur Aufrufer X, Y; einheitliches 404, für Nicht-Berechtigte nicht unterscheidbar (Lücke 'nur Rolle Service' ausgeschlossen)

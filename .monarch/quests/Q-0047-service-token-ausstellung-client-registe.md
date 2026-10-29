@@ -3,7 +3,7 @@ id: Q-0047
 gate: G-0014
 kind: main
 rank: A
-state: proposed
+state: in_review
 dod:
   - ADR-0002 Abschnitt 1 (Fassung 2) umgesetzt; Tests vorher rot, danach grün (TDD)
   - Jede Ablehnung (ID, Secret, Slot, Audience, Form, Content-Type, Größe, doppelte Felder, grant_type): byte-gleiche 401 invalid_client mit no-store; Längen-/Formprüfung vor dem Hashen
