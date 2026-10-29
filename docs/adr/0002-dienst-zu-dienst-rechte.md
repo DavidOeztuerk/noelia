@@ -272,8 +272,10 @@ verweigert `UseServiceCallers` den Start, wenn die eigene Audience gleich
 
 **Selbstprüfung.** Neuer Check `noelia.m2m.caller-policy`
 (`Category == Composition`, läuft also immer). Ohne eines der drei Module und
-ohne `[ServiceCaller]`-Endpoints liefert er `Pass` mit „nicht verwendet“ — 7.1
-ändert für bestehende Konsumenten kein Ergebnis. Sonst prüft er über die
+ohne `[ServiceCaller]`-Endpoints liefert er `NotApplicable` mit „nicht verwendet“,
+wie jeder andere Composition-Check ohne Prüfgegenstand (ein `Pass` behauptete
+eine Prüfung, die nicht stattfand); bestehende Konsumenten sehen eine Zeile
+mehr, keinen Befund. Sonst prüft er über die
 `EndpointDataSource` und den aufgelösten Container:
 1. Kein Endpoint trägt `[ServiceCaller]`/`RequireServiceCaller` **und**
    `AllowAnonymous` — eine Gruppe mit `.AllowAnonymous()` würde die Policy
@@ -507,7 +509,7 @@ Testplan (TDD, vorher rot):
   Fallback gleich. Minimal API und Controller. Dienst-Token am
   Personen-Endpoint → 401. Audit: je Ablehnung die richtige Grundklasse im
   Log, nie ein Token-Wert.
-- **Check:** ohne Module → Pass; `AllowAnonymous` + `ServiceCaller` → Fail;
+- **Check:** ohne Module → NotApplicable; `AllowAnonymous` + `ServiceCaller` → Fail;
   ein nach dem Dekorierer registrierter Handler, aus dem Container aufgelöst →
   Fail; Tür mit eigenem Rate-Limit ohne denselben am Fallback → Fail;
   Token-Endpoint ohne Rate-Limit → Warn.

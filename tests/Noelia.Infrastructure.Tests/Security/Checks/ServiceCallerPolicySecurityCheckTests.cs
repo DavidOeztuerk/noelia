@@ -24,7 +24,7 @@ public class ServiceCallerPolicySecurityCheckTests
     private const string CheckId = "noelia.m2m.caller-policy";
 
     [Fact]
-    public async Task Without_the_modules_and_without_doors_the_check_passes_as_not_in_use()
+    public async Task Without_the_modules_and_without_doors_the_check_is_not_applicable()
     {
         await using var host = await ServiceCallerHost.StartAsync(s =>
         {
@@ -35,7 +35,9 @@ public class ServiceCallerPolicySecurityCheckTests
 
         var result = await Run(host);
 
-        result.Status.Should().Be(SecurityCheckStatus.Pass);
+        // NotApplicable, like every other Composition check with nothing to look at: a
+        // Pass would claim a property was verified when nothing was examined.
+        result.Status.Should().Be(SecurityCheckStatus.NotApplicable);
         result.Summary.Should().Contain("not in use");
     }
 
@@ -292,7 +294,7 @@ public class ServiceCallerPolicySecurityCheckTests
             s.Map = endpoints => endpoints.MapGet("/plain", () => "x");
         });
 
-        (await Run(host)).Status.Should().Be(SecurityCheckStatus.Pass);
+        (await Run(host)).Status.Should().Be(SecurityCheckStatus.NotApplicable);
     }
 
     // ---- helpers ------------------------------------------------------------------

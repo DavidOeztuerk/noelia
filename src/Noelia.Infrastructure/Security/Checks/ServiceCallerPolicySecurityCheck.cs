@@ -17,8 +17,9 @@ namespace Noelia.Infrastructure.Security.Checks;
 /// <remarks>
 /// <c>Category == Composition</c>, so it runs whether or not the modules are composed: a
 /// door mapped in a service that never called <c>UseServiceCallers</c> is exactly the
-/// case it exists for. With nothing in use it passes and says so, which keeps 7.1 from
-/// changing the result for a service that does not use any of this.
+/// case it exists for. With nothing in use it answers NotApplicable, as every other
+/// Composition check does when it has nothing to examine: a Pass would claim a property
+/// it never looked at. A service that uses none of this sees one more line, not a finding.
 /// <para>
 /// Summaries name route patterns and module calls, never caller ids, policy names or
 /// any configured value.
@@ -53,7 +54,7 @@ internal sealed class ServiceCallerPolicySecurityCheck(
         if (!callersComposed && !issuerComposed && doors.Length == 0)
         {
             return Task.FromResult(Result(
-                SecurityCheckStatus.Pass,
+                SecurityCheckStatus.NotApplicable,
                 "Service callers are not in use: no module composed and no service door mapped."));
         }
 

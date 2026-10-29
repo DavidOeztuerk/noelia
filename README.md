@@ -1229,7 +1229,7 @@ nothing the caller sent is ever written.
 
 Rate limits, output caching and CORS go on the **group**, never on one door:
 anything that answers differently on a door than on the fallback tells a caller
-which paths exist. The check `noelia.m2m.caller-policy` (it passes when nothing
+which paths exist. The check `noelia.m2m.caller-policy` (it is not applicable when nothing
 here is in use, so the dashboard shows one more row and no new warning) verifies
 the fallback, the 404 handler and the single token endpoint.
 
@@ -1355,7 +1355,7 @@ var latest = app.Services.GetRequiredService<ISecurityCheckReport>().Latest;
 | `noelia.ratelimit.degradation` | `RateLimiting` | the limiter is enabled and never fails open |
 | `noelia.revocation.degradation` | `Jwt` | revocation is present and was not explicitly disabled |
 | `noelia.dashboard.operator-access` | `Dashboard` | an explicit operator policy and audit trail protect the page |
-| `noelia.m2m.caller-policy` | composition (always) | service doors have their fallback, the 404 handler is still in front, and one rate-limited token endpoint exists where tokens are issued; passes when none of it is in use |
+| `noelia.m2m.caller-policy` | composition (always) | service doors have their fallback, the 404 handler is still in front, and one rate-limited token endpoint exists where tokens are issued; not applicable when none of it is in use |
 
 Only checks belonging to `NoeliaComposition.Included` run; composition itself is
 always checked. Results use `Pass`, `Warning`, `Fail` or `NotApplicable` and

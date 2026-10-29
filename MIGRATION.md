@@ -32,7 +32,7 @@ erzeugt kein bestehender Aussteller; es gibt es erst durch
 in Diensten ab 7.1: Dienst-Audiences und Personen-Audiences nie gleich benennen
 und erst alle Dienste auf 7.1 heben, dann den Aussteller einschalten.
 
-**Neuer Check `noelia.m2m.caller-policy`.** Er läuft immer und ist `Pass`, solange
+**Neuer Check `noelia.m2m.caller-policy`.** Er läuft immer und ist `NotApplicable`, solange
 nichts davon genutzt wird („Service callers are not in use“); das Dashboard zeigt
 also eine Zeile mehr, aber keine neue Warnung.
 
