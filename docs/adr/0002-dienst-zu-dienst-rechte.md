@@ -1,6 +1,6 @@
 # ADR-0002 — Dienst-zu-Dienst-Rechte: Service-Tokens und Aufrufer je Endpoint
 
-**Status:** Angenommen (Warden-Freigabe Design nach Delta-Runde; Freigabe des Users am 2026-10-29 über projects-74, wörtlich „Ja“) · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv
+**Status:** Angenommen (Warden-Freigabe Design nach Delta-Runde; Freigabe des Users am 2026-10-29 über projects-74, wörtlich „Ja“) · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv · **umgesetzt in 7.1.0 (G-0014: Q-0047–Q-0049)**
 
 Fassung 2 arbeitet die Design-Runde des Wardens ein (approve-with-conditions,
 sechs Auflagen B1–B6 und vier Grenzen). Was sich geändert hat, steht unter

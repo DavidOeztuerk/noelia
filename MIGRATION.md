@@ -1,3 +1,61 @@
+# Noelia 7.0.1 → 7.1.0
+
+Rein additiv. Es ist nichts zu tun.
+
+**Neu: Dienst-zu-Dienst-Rechte** ([ADR-0002](docs/adr/0002-dienst-zu-dienst-rechte.md),
+README „Service-to-service rights (M2M)“). Drei neue Module, jedes für sich
+zuschaltbar, keines in `UseDefaults()`:
+
+- `UseServiceTokenIssuer(…)` mit `MapServiceTokenEndpoint()` – der Aussteller
+  (identity); OAuth-2.0-Client-Credentials, ein Token je Audience, fünf Minuten
+  gültig. Braucht `UseJwt(jwt => jwt.Issue(…))`.
+- `UseServiceCallers(audience)` mit `RequireServiceCaller(…)` /
+  `[ServiceCaller(…)]` und `MapServiceFallback()` – der Empfänger; jede
+  Ablehnung ist dasselbe 404, der Grund steht nur in Log und Metrik.
+- `UseServiceTokenClient()` mit `AddServiceToken(audience)` – der Aufrufer;
+  liest `NOELIA_M2M_TOKEN_ENDPOINT`, `NOELIA_M2M_CLIENT_ID`,
+  `NOELIA_M2M_CLIENT_SECRET`.
+
+Neue Bausteine: `ServiceClientSecret`, `IServiceTokenSource`,
+`ServiceTokenUnavailableException`, `ServiceTokenProtocol`, und die Properties
+`M2MConfiguration.Protocol` (Standard `Legacy`) und `M2MConfiguration.Audience`.
+`IServiceTokenProvider` ist unverändert; `ServiceTokenProvider` kann zusätzlich
+`IServiceTokenSource`. Keine neuen Pakete, die Budget-Tabelle bleibt.
+
+**Die einzige Verhaltensänderung an Bestehendem:** der Personen-Scheme und
+`JwtService` lehnen ein Token mit `typ = noelia-service+jwt` ab. Dieses Token
+erzeugt kein bestehender Aussteller; es gibt es erst durch
+`UseServiceTokenIssuer`. In einer gemischten Flotte 7.0.x/7.1 gilt die Sperre nur
+in Diensten ab 7.1: Dienst-Audiences und Personen-Audiences nie gleich benennen
+und erst alle Dienste auf 7.1 heben, dann den Aussteller einschalten.
+
+**Neuer Check `noelia.m2m.caller-policy`.** Er läuft immer und ist `Pass`, solange
+nichts davon genutzt wird („Service callers are not in use“); das Dashboard zeigt
+also eine Zeile mehr, aber keine neue Warnung.
+
+**Umstieg von `Legacy` auf `ClientCredentials`**, ein Dienst nach dem anderen:
+
+1. Alle Dienste auf 7.1.0 heben. Noch nichts einschalten.
+2. identity: `UseJwt(jwt => jwt.Issue(…))`, `UseServiceTokenIssuer(…)`,
+   `MapServiceTokenEndpoint().RequireRateLimiting(…)`; für jeden Aufrufer ein
+   Secret erzeugen (`ServiceClientSecret.Generate(id).ToEnvironment()`), den Hash
+   in identity, das Secret nur beim Aufrufer ablegen.
+3. Empfänger: `UseServiceCallers(audience)`, die Türen mit
+   `RequireServiceCaller(…)` und `MapServiceFallback()`. Eine so gesicherte Tür
+   nimmt nur Dienst-Tokens an, nicht das alte Token. Türen also erst umstellen,
+   wenn ihre Aufrufer Schritt 4 hinter sich haben, oder die neue Tür auf einem
+   eigenen Pfad neben der alten aufbauen.
+4. Aufrufer: `UseServiceTokenClient()` und `AddServiceToken("ziel")`. Wer
+   `IServiceCommunicationManager` nutzt, braucht nichts weiter: sobald das Modul
+   komponiert ist, holt er das Token seines Ziels. **Achtung:** in diesem Modus
+   gibt es keinen Rückfall mehr auf `ServiceCommunication:BearerToken` /
+   `SERVICE_COMMUNICATION_BEARER`; ist kein Token zu bekommen, geht kein Aufruf raus.
+5. Wenn alles läuft: die alten Legacy-Einstellungen (`M2M:TokenEndpoint` des alten
+   Dienstes, gemeinsames Bearer-Secret) entfernen.
+
+Der alte Weg (`Protocol = Legacy`) bleibt unverändert und ist nicht `[Obsolete]`;
+er ist nur nicht für neue Dienste gedacht.
+
 # Noelia 7.0.0 → 7.0.1
 
 Eine Korrekturversion, kein Bruch. Es ist nichts zu tun.
