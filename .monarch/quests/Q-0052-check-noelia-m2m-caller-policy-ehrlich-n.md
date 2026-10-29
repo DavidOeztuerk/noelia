@@ -3,7 +3,7 @@ id: Q-0052
 gate: G-0014
 kind: side
 rank: A
-state: in_review
+state: cleared
 dod:
   - Ohne Module und ohne Türen liefert der Check NotApplicable (Konvention aller Composition-Checks), Test vorher rot
   - Demo-Probe SecurityHeadersPackageTests erwartet noelia.m2m.caller-policy; security-check-expectations.json führt ihn als Composition; sonst keine Erwartung geändert
@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 5, weekly_pct: 0.6, gold_usd: 0 }
 boss: "CI-Job demo auf PR #50 grün"
+board: { pr: 50 }
 ---
 # Check noelia.m2m.caller-policy ehrlich: NotApplicable ohne Nutzung; Demo-Erwartungen (Probe, security-check-expectations.json) nachziehen

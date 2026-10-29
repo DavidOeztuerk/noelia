@@ -3,7 +3,7 @@ id: Q-0047
 gate: G-0014
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - ADR-0002 Abschnitt 1 (Fassung 2) umgesetzt; Tests vorher rot, danach grün (TDD)
   - Jede Ablehnung (ID, Secret, Slot, Audience, Form, Content-Type, Größe, doppelte Felder, grant_type): byte-gleiche 401 invalid_client mit no-store; Längen-/Formprüfung vor dem Hashen
@@ -15,5 +15,6 @@ scope:
   exclude: []
 estimate: { session_pct: 25, weekly_pct: 3, gold_usd: 0 }
 boss: "ServiceTokenIssuer-Suite grün in CI, dotnet build ohne Warnungen, PackageDependencyBudgetTests unverändert grün"
+board: { pr: 50 }
 ---
 # Service-Token-Ausstellung: Client-Register mit gehashten Secrets, 2 Slots, Token-Endpoint-Baustein

@@ -3,7 +3,7 @@ id: Q-0049
 gate: G-0014
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - ADR-0002 Abschnitte 3-5 umgesetzt; Tests vorher rot, danach grün (TDD)
   - Ein Token je Audience, nur im Prozess gecacht, nie IDistributedCache; Fehlschlag wirft, kein unauthentifizierter Aufruf
@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 20, weekly_pct: 2.5, gold_usd: 0 }
 boss: "End-to-end M2M-Test (Client holt Token, Empfänger lässt nur Aufrufer X durch) grün in CI; develop vor und nach gate merge grün"
+board: { pr: 50 }
 ---
 # Client: ServiceTokenProvider im Modus ClientCredentials, IServiceTokenSource, AddServiceToken, Doku, MIGRATION, 7.1.0

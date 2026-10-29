@@ -1,11 +1,11 @@
-# G-0014 Stand (11:48, 29.10.)
+# G-0014 Stand (12:00, 29.10.) — ABGESCHLOSSEN
 
-Quests Q-0046..Q-0052 alle **inreview**. Branch gepusht bis 4985fbd. PR #50 (Draft → develop) **CI komplett grün** (Run 40859842598 auf 5d6dcc4: build, vulnerabilities, demo).
-- Q-0051 (b557f60): Demo- und README-Pin 7.1.0 (Ursache CI-demo rot: Pin 7.0.1 vs VersionPrefix 7.1.0; Muster fd8c20c/ab78281).
-- Q-0052 (5d6dcc4): Demo-Probe + demo/eng/security-check-expectations.json um noelia.m2m.caller-policy; Check ohne Nutzung NotApplicable statt Pass (Konvention), ADR/MIGRATION/README angepasst. Test vorher rot.
-- projects-74 über „wieder grün“ informiert (11:45).
+- PR #50 per `monarch gate merge G-0014` nach develop gemergt: Squash **60f07436**. develop-Lauf 40861542494 (push) grün: build, vulnerabilities, demo.
+- Warden Code-Phase: approve (PR-Kommentar 6494762497) + Bestätigung Delta auf Head a68b7c0 (6494793675), weil gate merge einen Warden-Lauf nach dem Head-Commit verlangt (eigener Fehler: nach dem Review noch committet).
+- Q-0046..Q-0053 verifiziert und gecleart (`monarch evidence sync`).
+- Lokal unversioniert im Worktree: .monarch-Status nach Merge (quest pr-Links, Verdict, Clear, Ledger) — gehört in den nächsten Gate-/Chore-Weg nach develop, nicht direkt pushbar.
 
-**Läuft:** Warden Code-Phase (eine Runde, Sonnet) über dcafaca..HEAD.
-**Danach:** Befunde nach ADR-0011 einordnen; Blocker per gate_plan-Quest fixen (inreview-Quests sind nicht überschreibbar); PR #50 ready; `monarch gate merge G-0014` (Erste-Mal-Regel develop=main=dcafaca; erkennt gate merge das nicht → projects-74, nicht umgehen); develop-Lauf nachher abwarten; verify/clear; Meldung projects-74 (Release 7.1.0 = User; CLAUDE.md-Versionszeile = Release-Schritt).
-Mana 11:46: 5h 7 %, 7d 53 % (Richtwert ~49 % → >5 pp drüber ab 54 % melden).
-Selbstkritik: Q-0049 zwei Vergleichsdateien unter $CLAUDE_JOB_DIR/tmp (außerhalb Scope).
+Offen für den User:
+- Release 7.1.0: develop → main mergen, GitHub-Release v7.1.0 (publish.yml prüft VersionPrefix 7.1.0 = gesetzt). CLAUDE.md nennt noch „version 7.0.1“ (Release-Schritt, Skill noelia-release). Demo-Pin und README-Pin stehen schon auf 7.1.0.
+- gitleaks-Testvektoren in tests/…/ServiceTokens/ServiceTokenFixture.cs: Umbenennung (KnownVector/OtherVector) vs. begründetes `gitleaks:allow` — Entscheidung User (Warden: Follow-up).
+- Danach WT Q-0043 als „Übernahme Noelia 7.1“ neu zuschneiden (RECAP Schritt 3b).
