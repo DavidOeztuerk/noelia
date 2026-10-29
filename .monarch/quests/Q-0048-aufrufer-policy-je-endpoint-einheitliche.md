@@ -3,7 +3,7 @@ id: Q-0048
 gate: G-0014
 kind: main
 rank: A
-state: proposed
+state: in_review
 dod:
   - ADR-0002 Abschnitt 2 (Fassung 2) umgesetzt; Tests vorher rot, danach grün (TDD)
   - Matrix mit voller UseNoelia-Kette: berechtigt 2xx; alle Ablehnungsfälle des Testplans 404 byte-gleich zu nicht existierendem Pfad derselben Gruppe (auch mit UseStatusCodePages), Minimal API und Controller

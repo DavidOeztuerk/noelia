@@ -3,7 +3,7 @@ id: Q-0049
 gate: G-0014
 kind: main
 rank: A
-state: proposed
+state: in_review
 dod:
   - ADR-0002 Abschnitte 3-5 umgesetzt; Tests vorher rot, danach grün (TDD)
   - Ein Token je Audience, nur im Prozess gecacht, nie IDistributedCache; Fehlschlag wirft, kein unauthentifizierter Aufruf
