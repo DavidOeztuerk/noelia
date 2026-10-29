@@ -1,6 +1,6 @@
 # ADR-0002 — Dienst-zu-Dienst-Rechte: Service-Tokens und Aufrufer je Endpoint
 
-**Status:** Vorgeschlagen · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv
+**Status:** Vorgeschlagen, Warden-Freigabe Design (Delta-Runde approve), User-Freigabe ausstehend · **Datum:** 2026-10-29 · **Fassung:** 2 · **Gate:** G-0014 (Rank A, `auth`) · **Ziel:** 7.1.0, rein additiv
 
 Fassung 2 arbeitet die Design-Runde des Wardens ein (approve-with-conditions,
 sechs Auflagen B1–B6 und vier Grenzen). Was sich geändert hat, steht unter
@@ -421,7 +421,7 @@ verweigert; bereits ausgestellte gelten bis zu ihrem `exp`.
   seine eigene Personen-Audience und kann fremde nicht prüfen.
 - **`Token-Expired`-Header.** Der Personen-Scheme setzt bei einem abgelaufenen,
   sonst gültigen Personen-Token `Token-Expired: true`
-  (`ServiceCollectionExtensions.cs:465-470`). Er läuft in `UseAuthentication`
+  (`ServiceCollectionExtensions.cs:466-470`). Er läuft in `UseAuthentication`
   für jeden Pfad, ist an Tür und Fallback also gleich und verrät nichts über
   Türen — wohl aber dem Inhaber, dass sein Token abgelaufen ist. Akzeptiert;
   im Test festgehalten.
@@ -538,3 +538,27 @@ Design-Runde 1 (29.10.2026): approve-with-conditions. Eingearbeitet:
 | 9 | Rate-Limit am Token-Endpoint | Check Punkt 4 (Warn) |
 | 10 | Zusammengeführter Principal | §2 Mechanik |
 | 11–15 | Check ohne Module, Testplan, Quest-Abhängigkeiten, Zähltests | §2 Selbstprüfung, Testplan, Quest-Tabelle |
+
+Delta-Runde (29.10.2026): **approve**, keine Blocker. Vier Präzisierungen
+gehen als Auflagen in die Umsetzung:
+
+- **F1 → Q-0048.** Ohne `Authorization`-Header feuert `OnAuthenticationFailed`
+  nicht. `no_token` leitet der Dekorierer ab: Ergebnis ohne Authentifizierung
+  und ohne Fehlereintrag in `HttpContext.Items`. Ein doppelter Header und ein
+  Schema, das nicht `Bearer` ist, zählen als `invalid_token`, nicht als
+  `no_token`. `other_policy` zeigt nach außen nur das 404. „Alle anderen
+  Endpoints wie bisher“ heißt: Endpoints, deren Policy **keine**
+  `ServiceCallerRequirement` enthält.
+- **F2 → Q-0048.** `RequireServiceCaller`/`[ServiceCaller]` und
+  `MapServiceFallback` legen ein internes Metadatum mit dem Präfix des
+  Fallbacks ab. Darüber ordnet der Check eine Tür ihrem Fallback zu, mit
+  Vergleich nach Metadaten-Typ und Policy-Name. Controller-Türen deckt ein
+  `MapServiceFallback("/internal")` mit ausdrücklichem Präfix ab. Eine Tür ohne
+  passenden Fallback bleibt Warn.
+- **F3 → Q-0049.** Im Modus `ClientCredentials` wirft auch der Zweig „M2M an,
+  aber kein Provider“ (`ServiceCommunicationManager.cs:390`), statt in den
+  `BearerToken`-Rückfall zu laufen. Test: kein Provider ergibt eine Exception
+  und keinen Request.
+- **F4 → Q-0047.** Verglichen wird nur der Media-Type, sodass `; charset=utf-8`
+  zulässig ist. Das Secret wird strikt als kanonisches Base64url dekodiert: die
+  ungenutzten Bits der 43. Stelle sind 0, sonst Ablehnung.
