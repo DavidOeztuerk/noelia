@@ -14,6 +14,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Noelia.Infrastructure.Security;
 using Noelia.Infrastructure.Security.Keys;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Noelia.Infrastructure.Resilience;
 using Noelia.Infrastructure.Security.Encryption;
 using Noelia.Infrastructure.Security.InputSanitization;
@@ -442,6 +443,11 @@ public static class ServiceCollectionExtensions
                 ClockSkew = TimeSpan.Zero
               }
               : keys.ValidationParameters(issuer, audience);
+
+          // Both paths above, ring and authority, end up here, so the one call covers
+          // them: a service token carries the same issuer and key as a person's and
+          // differs only in its typ header.
+          ServiceTokenTypeGuard.Apply(opts.TokenValidationParameters);
 
           opts.TokenValidationParameters.NameClaimType = JwtRegisteredClaimNames.Sub;
           opts.TokenValidationParameters.RoleClaimType = System.Security.Claims.ClaimTypes.Role;
