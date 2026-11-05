@@ -63,6 +63,12 @@ internal sealed class ServiceCallerHost : IAsyncDisposable
         public Action<NoeliaBuilder>? Compose { get; set; }
         public Action<IServiceCollection>? Services { get; set; }
         public Action<IEndpointRouteBuilder>? Map { get; set; }
+
+        /// <summary>
+        /// Steps a service adds behind Noelia's chain. The default chain has neither
+        /// revocation nor the principal in it, so a door tested without this never meets them.
+        /// </summary>
+        public Action<IApplicationBuilder>? AfterChain { get; set; }
     }
 
     public static async Task<ServiceCallerHost> StartAsync(Action<Settings>? configure = null)
@@ -115,6 +121,7 @@ internal sealed class ServiceCallerHost : IAsyncDisposable
 
                     app.UseRouting();
                     app.UseNoelia(new Env(), "billing");
+                    settings.AfterChain?.Invoke(app);
                     app.UseEndpoints(endpoints =>
                     {
                         if (settings.Map is not null)
