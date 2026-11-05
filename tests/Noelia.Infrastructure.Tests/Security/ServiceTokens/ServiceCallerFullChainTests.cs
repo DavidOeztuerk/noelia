@@ -306,13 +306,50 @@ public class ServiceCallerFullChainTests
     [InlineData(PersonSchemeFirst)]
     public async Task An_identity_nobody_authenticated_next_to_a_service_is_not_a_person(string door)
     {
-        await using var host = await Chain();
+        // Without permission enforcement, because this is about the steps of ADR-0003.
+        // PermissionMiddleware reads only the first identity, and the merge can put the
+        // unauthenticated one there; it then answers 401, which fails closed and is a
+        // limit of that step, named in the ADR.
+        await using var host = await Chain(permissions: false);
 
         using var response = await host.Client.SendAsync(
             await BothAt(door, "person-token", HeaderPersonHandler.Unauthenticated));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync()).Should().Be(NoPrincipal);
+    }
+
+    [Fact]
+    public async Task A_revoked_person_behind_an_identity_nobody_authenticated_is_still_found()
+    {
+        var store = await StoreRevoking("revoked-token");
+        var issuedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal([
+                new ClaimsIdentity([new Claim("note", "nobody vouches for this")]),
+                new ClaimsIdentity(
+                    [new Claim("client_id", "advisor"), new Claim("jti", "service-token"), new Claim("iat", issuedAt)],
+                    ServiceTokenDefaults.AuthenticationScheme),
+                new ClaimsIdentity(
+                    [new Claim("sub", Subject), new Claim("jti", "revoked-token"), new Claim("iat", issuedAt)],
+                    HeaderPersonHandler.SchemeName)])
+        };
+        context.Response.Body = new MemoryStream();
+
+        var next = false;
+        await new TokenRevocationMiddleware(
+                _ =>
+                {
+                    next = true;
+                    return Task.CompletedTask;
+                },
+                store,
+                NullLogger<TokenRevocationMiddleware>.Instance)
+            .InvokeAsync(context);
+
+        next.Should().BeFalse();
+        context.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
     }
 
     // ---- the check per record ------------------------------------------------
@@ -400,14 +437,22 @@ public class ServiceCallerFullChainTests
         bool principal = true,
         ITokenRevocationEvaluator? evaluator = null,
         IPrincipalFactory? factory = null,
-        IResourceAuthorizationService? resources = null) =>
+        IResourceAuthorizationService? resources = null,
+        bool permissions = true) =>
         StartAsync(settings =>
         {
             settings.Controllers = resources is not null;
-            settings.Compose = noelia => noelia
-                .UseJwt(jwt => jwt.VerifyOnly(KeyPair.PublicKey, KeyPair.Kid))
-                .UseServiceCallers(ThisAudience)
-                .Use(NoeliaModule.Principal);
+            settings.Compose = noelia =>
+            {
+                noelia
+                    .UseJwt(jwt => jwt.VerifyOnly(KeyPair.PublicKey, KeyPair.Kid))
+                    .UseServiceCallers(ThisAudience)
+                    .Use(NoeliaModule.Principal);
+                if (!permissions)
+                {
+                    noelia.Without(NoeliaModule.PermissionEnforcement, "the test is about the steps behind it");
+                }
+            };
             settings.Services = services =>
             {
                 services.AddSingleton(evaluator ?? new InMemoryTokenRevocationStore());

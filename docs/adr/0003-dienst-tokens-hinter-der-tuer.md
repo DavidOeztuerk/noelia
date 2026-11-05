@@ -24,7 +24,8 @@ durch**. Der Fix schließt das mit.
 
 Was sich für Nutzer ändert: Nichts an den Regeln für Personen. Ein Personen-Token
 ohne `sub` wird weiter abgelehnt, ein widerrufenes Token auch. An einer Tür gibt es
-keine handelnde Person: `ICurrentPrincipal.Current` ist dort `null`.
+keine handelnde Person: `ICurrentPrincipal.Current` ist dort `null`, außer die Anfrage
+trägt neben dem Dienst zusätzlich eine angemeldete Person.
 
 ## Frage
 
@@ -90,7 +91,9 @@ dabei, wird der `IResourceAuthorizationService` mit genau dieser Person gefragt 
 nie mit dem Dienst. Die Regel sitzt in der Middleware, weil auch dieser Port ersetzbar
 ist.
 
-**6. `ICurrentPrincipal.Current` ist an einer Tür `null`.** Gründe:
+**6. `ICurrentPrincipal.Current` ist an einer Tür `null`**, außer die Anfrage trägt neben
+dem Dienst eine authentifizierte Person: Dann ist `Current` diese Person. Gründe für
+`null`:
 
 - ADR-0002 verlangt: „kein Codepfad soll einen Dienst für eine Person halten“.
 - `Principal.Subject` ist Pflicht, ein Dienst hat keinen.
@@ -165,6 +168,13 @@ ein gültiges Dienst-Token. Der Personen-Anteil schließt es.
   der Policy-Prüfung noch leer, deshalb lehnen `ActingForCompany` und `ActingAsSelf`
   dort jede Person ab (Laufzeitprobe: 403). Das hat mit Türen nichts zu tun, blockiert
   7.1.1 nicht und ist als eigenes Issue erfasst.
+- **`PermissionMiddleware` liest nur die erste Identity.** Meldet ein fremdes Scheme
+  `Success` mit einer Identity, die niemand authentifiziert hat, und nennt eine Tür dieses
+  Scheme neben dem Dienst-Scheme, kann die Zusammenführung sie nach vorn stellen. Dann
+  antwortet dieser Schritt mit 401, obwohl der Dienst berechtigt ist (Laufzeitprobe). Das
+  scheitert geschlossen und setzt einen Fehler im fremden Scheme voraus. Die Änderung
+  träfe die Standardkette aller Konsumenten und ist deshalb ein eigenes Issue. Der Test
+  dieses Falls läuft darum ohne `PermissionEnforcement`.
 - **Trennung liegt beim Betreiber.** Ein Dienst, der ein eigenes Scheme oder eine eigene
   `IClaimsTransformation` so baut, dass eine Identity `AuthenticationType =
   "NoeliaService"` trägt, hebt die Trennung auf. Das ist Code des Betreibers und liegt
