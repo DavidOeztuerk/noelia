@@ -1,4 +1,5 @@
 using Noelia.Abstractions.Security;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,13 @@ namespace Noelia.Infrastructure.Security;
 /// <see cref="ITokenRevocationEvaluator"/>. A token missing any of the first
 /// three cannot be checked and is refused: an unidentifiable token must not be
 /// the one that slips through.
+/// <para>
+/// This is about people's tokens. A service token has no revocation, its short life
+/// stands in for one (ADR-0002), so the identity the service scheme authenticated is
+/// left out before anything is read. That is decided by which scheme verified the
+/// identity and never by a missing <c>sub</c>. A person beside a service is checked
+/// as any other person (ADR-0003).
+/// </para>
 /// </remarks>
 public class TokenRevocationMiddleware
 {
@@ -35,13 +43,15 @@ public class TokenRevocationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (context.User.Identity?.IsAuthenticated != true)
+        var person = ServiceCallerIdentity.PersonPartOf(context.User);
+
+        if (person.Identity?.IsAuthenticated != true)
         {
             await _next(context);
             return;
         }
 
-        if (!TryReadToken(context.User, out var token))
+        if (!TryReadToken(person, out var token))
         {
             _logger.LogWarning(
                 "Authenticated principal without jti/sub/iat claims on {Path}; refusing.",

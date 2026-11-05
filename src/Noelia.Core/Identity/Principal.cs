@@ -7,6 +7,10 @@ namespace Noelia.Core.Identity;
 /// Built once from the validated token at the middleware boundary. Read the
 /// principal from <see cref="ICurrentPrincipal"/> downstream rather than
 /// inspecting claims again.
+/// <para>
+/// Always a person. A service calling a door has no principal; the handler of a door
+/// that wants to know who called reads <c>HttpContext.User</c>.
+/// </para>
 /// </remarks>
 public sealed record Principal
 {

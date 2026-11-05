@@ -7,12 +7,25 @@ namespace Noelia.Core.Identity;
 /// </summary>
 public interface ICurrentPrincipal
 {
-    /// <summary><c>null</c> when the request is not authenticated.</summary>
+    /// <summary>
+    /// The person behind the request, or <c>null</c> when no person stands behind it.
+    /// </summary>
+    /// <remarks>
+    /// <c>null</c> on an anonymous request, and on a service-to-service door: a
+    /// service is authenticated but it is not a person, and nothing here may take it
+    /// for one. Should a request carry a person beside the service, this is that
+    /// person. The caller of a door is in <c>HttpContext.User</c>.
+    /// </remarks>
     Principal? Current { get; }
 }
 
 public static class CurrentPrincipalExtensions
 {
+    /// <summary>Whether a person stands behind the request.</summary>
+    /// <remarks>
+    /// False on a service-to-service door, although that request is authenticated.
+    /// <c>HttpContext.User</c> answers the other question.
+    /// </remarks>
     public static bool IsAuthenticated(this ICurrentPrincipal accessor) =>
         accessor.Current is not null;
 
@@ -21,13 +34,15 @@ public static class CurrentPrincipalExtensions
     /// </summary>
     /// <remarks>
     /// For code behind <c>[Authorize]</c>, where an anonymous request is a wiring
-    /// mistake rather than a runtime case.
+    /// mistake rather than a runtime case. It throws on a service-to-service door as
+    /// well, which is what keeps code written for people from running for a service.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The request is anonymous.</exception>
+    /// <exception cref="InvalidOperationException">No person stands behind the request.</exception>
     public static Principal Require(this ICurrentPrincipal accessor) =>
         accessor.Current ?? throw new InvalidOperationException(
             "No principal on this request. Is [Authorize] or the principal "
-            + "middleware missing?");
+            + "middleware missing, or is this a door a service calls? "
+            + "A service has no principal.");
 
     /// <summary>
     /// Gets the tenant when the caller acts for a company. Anonymous callers and

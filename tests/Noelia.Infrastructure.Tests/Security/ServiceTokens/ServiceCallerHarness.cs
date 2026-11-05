@@ -63,6 +63,12 @@ internal sealed class ServiceCallerHost : IAsyncDisposable
         public Action<NoeliaBuilder>? Compose { get; set; }
         public Action<IServiceCollection>? Services { get; set; }
         public Action<IEndpointRouteBuilder>? Map { get; set; }
+
+        /// <summary>
+        /// Steps a service adds behind Noelia's chain. The default chain has neither
+        /// revocation nor the principal in it, so a door tested without this never meets them.
+        /// </summary>
+        public Action<IApplicationBuilder>? AfterChain { get; set; }
     }
 
     public static async Task<ServiceCallerHost> StartAsync(Action<Settings>? configure = null)
@@ -115,6 +121,7 @@ internal sealed class ServiceCallerHost : IAsyncDisposable
 
                     app.UseRouting();
                     app.UseNoelia(new Env(), "billing");
+                    settings.AfterChain?.Invoke(app);
                     app.UseEndpoints(endpoints =>
                     {
                         if (settings.Map is not null)
@@ -228,10 +235,23 @@ internal static class Wire
         string audience = ServiceCallerHost.ThisAudience,
         string type = ServiceTokenDefaults.TokenType,
         TimeSpan? lifetime = null,
-        string issuer = Issuer)
+        string issuer = Issuer,
+        string? subject = null,
+        string? tokenId = null)
     {
         var now = DateTime.UtcNow;
         var expires = lifetime ?? TimeSpan.FromMinutes(5);
+        var claims = new Dictionary<string, object> { ["client_id"] = client };
+        if (subject is not null)
+        {
+            claims["sub"] = subject;
+        }
+
+        if (tokenId is not null)
+        {
+            claims["jti"] = tokenId;
+        }
+
         return Sign(new SecurityTokenDescriptor
         {
             Issuer = issuer,
@@ -240,16 +260,34 @@ internal static class Wire
             IssuedAt = expires < TimeSpan.Zero ? now + expires - TimeSpan.FromMinutes(5) : now,
             Expires = now + expires,
             TokenType = type,
-            Claims = new Dictionary<string, object> { ["client_id"] = client }
+            Claims = claims
         });
     }
 
-    /// <summary>A person's token as the person scheme accepts it, optionally with a self-set client_id.</summary>
-    public static string Person(string? clientIdClaim = null, TimeSpan? lifetime = null)
+    /// <summary>
+    /// A person's token as the person scheme accepts it, optionally with a self-set
+    /// client_id. A null subject leaves <c>sub</c> out, which is the case the revocation
+    /// check and the principal have to go on refusing.
+    /// </summary>
+    public static string Person(
+        string? clientIdClaim = null,
+        TimeSpan? lifetime = null,
+        string? subject = "person-1",
+        string? tokenId = null)
     {
         var now = DateTime.UtcNow;
         var expires = lifetime ?? TimeSpan.FromMinutes(5);
-        var claims = new Dictionary<string, object> { ["sub"] = "person-1" };
+        var claims = new Dictionary<string, object>();
+        if (subject is not null)
+        {
+            claims["sub"] = subject;
+        }
+
+        if (tokenId is not null)
+        {
+            claims["jti"] = tokenId;
+        }
+
         if (clientIdClaim is not null)
         {
             claims["client_id"] = clientIdClaim;
