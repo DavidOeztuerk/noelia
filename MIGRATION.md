@@ -1,3 +1,34 @@
+# Noelia 7.1.0 → 7.1.1
+
+Keine neue öffentliche API. Es ist nichts umzustellen.
+
+**Behoben: Türen hinter Widerruf und Principal** ([ADR-0003](docs/adr/0003-dienst-tokens-hinter-der-tuer.md),
+#57). In 7.1.0 endete jeder berechtigte Aufruf einer Tür in `401`, sobald ein Dienst
+`UseTokenRevocation()` oder `UseNoeliaPrincipal()` hinter `UseAuth()` hängte. An einer
+Controller-Tür konnte `UseResourceAuthorization()` dasselbe tun. Die Standardkette
+enthält keinen der drei Schritte und war nicht betroffen. Alle drei lassen nun die
+Identity aus, die das Scheme `NoeliaService` geprüft hat. Entschieden wird am Scheme,
+nie an einem fehlenden `sub`: Ein Personen-Token ohne `sub` wird weiter abgelehnt.
+
+**Behoben, sicherheitsrelevant: widerrufene Person neben einem Dienst.** Nennt eine
+Policy zwei Schemes, stehen Person und Dienst in einem Principal, zum Beispiel bei
+Cookie und Dienst-Token an einer Tür. Stand die Dienst-Identity vorn, las
+`TokenRevocationMiddleware` `jti` und `iat` vom Dienst-Token und `sub` von der Person.
+Ein widerrufenes Personen-Token fiel dadurch nicht auf. Wer so einen Aufbau betreibt,
+sollte 7.1.1 zügig übernehmen. Dienste mit einem Scheme je Tür waren nicht betroffen.
+
+**Verhalten an einer Tür, jetzt festgelegt:** `ICurrentPrincipal.Current` ist `null`,
+außer neben dem Dienst steht eine authentifizierte Person. `IsAuthenticated()` ist
+dort `false`, `Require()` wirft, und die Meldung nennt diesen Fall. Der aufrufende
+Dienst steht in `HttpContext.User`. Der Dienst ist nie ein `Principal`, und
+`IResourceAuthorizationService` bekommt ihn nicht mehr zu sehen.
+
+Eine eigene `IPrincipalFactory` und ein eigener `IResourceAuthorizationService` erhalten
+nur noch den Personen-Anteil. Beide müssen nichts über Dienste wissen.
+`ResourceAuthorizationMiddleware` überspringt jetzt auch einen Principal ganz ohne
+Identity, statt den Service zu fragen. Das ASP.NET-eigene `HttpContext.User` hat immer
+eine Identity, betroffen wäre also nur ein Principal, den eigener Code so gesetzt hat.
+
 # Noelia 7.0.1 → 7.1.0
 
 Rein additiv. Es ist nichts zu tun.

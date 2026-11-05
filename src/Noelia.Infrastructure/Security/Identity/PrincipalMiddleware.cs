@@ -1,4 +1,5 @@
 using Noelia.Core.Identity;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +13,13 @@ namespace Noelia.Infrastructure.Security.Identity;
 /// Register after authentication and before authorization. A request whose
 /// claims cannot be translated is answered with 401 rather than continuing
 /// without a principal.
+/// <para>
+/// A service is not a person and gets no principal: the identity the service scheme
+/// authenticated is taken out here, ahead of the factory, so that a factory a service
+/// wrote itself needs no knowledge of it. Behind a door that leaves nothing to
+/// translate and <see cref="ICurrentPrincipal.Current"/> stays <c>null</c>; a person
+/// authenticated beside the service is translated as usual (ADR-0003).
+/// </para>
 /// </remarks>
 public sealed class PrincipalMiddleware
 {
@@ -33,7 +41,7 @@ public sealed class PrincipalMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var result = _factory.Create(context.User);
+        var result = _factory.Create(ServiceCallerIdentity.PersonPartOf(context.User));
 
         if (result.IsInvalid)
         {

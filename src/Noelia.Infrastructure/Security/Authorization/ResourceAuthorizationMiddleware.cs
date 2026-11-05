@@ -1,4 +1,5 @@
 using Noelia.Abstractions.Security.Authorization;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,11 @@ namespace Noelia.Infrastructure.Security.Authorization;
 /// <summary>
 /// Middleware for automatic resource authorization
 /// </summary>
+/// <remarks>
+/// A right is per door and not per record (ADR-0002), and the list of a door has
+/// already decided by the time this runs, so the identity the service scheme
+/// authenticated is never put to the service. A person beside it is (ADR-0003).
+/// </remarks>
 public class ResourceAuthorizationMiddleware
 {
     private readonly RequestDelegate _next;
@@ -31,8 +37,11 @@ public class ResourceAuthorizationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Skip for non-authenticated requests
-        if (!context.User.Identity?.IsAuthenticated == true)
+        var person = ServiceCallerIdentity.PersonPartOf(context.User);
+
+        // Skip for non-authenticated requests. Written as "is not true": a door leaves a
+        // principal with no identity at all, and "!x == true" is false for a null x.
+        if (person.Identity?.IsAuthenticated != true)
         {
             await _next(context);
             return;
@@ -47,13 +56,13 @@ public class ResourceAuthorizationMiddleware
 
         try
         {
-            var authResult = await CheckResourceAuthorizationAsync(context);
-            
+            var authResult = await CheckResourceAuthorizationAsync(context, person);
+
             if (!authResult.Succeeded)
             {
                 _logger.LogWarning(
                     "Resource authorization failed for user {UserId} on {Method} {Path}: {Reasons}",
-                    context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                    person.FindFirst(ClaimTypes.NameIdentifier)?.Value,
                     context.Request.Method,
                     context.Request.Path,
                     string.Join(", ", authResult.FailureReasons));
@@ -71,7 +80,7 @@ public class ResourceAuthorizationMiddleware
         await _next(context);
     }
 
-    private async Task<AuthorizationResult> CheckResourceAuthorizationAsync(HttpContext context)
+    private async Task<AuthorizationResult> CheckResourceAuthorizationAsync(HttpContext context, ClaimsPrincipal person)
     {
         var resourceInfo = ExtractResourceInformation(context);
         
@@ -83,7 +92,7 @@ public class ResourceAuthorizationMiddleware
         var action = MapHttpMethodToAction(context.Request.Method);
         
         return await _authorizationService.AuthorizeAsync(
-            context.User,
+            person,
             resourceInfo.ResourceType,
             action,
             resourceInfo.ResourceData);
