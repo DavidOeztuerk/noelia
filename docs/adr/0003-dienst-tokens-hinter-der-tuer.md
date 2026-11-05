@@ -167,14 +167,14 @@ ein gültiges Dienst-Token. Der Personen-Anteil schließt es.
 - **Eigener Defekt, nicht Teil dieses Gates.** Hinter `UseAuth()` ist `Current` während
   der Policy-Prüfung noch leer, deshalb lehnen `ActingForCompany` und `ActingAsSelf`
   dort jede Person ab (Laufzeitprobe: 403). Das hat mit Türen nichts zu tun, blockiert
-  7.1.1 nicht und ist als eigenes Issue erfasst.
+  7.1.1 nicht und ist als #58 erfasst.
 - **`PermissionMiddleware` liest nur die erste Identity.** Meldet ein fremdes Scheme
   `Success` mit einer Identity, die niemand authentifiziert hat, und nennt eine Tür dieses
   Scheme neben dem Dienst-Scheme, kann die Zusammenführung sie nach vorn stellen. Dann
   antwortet dieser Schritt mit 401, obwohl der Dienst berechtigt ist (Laufzeitprobe). Das
   scheitert geschlossen und setzt einen Fehler im fremden Scheme voraus. Die Änderung
-  träfe die Standardkette aller Konsumenten und ist deshalb ein eigenes Issue. Der Test
-  dieses Falls läuft darum ohne `PermissionEnforcement`.
+  träfe die Standardkette aller Konsumenten und ist deshalb ein eigenes Issue (#59). Der
+  Test dieses Falls läuft darum ohne `PermissionEnforcement`.
 - **Trennung liegt beim Betreiber.** Ein Dienst, der ein eigenes Scheme oder eine eigene
   `IClaimsTransformation` so baut, dass eine Identity `AuthenticationType =
   "NoeliaService"` trägt, hebt die Trennung auf. Das ist Code des Betreibers und liegt

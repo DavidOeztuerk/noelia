@@ -3,7 +3,7 @@ id: Q-0055
 gate: G-0016
 kind: main
 rank: A
-state: in_progress
+state: in_review
 dod:
   - Roter Test zuerst: Tür mit echter Kette inklusive UseTokenRevocation und UseNoeliaPrincipal, ein berechtigter Dienst kommt vor dem Fix nicht durch
   - Beide Bausteine erkennen Dienst-Tokens an der geprüften Identität des Dienst-Schemes, nie am fehlenden sub
