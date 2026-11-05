@@ -430,7 +430,8 @@ verweigert; bereits ausgestellte gelten bis zu ihrem `exp`.
 - **Bearer, kein Besitznachweis.** Ein gestohlenes Token gilt bis `exp`. DPoP
   oder mTLS-gebundene Tokens sind nicht Teil von 7.1.
 - **Kein Widerruf ausgestellter Dienst-Tokens.** Die kurze Laufzeit ersetzt ihn;
-  die Revocation-Middleware gilt nur für Personen-Tokens.
+  die Revocation-Middleware gilt nur für Personen-Tokens. Im Code gilt das erst seit
+  7.1.1, siehe [ADR-0003](0003-dienst-tokens-hinter-der-tuer.md).
 - **Rechte je Tür, nicht je Datensatz.** Ein berechtigter Aufrufer kann jede ID
   abfragen (WT: Q-0044 Einwilligungsprüfung).
 - **Kompromittierter Aufrufer** hat dessen Türen. Die Policy begrenzt gestohlene

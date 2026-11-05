@@ -636,7 +636,9 @@ from claims another scheme established.
 
 The middleware answers 401 when a token's claims cannot be translated, rather
 than letting the request continue without a principal. Downstream code reads
-`ICurrentPrincipal` instead of inspecting claims again.
+`ICurrentPrincipal` instead of inspecting claims again. A service calling a door
+is not a person and has no principal; see
+[behind a door](#behind-a-door).
 
 Endpoints declare the capacity they need:
 
@@ -952,6 +954,10 @@ from the state the writer records. `maxTokenLifetime` is how long a cutoff is
 kept and must be at least the longest lifetime an access token can have, or a
 cutoff expires while tokens it should refuse are still valid.
 
+The check is about people's tokens. A service token cannot be revoked and lives
+minutes instead, so it is not held against this list; see
+[behind a door](#behind-a-door).
+
 **This is the upgrade, not the entry price.** Ending a session is what
 `AddTokenSessions()` does, in your own database, with no extra server. A
 revocation store closes the remaining window — the access token already issued —
@@ -1232,6 +1238,29 @@ anything that answers differently on a door than on the fallback tells a caller
 which paths exist. The check `noelia.m2m.caller-policy` (it is not applicable when nothing
 here is in use, so the dashboard shows one more row and no new warning) verifies
 the fallback, the 404 handler and the single token endpoint.
+
+### Behind a door
+
+A door puts the service in `HttpContext.User`, and the steps a service adds behind
+`UseAuth()` are about people. `UseTokenRevocation()`, `UsePrincipal()` and
+`UseResourceAuthorization()` therefore leave out the identity the service scheme
+verified. They decide that by the scheme and never by a missing `sub`, so a person's
+token without a `sub` is refused as it always was.
+
+`ICurrentPrincipal.Current` is `null` at a door: a service is not a person. `Require()`
+throws there, `IsAuthenticated()` is `false` although the request is authenticated, and
+a tenant filter written as documented falls back to `TenantId.None` and shows no
+tenant's rows. Code written for people cannot run for a service by accident, and a
+door that has to read across tenants says so itself. A handler that wants the name of
+its caller reads it from the user:
+
+```csharp
+var caller = context.User.FindFirst(ServiceTokenDefaults.CallerClaim)?.Value;
+```
+
+A policy that names two schemes can put a person beside the service, a cookie and a
+service token on one door for instance. That person is then the principal, and is
+revoked and refused like any other. See ADR-0003.
 
 ### The client
 
@@ -2520,18 +2549,18 @@ are pinned to prereleases.
 ## Consuming Noelia
 
 5.0.0 was the first stable release under the Noelia identity; the current
-version is 7.1.0. Consumers install anonymously from NuGet.org:
+version is 7.1.1. Consumers install anonymously from NuGet.org:
 
 ```bash
-dotnet add package Noelia.Infrastructure --version 7.1.0
+dotnet add package Noelia.Infrastructure --version 7.1.1
 ```
 
 Reference only what the service actually runs:
 
 ```xml
-  <PackageReference Include="Noelia.Infrastructure" Version="7.1.0" />
-  <PackageReference Include="Noelia.Redis" Version="7.1.0" />
-  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.1.0" />
+  <PackageReference Include="Noelia.Infrastructure" Version="7.1.1" />
+  <PackageReference Include="Noelia.Redis" Version="7.1.1" />
+  <PackageReference Include="Noelia.Data.EntityFrameworkCore" Version="7.1.1" />
 ```
 
 A service that speaks to no broker leaves out `Noelia.Messaging.MassTransit`

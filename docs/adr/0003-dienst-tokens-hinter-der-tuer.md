@@ -1,6 +1,6 @@
 # ADR-0003 — Dienst-Tokens hinter der Tür: Widerruf, Principal und Prüfung je Datensatz
 
-**Status:** Vorschlag, Fassung 2 (arbeitet die Design-Runde des Wardens ein: approve-with-conditions) · **Datum:** 2026-11-05 · **Gate:** G-0016 (Rank A, `auth`) · **Quest:** Q-0055 · **Issue:** #57 · **Ziel:** 7.1.1, keine neue öffentliche API
+**Status:** Angenommen für `develop` (Fassung 2, Warden-Freigabe nach Delta-Runde), umgesetzt in 7.1.1 · **Datum:** 2026-11-05 · **Gate:** G-0016 (Rank A, `auth`) · **Quest:** Q-0055 · **Issue:** #57 · **Ziel:** 7.1.1, keine neue öffentliche API
 
 ## In einfacher Sprache
 
@@ -223,3 +223,19 @@ Kein neues öffentliches API, nur Verhalten nach ADR-0002 und Doku: **7.1.1**.
 | 1 (minor): `IsAuthenticated()` und Remarks von `Principal` | Übernommen, mit Test. |
 | 4 (minor): Testliste | Zum Teil schon erfüllt: `client_id` bei einem Personen-Scheme ist genau der Fall „`AuthenticationType` ist nicht `NoeliaService`“. Der Evaluator, der alles ablehnt, fällt um, sobald er gefragt wird, ist also strenger als ein Aufrufzähler. |
 | 5 (minor): Widerspruch zum Platz des Principals | Unter „Grenzen“ geklärt. Die Prüfung ergab den eigenen Defekt mit den Kapazitäts-Policies. |
+
+Die Delta-Runde gab das Design frei und stufte die Kapazitäts-Policies als nicht
+blockierend für 7.1.1 ein. Ihr Hinweis, dass `Current` neben einem Dienst auch eine Person
+sein kann, steht jetzt in Entscheidung 6.
+
+## Mutationsprobe
+
+Die Wächter sind nicht nur grün, sie fallen auch. Am Helfer `PersonPartOf` wurde jeweils
+eine falsche Regel eingesetzt und die Testklasse laufen gelassen:
+
+| Falsche Regel | Rote Tests |
+|---|---|
+| Dienst erkannt am fehlenden `sub` (von der Vorgabe verboten) | 16 |
+| Dienst erkannt am Claim `client_id` | 13 |
+| Dienst da, also alles überspringen | 10 |
+| Rest ohne den Filter auf authentifizierte Identities | 1 |
