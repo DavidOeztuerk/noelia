@@ -309,7 +309,7 @@ public class ServiceCallerFullChainTests
         // Without permission enforcement, because this is about the steps of ADR-0003.
         // PermissionMiddleware reads only the first identity, and the merge can put the
         // unauthenticated one there; it then answers 401, which fails closed and is a
-        // limit of that step, named in the ADR.
+        // limit of that step, named in the ADR. Once #59 is fixed this runs with the module.
         await using var host = await Chain(permissions: false);
 
         using var response = await host.Client.SendAsync(

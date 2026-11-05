@@ -25,6 +25,9 @@ Dienst steht in `HttpContext.User`. Der Dienst ist nie ein `Principal`, und
 
 Eine eigene `IPrincipalFactory` und ein eigener `IResourceAuthorizationService` erhalten
 nur noch den Personen-Anteil. Beide müssen nichts über Dienste wissen.
+`ResourceAuthorizationMiddleware` überspringt jetzt auch einen Principal ganz ohne
+Identity, statt den Service zu fragen. Das ASP.NET-eigene `HttpContext.User` hat immer
+eine Identity, betroffen wäre also nur ein Principal, den eigener Code so gesetzt hat.
 
 # Noelia 7.0.1 → 7.1.0
 

@@ -17,5 +17,6 @@ scope:
   exclude: []
 estimate: { session_pct: 30, weekly_pct: 8, gold_usd: 0 }
 boss: "HTTP-Test über die Kette von WT: berechtigter Dienst 200 an der Tür, Personen-Token ohne sub 401, widerrufenes Personen-Token 401"
+board: { pr: 60 }
 ---
 # Widerruf und Principal lassen geprüfte Dienst-Identität durch, Personen-Token ohne sub bleibt abgelehnt (#57)
