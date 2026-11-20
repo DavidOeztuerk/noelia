@@ -1,6 +1,6 @@
 # ADR-0007 — Rechte und Rollen zählen nur aus angemeldeten Identitäten
 
-**Status:** Entwurf (Fassung 4, nach Warden-Runde 1, Delta-Runde und schmaler Prüfung; hält sich an den Owner-Entscheid, gilt damit als freigegeben; der Warden prüft die Umsetzung in der Gate-Runde) · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Entwurf (Fassung 4). Owner-Entscheid wörtlich eingehalten. Warden: changes-requested in der schmalen Prüfung; Korrektur (Handler ohne angemeldete Person = nicht erfüllt) eingearbeitet; Warden-Bestätigung offen. · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 ## Owner-Entscheid vom 20.11.2026 (wörtlich)
 
