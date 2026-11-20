@@ -3,7 +3,7 @@ id: Q-0059
 gate: G-0017
 kind: main
 rank: A
-state: proposed
+state: abandoned
 dod:
   - "Design in einfacher Sprache im PR, Warden (Opus) gibt frei"
   - "Der Schritt nutzt Pin des Kandidaten, Source-Mapping auf den packenden Feed, Tool des Kandidaten und Operator__Secret"

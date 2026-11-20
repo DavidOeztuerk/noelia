@@ -3,7 +3,7 @@ id: Q-0066
 gate: G-0017
 kind: main
 rank: B
-state: in_progress
+state: in_review
 dod:
   - "Roter Test zuerst: Schema 3 gilt nicht als neuer als das Tool; Konstante des Tools gleich OperatorReport.SchemaVersion"
   - "Egress-Befund stützt sich bei Schema 3 auf httpEgress.isEnforcing, nicht auf das Legacy-Feld"

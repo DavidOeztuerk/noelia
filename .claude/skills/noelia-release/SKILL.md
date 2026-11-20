@@ -93,12 +93,32 @@ a candidate it has found something the demo could not: a file path classified as
 a public host, SaaS domains missing from the third-country list, a missing
 `using` in the documented snippet, a crash on first run in Production.
 
+Do not run it by hand: ContosoInvoicing pins Noelia 6.4.0 and `noelia analyze` calls
+whatever tool is installed globally, so the old four lines built and started the
+wrong version. The script works on a throw-away copy, with an own package folder,
+and fails instead of reporting green when it cannot prove the candidate ran.
+
 ```bash
-cd ~/Projects/ContosoInvoicing
-dotnet restore --configfile NuGet.Local.Config --force --no-cache
-dotnet build -c Release && dotnet run -c Release
-noelia analyze .                        # the tool, on a real consumer
+V="$(sed -nE 's|.*<VersionPrefix>([0-9.]+)</VersionPrefix>.*|\1|p' Directory.Build.props)-gate.$(date -u +%Y%m%d%H%M%S)"
+FEED="$(mktemp -d)"
+dotnet pack Noelia.slnx -c Release -p:Version="$V" -o "$FEED"
+demo/eng/contoso-candidate-check.sh \
+  --contoso ~/Projects/ContosoInvoicing --noelia "$PWD" --version "$V" --feed "$FEED"
 ```
+
+What it proves, and fails on otherwise:
+
+- **Pin** — every `Noelia.*` entry in `obj/project.assets.json` is exactly `$V`.
+- **Source** — restore uses its own `NuGet.Config` (`<clear/>`, `Noelia.*` only from the feed) and a private `NUGET_PACKAGES`; nothing new lands in `~/.nuget/packages`.
+- **Tool** — `noelia` is the candidate's own (`dotnet dnx Noelia.Cli --version $V`), version and `+sha` match the checkout.
+- **Secret** — the service starts in Production with a throw-away `Operator__Secret` (never printed) and its `report.json` says `invoicing` / `Production`.
+- **Commit** — for every restored `Noelia.*` package, `repository@commit` in the nuspec equals `git rev-parse HEAD`; a missing commit fails.
+
+`noelia analyze` exit 1 (findings) is printed and read by you; exit 2 (tool error)
+fails. A bare `X.Y.Z` is refused: the version needs the prerelease suffix. NU1900
+(NuGetAudit offline) under `-warnaserror` can be a false alarm of the network, not of
+the candidate; rerun online, never disable the audit. This step will be adjusted
+again with #55 (`.env`) and #63 (the cache purge above goes away).
 
 ## 6. Documentation, in the same commit
 
