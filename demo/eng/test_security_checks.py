@@ -87,6 +87,59 @@ class ExpectedSet(unittest.TestCase):
         self.assertNotIn("noelia.sessions.refresh-cookie", expected["todo-staging"])
 
 
+class ExpectedStatus(unittest.TestCase):
+    """A check present in the log is not the same as a check that says what the
+    service promises: an issuer whose token endpoint lost its rate limit still
+    reports noelia.m2m.caller-policy, as a Warning, and a presence-only gate is
+    green next to it."""
+
+    STATUSES = {"noelia.d.jwt": {"verifier": "Pass"}}
+
+    def setup_for(self, lines):
+        expectations = dict(EXPECTATIONS, ExpectedStatus=self.STATUSES)
+        expectations["_roles"] = {r["Name"]: set(r["Modules"]) for r in BASELINES["Roles"]}
+        expected = gate.expected_services(expectations, "prod")
+        wanted = gate.expected_statuses(expectations, "prod")
+        return gate.evaluate(gate.parse_runs("\n".join(lines)), expected, [], expected_status=wanted)
+
+    def judged(self, todo_status):
+        return self.setup_for(run("gateway-prod", GATEWAY) + run("todo-prod", ALL, {"noelia.d.jwt": todo_status}))
+
+    def test_the_expected_status_is_scoped_to_the_service_role(self):
+        expectations = dict(EXPECTATIONS, ExpectedStatus=self.STATUSES)
+        wanted = gate.expected_statuses(expectations, "prod")
+        self.assertEqual(wanted, {"todo-prod": {"noelia.d.jwt": "Pass"}})
+
+    def test_the_expected_status_is_met(self):
+        _, problems = self.judged("Pass")
+        self.assertEqual(problems, [])
+
+    def test_a_warning_where_a_pass_is_expected_fails(self):
+        _, problems = self.judged("Warning")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("todo-prod: noelia.d.jwt is Warning, expected Pass", problems[0])
+
+    def test_not_applicable_where_a_pass_is_expected_fails(self):
+        _, problems = self.judged("NotApplicable")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("expected Pass", problems[0])
+
+    def test_a_missing_check_is_reported_once_not_twice(self):
+        _, problems = self.setup_for(
+            run("gateway-prod", GATEWAY) + run("todo-prod", [i for i in ALL if i != "noelia.d.jwt"]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is missing", problems[0])
+
+    def test_real_expectations_demand_a_pass_of_the_m2m_check_on_the_issuer_only(self):
+        expectations = gate.load_expectations(HERE / "security-check-expectations.json",
+                                              HERE / "composition-baselines.json")
+        wanted = gate.expected_statuses(expectations, "all")
+        for stage in ("dev", "staging", "prod"):
+            self.assertEqual(wanted[f"user-{stage}"], {"noelia.m2m.caller-policy": "Pass"})
+            self.assertNotIn(f"todo-{stage}", wanted)
+            self.assertNotIn(f"gateway-{stage}", wanted)
+
+
 class Judging(unittest.TestCase):
     def healthy(self):
         return run("gateway-prod", GATEWAY) + run("todo-prod", ALL)

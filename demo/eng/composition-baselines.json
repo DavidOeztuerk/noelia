@@ -54,6 +54,7 @@
         "Resilience",
         "SecurityHeaders",
         "SecurityMonitoring",
+        "ServiceTokenIssuing",
         "SovereignPlatform",
         "TokenSessions"
       ]
@@ -175,6 +176,7 @@
         "Resilience",
         "SecurityHeaders",
         "SecurityMonitoring",
+        "ServiceTokenIssuing",
         "SovereignPlatform",
         "TokenSessions"
       ]

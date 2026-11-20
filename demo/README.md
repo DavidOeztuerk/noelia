@@ -229,7 +229,8 @@ This still does not cover the application's login/logout journeys.
 
 ### Runtime secrets
 
-`.env` holds three values and is gitignored. Copy `.env.example` and fill it in:
+`.env` holds four values and is gitignored. Copy `.env.example` and fill it in
+(the fourth, `NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH`, is described after the block):
 
 ```bash
 # A key pair. The issuing service gets the private half; everyone else
@@ -252,6 +253,26 @@ are read by the `KeyPerFile` configuration provider from `/run/secrets`. A
 container's environment is visible to anyone on the host through
 `docker inspect` and `/proc/<pid>/environ`; a tmpfs mounted into one container
 is not.
+
+**The issuer's machine client.** `user-service` also issues service tokens
+(`POST /m2m/token`, OAuth 2.0 client credentials). It knows one client,
+`todo-service`, and one audience, `user-service`, both written in
+`UserService.Api/Program.cs`; configuration holds only the **hash** of the client's
+secret, as a fourth Docker secret on the three `user-*` services (not on the
+monolith). Nothing in the demo calls the endpoint yet, so the plaintext secret is
+not needed anywhere and is not stored. Make the hash exactly as the main README
+describes ("Making a secret"), keeping only the hash line:
+
+```bash
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+S=$(openssl rand 32 | b64url)
+echo "NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH=sha256:$(printf %s "$S" | openssl dgst -sha256 -binary | b64url)"
+```
+
+The endpoint is rate limited (20 a minute per caller address) by a policy the
+service registers itself: `RequireRateLimiting` alone is only metadata, and
+`noelia.m2m.caller-policy` can see the metadata but not whether a limiter runs, so
+`ServiceTokenIssuerTests` asserts the 429.
 
 ## Checking it
 
@@ -286,6 +307,13 @@ the provider set, and takes each service role's modules from
 other only where its module is in the role — so a module left out on purpose
 (`OmittedModules` in the expectations file) takes its checks with it and is not a
 failure, while the same absence undeclared is one.
+
+Presence is not always enough, so the file also carries `ExpectedStatus`: a check, a
+service role and the status it must report. `noelia.m2m.caller-policy` must be `Pass`
+on the issuer (`user` in every stage). Without that line the check would be present
+and `NotApplicable` on a host that had lost its token endpoint, and the gate green.
+A status other than the expected one is a finding even when it is not a Fail, and an
+acceptance covers a Warning of it but never a `NotApplicable`.
 
 Acceptances are scoped, never global: `eng/accepted-findings.txt` lines read
 `<scope> <check id> <reason>`, scope being a stage (`prod`) or one service
