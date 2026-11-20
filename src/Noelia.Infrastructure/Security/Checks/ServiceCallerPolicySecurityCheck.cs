@@ -27,7 +27,8 @@ namespace Noelia.Infrastructure.Security.Checks;
 /// </remarks>
 internal sealed class ServiceCallerPolicySecurityCheck(
     IServiceProvider services,
-    NoeliaComposition composition) : SecurityCheckBase
+    NoeliaComposition composition,
+    RoutesBuiltState routes) : SecurityCheckBase
 {
     public override string Id => "noelia.m2m.caller-policy";
     public override NoeliaModule Module => NoeliaModule.Composition;
@@ -42,6 +43,19 @@ internal sealed class ServiceCallerPolicySecurityCheck(
 
     public override Task<SecurityCheckResult> RunAsync(CancellationToken cancellationToken = default)
     {
+        // The first run happens in StartAsync, before ASP.NET has put the routes into the
+        // container. What it would see is not "no doors" but "nothing yet", and either a Pass
+        // or a Fail over that would be a known-wrong entry in the report. It answers before
+        // the module question on purpose: a door without a module is why this is a
+        // Composition check, so "nothing composed" cannot be told apart from "not built".
+        if (!routes.Built)
+        {
+            return Task.FromResult(Result(
+                SecurityCheckStatus.Warning,
+                "Routes not built yet, checked again after startup.",
+                SecurityCheckSeverity.Medium));
+        }
+
         var endpoints = services.GetService<EndpointDataSource>()?.Endpoints ?? [];
 
         var doors = endpoints.Where(endpoint => endpoint.Metadata.GetMetadata<ServiceCallerAttribute>() is not null).ToArray();
@@ -84,6 +98,13 @@ internal sealed class ServiceCallerPolicySecurityCheck(
                         ? "(another registration replaced it), so refusals are not the uniform 404"
                         : "(UseServiceCallers is not composed), so a refused caller gets the framework's answer"));
             }
+        }
+
+        // A Pass over zero doors would claim a property nobody looked at. An error elsewhere
+        // still outranks this, because failures are listed first and decide the status.
+        if (callersComposed && doors.Length == 0)
+        {
+            warnings.Add("No service door is mapped, nothing was checked");
         }
 
         // 3. Everything endpoint-driven that a door carries and its fallback does not would
@@ -133,9 +154,20 @@ internal sealed class ServiceCallerPolicySecurityCheck(
                 SecurityCheckStatus.Warning, string.Join("; ", warnings) + ".", SecurityCheckSeverity.Medium));
         }
 
-        return Task.FromResult(Result(
-            SecurityCheckStatus.Pass,
-            $"{doors.Length} service door(s) are covered by a fallback, and the refusal handler is in place."));
+        // Name only what this run examined: an issuer-only service has no handler or door
+        // checked, and a summary that mentioned them would vouch for what it never looked at.
+        var verified = new List<string>();
+        if (callersComposed || doors.Length > 0)
+        {
+            verified.Add($"{doors.Length} service door(s) are covered by a fallback, and the refusal handler is in place");
+        }
+
+        if (issuerComposed)
+        {
+            verified.Add("exactly one token endpoint is mapped and rate limited");
+        }
+
+        return Task.FromResult(Result(SecurityCheckStatus.Pass, string.Join("; ", verified) + "."));
     }
 
     private static string Pattern(Endpoint endpoint) =>
