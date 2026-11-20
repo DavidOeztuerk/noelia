@@ -12,5 +12,6 @@ scope:
   include: ["docs/adr/**"]
   exclude: []
 estimate: { session_pct: 6, weekly_pct: 1, gold_usd: 0 }
+board: { pr: 69 }
 ---
 # ADR-0007: Rechte und Rollen nur aus angemeldeten Identitäten (Design, Owner-Entscheid wörtlich)

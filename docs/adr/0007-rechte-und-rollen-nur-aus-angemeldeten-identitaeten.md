@@ -1,18 +1,18 @@
 # ADR-0007 — Rechte und Rollen zählen nur aus angemeldeten Identitäten
 
-**Status:** Entwurf (Fassung 1, wartet auf Warden-Freigabe) · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Entwurf (Fassung 2, nach Warden-Runde 1, wartet auf Delta-Runde) · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 ## Owner-Entscheid vom 20.11.2026 (wörtlich)
 
 > „#59 bekommt ein eigenes Gate und wird Teil eines Minor-Release (7.2.0), weil der Fix Konsumenten brechen kann. Die Lücke wird geschlossen, nicht nur dokumentiert: Rechte und Rollen zählen nur aus angemeldeten Identitäten, in PermissionMiddleware und PermissionAuthorizationHandler gleich. Der Bruch für Konsumenten mit IClaimsTransformation steht in MIGRATION.md, mit dem Weg, wie sie ihre Claims richtig anhängen."
 
-Dieses ADR setzt den Entscheid um. Es lässt nichts davon offen und wählt keine Alternative, die ihm widerspricht.
+Dieses ADR setzt den Entscheid um. Es lässt nichts davon offen und wählt keine Alternative, die ihm widerspricht. Dass der Fix über die beiden genannten Pfade hinaus weitere Noelia-Prüfungen erfasst (Entscheidung 3), ist keine Abweichung, sondern seine Voraussetzung: Entscheidung 2 nimmt in der Standardkette die 401 weg, die diese Pfade heute verdeckt.
 
 ## In einfacher Sprache
 
 Eine Anfrage trägt in .NET einen „Principal“. Der kann mehrere Identitäten enthalten, zum Beispiel
 die Person, die sich angemeldet hat, und eine zweite, die ein Baustein später angehängt hat. Jede
-Identität weiß von sich, ob sie angemeldet ist, also ob ein Anmelde-Scheme sie geprüft hat.
+Identität weiß von sich, ob sie angemeldet ist, also ob sie einen `AuthenticationType` trägt.
 
 Noelias Rechteprüfung fragt aber nur die **erste** Identität, ob sie angemeldet ist, und liest dann
 Rechte und Rollen aus **allen**. Dadurch gibt es zwei Fehler:
@@ -23,28 +23,37 @@ Rechte und Rollen aus **allen**. Dadurch gibt es zwei Fehler:
 2. Steht die nicht angemeldete Identität vorn, wird die Anfrage abgelehnt, obwohl eine angemeldete Person
    dabei ist. Das ist nur lästig.
 
-Die Regel nach dem Fix: **Was zählt, kommt nur von angemeldeten Identitäten.** Eine Identität, die kein
-Anmelde-Scheme geprüft hat, wird für Rechte, Rollen und die Nutzer-ID behandelt, als wäre sie nicht da.
-Das gilt in der Middleware und im Handler gleich, weil beide denselben Baustein benutzen.
+Beim Prüfen zeigte sich: Der Fehler sitzt nicht nur in diesen zwei Pfaden, sondern in fast allen Prüfungen,
+die Noelia selbst mitbringt (Katalog- und Rollen-Policies, Kontostand, Besitz, Mandant). Heute verdeckt die
+Rechte-Middleware das in der Standardkette zum Teil. Würde man nur sie reparieren, kämen die anderen Wege
+frei. Darum gilt die Regel überall dort, wo Noelia selbst Rechte, Rollen, Nutzer-ID, Kontostand oder Mandant liest.
+
+Die Regel nach dem Fix: **Was zählt, kommt nur von angemeldeten Identitäten.** Eine Identität ohne
+`AuthenticationType` wird dafür behandelt, als wäre sie nicht da. Alle diese Prüfungen benutzen denselben
+Baustein, also kann keine von ihnen etwas anderes antworten als die anderen.
 
 Was sich für Nutzer ändert:
 
 - Wer Claims über `IClaimsTransformation` mit `principal.AddIdentity(new ClaimsIdentity(...))` und **ohne**
   `AuthenticationType` anhängt, bekommt künftig 403 statt 200. Die Claims zählen nicht mehr. Das scheitert
   geschlossen, bricht aber diese Konsumenten. Deshalb ein Minor mit Migrationsweg, kein Patch.
-- Wer die Claims an die angemeldete Identität hängt, merkt nichts.
+- Wer die Claims an die angemeldete **Personen**-Identität hängt, merkt nichts.
 - Eine Anfrage mit nur nicht angemeldeten Identitäten bekommt 401, mit einer angemeldeten ohne das Recht 403.
-- Eine **widerrufene** Person kommt in keinem Aufbau mehr durch (siehe Entscheidung 3).
+- Eine **widerrufene** Person kommt in keinem Aufbau mehr durch, auch nicht, wenn zwei Personen-Schemes im
+  selben Principal stehen (Entscheidung 4).
+- Eigener Code der Konsumenten ist nicht betroffen: `[Authorize(Roles=…)]`, `RequireRole`, `RequireClaim` und
+  `User.IsInRole` zählen in ASP.NET weiter alle Identitäten. Die Regel gilt für Noelias eigene Prüfungen.
 
 ## Frage
 
-Welche Identitäten eines Principals dürfen Rechte, Rollen und die Nutzer-ID liefern, und wie stellen wir
-sicher, dass Middleware, Handler, Widerruf und Prüfung je Datensatz dasselbe beantworten?
+Welche Identitäten eines Principals dürfen Rechte, Rollen, Nutzer-ID, Kontostand und Mandant liefern, und wie
+stellen wir sicher, dass Middleware, Handler, Widerruf, Prüfung je Datensatz und Principal dasselbe beantworten?
 
 ## Befund, zur Laufzeit belegt
 
-Laufzeitproben des Wardens gegen die gebaute `Noelia.Infrastructure.dll` (Kommentar an #59). Endpoint mit
-`[RequirePermission("orders:delete")]`, Principal mit zwei Identitäten:
+### Die beiden Pfade aus #59 (Warden-Probe)
+
+Endpoint mit `[RequirePermission("orders:delete")]`, Principal mit zwei Identitäten:
 
 | Fall | Identitäten | `PermissionMiddleware` | `PermissionAuthorizationHandler` |
 |---|---|---|---|
@@ -52,115 +61,149 @@ Laufzeitproben des Wardens gegen die gebaute `Noelia.Infrastructure.dll` (Kommen
 | B | unangemeldet mit `permission` vorn + angemeldet ohne Recht | 401 | nicht erfüllt |
 | C | eine Identität, angemeldet, ohne Recht | 403 | nicht erfüllt |
 
-Ursache, im Code belegt:
+Ursache: `PermissionMiddleware.cs:64` und `PermissionAuthorizationHandler.cs:46` fragen `User.Identity.IsAuthenticated`
+(die **erste** Identität); `GetUserPermissions` (`PermissionMiddleware.cs:112–123`,
+`PermissionAuthorizationHandler.cs:76–92`) liest `permission` und Rollen über **alle**; die Nutzer-ID kommt per
+`FindFirst(NameIdentifier)` über alle (`PermissionMiddleware.cs:84`, `PermissionAuthorizationHandler.cs:52`).
 
-- `PermissionMiddleware.cs:64` und `PermissionAuthorizationHandler.cs:46` fragen `User.Identity.IsAuthenticated`. Das
-  ist die **erste** Identität.
-- `PermissionMiddleware.GetUserPermissions` (Z. 112–123) und `PermissionAuthorizationHandler.GetUserPermissions`
-  (Z. 76–92) lesen `FindAll("permission")` und `FindAll(ClaimTypes.Role)` über **alle** Identitäten.
-- Die Nutzer-ID kommt aus `FindFirst(ClaimTypes.NameIdentifier)`, ebenfalls über alle.
+### Dieselbe Fehlerklasse an weiteren Stellen (Warden-Runde 1, Laufzeitprobe gegen 28c4750)
 
-Dieselbe Fehlerklasse steckt an weiteren Stellen, die Personen betreffen:
+Kontrolle jeweils: eine angemeldete Identität ohne Recht, Konto `Suspended`; alle Kontrollen ergaben „abgelehnt“.
 
-| Stelle | Fehler |
-|---|---|
-| `Security/TokenRevocationMiddleware.cs:46–48` und `:90–92` | entscheidet an der ersten Identität, solange keine Dienst-Identität im Principal liegt (`PersonPartOf` lässt den Principal dann unverändert; mit Dienst-Identität filtert es schon auf angemeldete), und liest `jti`/`sub`/`iat` per `FindFirst` über alle |
-| `Security/Authorization/ResourceAuthorizationMiddleware.cs:40–48` und `:65` | dasselbe Muster: Entscheidung an der ersten Identität (ohne Dienst-Identität), Nutzer-ID per `FindFirst` |
-| `Security/ResourceOwnerHandler.cs:40` | `IsInRole(Admin)` über alle Identitäten, Nutzer-ID per `FindFirst` über alle |
-| `Security/Identity/PrincipalFactory.cs:13` | prüft die erste Identität, liest `sub` über alle |
+| Stelle | Fehler | Probe |
+|---|---|---|
+| `Security/AuthorizationExtensions.cs:42–45` (`RequireClaim("permission", p)` je Katalogrecht) und `:27–34` (`RequireRole` Admin/Moderator/User); `Security/Authorization/AuthorizationExtensions.cs:52–56` (`AdminOnly`/`SuperAdminOnly`) | ASP.NET wertet `RequireClaim`/`RequireRole` über alle Identitäten aus; die Katalog-Policies haben kein `RequireAuthenticatedUser` | erfüllt in A, in B und sogar bei nur unangemeldeten Identitäten |
+| `Security/Authorization/AuthorizationExtensions.cs:136–140` (`ResourceAuthorizationHandler`) und `:313` (`OwnershipAuthorizationHandler`) | geben das ungefilterte `context.User` weiter bzw. lesen `FindFirst(NameIdentifier)` über alle; die Provider lesen ebenfalls per `FindFirst` (`Noelia.InMemory/.../InMemoryResourceAuthorizationService.cs:30`, `Noelia.Redis/.../ResourceAuthorizationService.cs:81`) | Datensatz des Opfers freigegeben |
+| `Security/ActiveAccountHandler.cs:20`, `Security/EmailVerifiedHandler.cs:20` | `FindFirst` über alle: ein gesperrtes Konto kommt durch, wenn eine unangemeldete Identität `account_status=Active` trägt | erfüllt |
+| `Security/ResourceOwnerHandler.cs:30`, `:40` | `FindFirst` und `IsInRole(Admin)` über alle | erfüllt |
+| `Security/Identity/PrincipalFactory.cs:13`, `:18–19`, `:26` | prüft die erste Identität, liest `sub` **und `tenant`** über alle: ein unangemeldetes `tenant` hinter der Person macht sie zu „handelt für Firma T“, `TenantForQueryFilter` wird T, `ActingForCompany` ist erfüllt (Mandantentrennung, `NoeliaTenant`-Filter, ADR-0006) | erfüllt |
+| `Security/TokenRevocationMiddleware.cs:46–48`, `:90–92` | Entscheidung an der ersten Identität, solange keine Dienst-Identität im Principal liegt; `jti`/`sub`/`iat` per `FindFirst` über alle, dabei wird `NameIdentifier` vor `sub` gezogen, die Werte können aus verschiedenen Identitäten stammen; bei zwei Personen-Schemes wird nur ein Token geprüft | (Code belegt) |
+| `Security/Authorization/ResourceAuthorizationMiddleware.cs:40–48`, `:65` | dasselbe Muster | (Code belegt) |
+| `Security/Audit/SecurityAuditMiddleware.cs:75`, `Security/SecurityAuditMiddleware.cs:62`, `Security/Monitoring/SecurityAlertService.cs:484`, `Builder/Modules/MiddlewarePipelineModule.cs:87` | `FindFirst` bzw. Entscheidung über alle: eine unangemeldete Identität vorn kann dem Prüfprotokoll eine fremde ID unterschieben | (Code belegt) |
 
-Das Gefährliche an der dritten Zeile: **Ein Fix allein in der Middleware öffnet einen Weg.** Heute verdeckt die 401 aus
-`PermissionMiddleware.cs:64` den Fehler im Widerruf. Würde man dort nur `Identities.Any(i => i.IsAuthenticated)`
-einsetzen, käme eine **widerrufene Person durch** (Probe: nächster Schritt läuft, 200), sobald eine Policy das
-Personen-Scheme und ein zweites, fehlerhaftes Scheme nennt. Deshalb ist der Fix ein gemeinsamer Baustein, nicht eine
-Zeile.
+Das Gefährliche: **Ein Fix allein in der Middleware öffnet Wege.** Heute verdeckt die 401 aus
+`PermissionMiddleware.cs:64` in Fall B jede Handler-Entscheidung, die aus der vorn stehenden unangemeldeten Identität
+getroffen wurde (`UseAuthorization` läuft vor `PermissionMiddleware`, `MiddlewarePipelineModule.cs:238–239`,
+`ServiceCollectionExtensions.cs:229–231`). Mit `Identities.Any(...)` allein käme außerdem eine **widerrufene Person durch**
+(Probe: nächster Schritt läuft, 200), sobald eine Policy das Personen-Scheme und ein fehlerhaftes zweites Scheme nennt.
 
 ## Entscheidungen
 
 1. **Ein gemeinsamer interner Baustein.** In `Noelia.Infrastructure.Security` entsteht ein interner Helfer
-   (Arbeitsname `AuthenticatedIdentities`) mit zwei Aufgaben:
+   (Arbeitsname `AuthenticatedIdentities`):
    - `IsAuthenticated(principal)`: wahr, wenn **irgendeine** Identität angemeldet ist.
-   - `Of(principal)`: ein `ClaimsPrincipal`, der **nur** die angemeldeten Identitäten enthält, in ihrer Reihenfolge.
-   Er ist `internal`; es entsteht keine neue öffentliche API. Er liegt neben `ServiceCallerIdentity`, das dieselbe Art von
-   Auswahl für das Dienst-Scheme trifft.
+   - `Of(principal)`: ein `ClaimsPrincipal` mit **nur** den angemeldeten Identitäten, in ihrer Reihenfolge.
+   Er ist `internal`; es entsteht keine neue öffentliche API. Er liegt neben `ServiceCallerIdentity`.
+   **Kriterium und Grenze:** „angemeldet“ heißt `ClaimsIdentity.IsAuthenticated`, also ein gesetzter `AuthenticationType`. Dass
+   dahinter wirklich ein Scheme geprüft hat, kann der Baustein nicht wissen: Setzt ein Konsument `AuthenticationType` selbst
+   auf eine Identität, die kein Scheme geprüft hat, zählt sie. Diese Trennung liegt beim Betreiber (wie in ADR-0003).
 
 2. **Rechte, Rollen, Wildcards und Nutzer-ID nur aus `Of(principal)`.** `PermissionMiddleware` und
-   `PermissionAuthorizationHandler` fragen zuerst `IsAuthenticated` (keine angemeldete Identität: Middleware 401,
-   Handler nicht erfüllt) und lesen danach ausschließlich aus dem gefilterten Principal: `permission`, Rollen über den
-   Katalog, `*`, `kategorie:*` und die Nutzer-ID für Log und Alarm. Reihenfolge der Identitäten spielt keine Rolle mehr.
-   Damit ergeben Fall A und Fall B beide **403** (eine angemeldete Person ohne Recht ist da), und nur „gar keine angemeldete
-   Identität“ ergibt 401. Ein Recht, das nur eine nicht angemeldete Identität trägt, zählt nicht.
+   `PermissionAuthorizationHandler` fragen zuerst `IsAuthenticated` (keine: Middleware 401, Handler nicht erfüllt) und lesen
+   danach ausschließlich aus dem gefilterten Principal: `permission`, Rollen über den Katalog, `*`, `kategorie:*`, `Permission:…`
+   mit `requirement.Resource`, und die Nutzer-ID für Log und Alarm. Die Reihenfolge der Identitäten spielt keine Rolle. Fall A
+   und Fall B ergeben beide **403**; nur „gar keine angemeldete Identität“ ergibt 401.
 
-3. **Widerruf, Prüfung je Datensatz, Besitzerprüfung und Principal lesen dasselbe.** `ServiceCallerIdentity.PersonPartOf`
-   filtert künftig **immer** auf angemeldete Identitäten (bisher gab es ohne Dienst-Identität den Principal unverändert
-   zurück) und nimmt wie bisher die Dienst-Identität heraus. `TokenRevocationMiddleware`,
-   `ResourceAuthorizationMiddleware`, `ResourceOwnerHandler` und `PrincipalFactory` lesen Entscheidung und Claims aus
-   diesem Ergebnis. Folge: Steht eine nicht angemeldete Identität vorn, wird die dahinter angemeldete Person trotzdem
-   geprüft und, wenn widerrufen, mit 401 abgelehnt. Ist **keine** Person angemeldet, lassen Widerruf und Prüfung je
-   Datensatz wie bisher durch; die Ablehnung kommt von der Anmelde- und Rechteprüfung. Das ist nötig, damit Entscheidung 2
-   den Widerruf nicht freilegt.
+3. **Dieselbe Regel für jede Stelle, an der Noelia selbst Rechte, Rollen, Nutzer-ID, Kontostand oder Mandant liest.** Jede Zeile
+   der Befundtabelle oben liest künftig über `Of(principal)` (bzw. `PersonPartOf`, Entscheidung 5). Im Einzelnen:
+   - **Katalog- und Rollen-Policies** (`RequireClaim("permission", …)`, `RequireRole`, `AdminOnly`, `SuperAdminOnly`) werden
+     durch interne Requirements mit Handlern ersetzt, die nur angemeldete Identitäten lesen, und bekommen
+     `RequireAuthenticatedUser`. Ihre **Bedeutung bleibt**: Die Katalog-Policy zählt weiter nur den `permission`-Claim, nicht die
+     Rolle; die offene Roadmap-Frage `README.md:2218–2224` wird nicht nebenbei entschieden. Policy-Namen und öffentliche API
+     bleiben gleich.
+   - **`ResourceAuthorizationHandler` und `OwnershipAuthorizationHandler`** geben bzw. lesen den gefilterten Principal.
+   - **`ActiveAccountHandler`, `EmailVerifiedHandler`:** nur angemeldete Identitäten werden gelesen; sagt irgendeine angemeldete
+     Personen-Identität „nicht aktiv“, wird abgelehnt.
+   - **`ResourceOwnerHandler`, `PrincipalFactory`** (`sub` und `tenant`), die Audit- und Alarmstellen und
+     `MiddlewarePipelineModule.cs:87`.
+   `PrincipalFactory` ist öffentlich und filtert selbst, damit auch eine Eigenverwendung durch Konsumenten dasselbe erhält.
 
-4. **Dienst-Tokens ändern sich nicht.** Die Identität des Dienst-Schemes ist angemeldet. Ein `permission`-Claim darin zählte
-   vorher und zählt nachher. Noelias Aussteller schreibt nur `client_id` und `jti` hinein (ADR-0002, ADR-0003), also
-   verleiht ein Dienst-Token von sich aus kein Recht. Das ist keine Änderung, wird hier aber festgehalten, damit niemand sie
-   aus Versehen als Nebenwirkung dieses Fixes liest.
+4. **Widerruf prüft jede angemeldete Personen-Identität einzeln.** `TokenRevocationMiddleware` und
+   `ResourceAuthorizationMiddleware` prüfen jede angemeldete Identität, die keine Dienst-Identität ist, **einzeln** mit
+   `identity.FindFirst` (also `jti`, `sub`, `iat` aus derselben Identität). Ist eine davon widerrufen oder nicht prüfbar, wird
+   abgelehnt (401). Ist **keine** Person angemeldet, lassen beide wie bisher durch; die Ablehnung kommt von der Anmelde- und
+   Rechteprüfung. Das schließt „in keinem Aufbau“ ein, auch zwei Personen-Schemes in einer Policy.
 
-5. **Der Fix ist gewollt ein Bruch, kein Patch.** Konsumenten mit `IClaimsTransformation`, die eine **zusätzliche** Identität
+5. **`PersonPartOf` filtert immer.** `ServiceCallerIdentity.PersonPartOf` gibt künftig **immer** nur angemeldete Identitäten
+   ohne die Dienst-Identität zurück (bisher kam ohne Dienst-Identität der Principal unverändert zurück). Das **ersetzt diesen
+   Teil von ADR-0003** (die Zusicherung „comes back as it went in“, `ServiceCallerHandler.cs:56–58`); die Remarks werden
+   angepasst. Folge für Konsumenten: Eine eigene `IPrincipalFactory` bekommt einen gefilterten Principal (MIGRATION.md).
+
+6. **Dienst-Tokens ändern sich nicht.** Die Identität des Dienst-Schemes ist angemeldet. Ein `permission`-Claim darin zählte
+   vorher und zählt nachher. Noelias Aussteller schreibt nur `client_id` und `jti` hinein (`ServiceTokenIssuer.cs:98–105`),
+   verleiht also von sich aus kein Recht. Das ist keine Änderung, wird festgehalten, damit niemand sie als Nebenwirkung liest.
+
+7. **Der Fix ist gewollt ein Bruch, kein Patch.** Konsumenten mit `IClaimsTransformation`, die eine **zusätzliche** Identität
    ohne `AuthenticationType` anhängen, verlieren ihre Rechte (200 → 403). Das ist die geschlossene Richtung, und der Owner hat
-   sie ausdrücklich gewählt. Der Weg für sie steht in `MIGRATION.md` (Entscheidung 7).
+   sie ausdrücklich gewählt.
 
-6. **Was dieses Gate nicht anfasst.** Das Gate ändert nur `src/Noelia.Infrastructure/{Middleware,Authorization,Security,Builder}`,
-   Tests, `README.md`, `MIGRATION.md` und `docs/befunde/`. Dieselbe Fehlerklasse steht noch an Stellen außerhalb dieses
-   Scopes. Sie ändern weder Rechte noch Rollen einer Anfrage und werden **nicht** hier gefixt, sondern als Issue geführt:
-   `Extensions/ClaimsPrincipalExtensions.cs` (öffentliche Helfer `IsAdmin()` und andere, `IsInRole` über alle Identitäten, in der
-   Bibliothek selbst nicht aufgerufen), `Noelia.Http/.../DistributedRateLimitingMiddleware.cs:114` (Schlüsselwahl für das
-   Limit) sowie die reinen Log-Stellen `LoggingBehavior.cs:244` und `MiddlewarePipelineModule.cs:87`. Ob die öffentlichen
-   Helfer dazugehören, ist eine eigene Entscheidung, weil sie öffentliche Signaturen berühren.
+8. **Was dieses Gate nicht anfasst** (außerhalb des Scopes, Issue „Nacharbeit G-0018“, soweit nicht bereits Issue):
+   `Extensions/ClaimsPrincipalExtensions.cs` (öffentliche Helfer, in `src/` und `demo/` nicht aufgerufen, eigene Entscheidung wegen
+   öffentlicher Signaturen), `Noelia.Http/.../DistributedRateLimitingMiddleware.cs:114,119` (Schlüsselwahl für das Limit: fehlt der
+   Person `sub`, kann der Schlüssel aus einer unangemeldeten Identität stammen, das Limit trifft einen fremden Nutzer oder lässt sich
+   umgehen), `Observability/TelemetryMiddleware.cs:137`, `Caching/Http/ResponseCachingHeaderMiddleware.cs:267` (ETag-Schlüssel),
+   `Noelia.Dashboard/NoeliaDashboardMiddleware.cs:222`, `Noelia.Cli/InitCommand.cs:337` (erzeugt `VisibleTo(... IsInRole("operator"))`),
+   `LoggingBehavior.cs:244` (nur Log).
 
-7. **Migrationsweg (Text für `MIGRATION.md`).** Wer in `IClaimsTransformation` Claims ergänzt, hängt sie an die
-   **angemeldete** Identität des Principals, nicht an eine zusätzliche:
+9. **Migrationsweg (Text für `MIGRATION.md`).** Eine `IClaimsTransformation` läuft bei **jedem** `AuthenticateAsync`, für **jedes**
+   Scheme, auch für das Dienst-Scheme `NoeliaService`. Wer Claims ergänzt, wählt deshalb die angemeldete **Personen**-Identität
+   und leitet die Rechte aus deren `sub` ab:
 
    ```csharp
-   if (principal.Identity is ClaimsIdentity authenticated
-       && !authenticated.HasClaim("permission", "orders:read"))   // die Transformation kann mehrfach laufen
+   var person = principal.Identities.FirstOrDefault(i =>
+       i.IsAuthenticated && i.AuthenticationType != ServiceTokenDefaults.AuthenticationScheme);
+   var sub = person?.FindFirst("sub")?.Value;
+   if (person is not null && sub is not null && !person.HasClaim("permission", "orders:read"))  // mehrfach lauffähig
    {
-       authenticated.AddClaim(new Claim("permission", "orders:read"));
+       person.AddClaim(new Claim("permission", "orders:read"));
    }
    ```
 
-   Nicht: der angehängten Identität selbst einen `AuthenticationType` geben, damit sie „zählt“. Das hieße, eine Identität als
-   angemeldet auszugeben, die kein Scheme geprüft hat, also genau den Zustand, den dieser Fix ausschließt. Wer die
-   Rechte aus einer Datenbank lädt, setzt sie auf die angemeldete Identität oder stellt sie im Token aus.
+   Nicht: an `principal.Identity` anhängen (kann die unangemeldete erste Identität sein, die Claims zählen dann nicht), nicht an die
+   Dienst-Identität (ein Dienst-Token bekäme Personenrechte, Entscheidung 6), und nicht der angehängten Identität selbst einen
+   `AuthenticationType` geben, damit sie „zählt“: Das gäbe eine Identität als angemeldet aus, die kein Scheme geprüft hat.
+   `ServiceTokenDefaults.AuthenticationScheme` ist öffentlich.
 
 ## Verworfen
 
-- **Nur `Identities.Any(i => i.IsAuthenticated)` in `PermissionMiddleware`.** Verworfen im Design-Review der Vorrunde: lässt
-  Fall A offen (Rechte aus allen Identitäten), lässt den Handler unberührt und legt den Widerruf frei (Entscheidung 3).
-- **Nur dokumentieren, dass nicht angemeldete Identitäten zählen.** Gegen den Owner-Entscheid („Die Lücke wird geschlossen,
-  nicht nur dokumentiert“).
+- **Nur `Identities.Any(i => i.IsAuthenticated)` in `PermissionMiddleware`.** Lässt Fall A offen, lässt den Handler und die
+  weiteren Wege unberührt und legt Widerruf und Handler frei.
+- **Nur dokumentieren.** Gegen den Owner-Entscheid („geschlossen, nicht nur dokumentiert“).
 - **Als Patch 7.1.2 ausliefern.** Gegen den Owner-Entscheid; der Fix bricht Konsumenten, also Minor 7.2.0.
-- **Eine Option „unangemeldete Identitäten zulassen“.** Würde die Lücke als Schalter erhalten. Wer Claims braucht, hängt sie
-  an die angemeldete Identität (Entscheidung 7).
+- **Eine Option „unangemeldete Identitäten zulassen“.** Würde die Lücke als Schalter erhalten.
+- **Die Katalog-Policies auf die Rolle ausdehnen.** Würde die offene Roadmap-Frage (`README.md:2218–2224`) nebenbei entscheiden.
 
 ## Prüfung (Plan für Q-0070)
 
 Rot zuerst, dann grün, je Zeile mit Mutationsprobe (Körper des Fixes entfernen, Test muss rot werden):
 
-- **Matrix** {`permission`, Rolle über Katalog, `*`, `kategorie:*`} × {unangemeldete Identität vorn, hinten} mit angemeldeter
-  Person ohne Recht: **403**, in `PermissionMiddleware` **und** `PermissionAuthorizationHandler`. Nur nicht angemeldete
-  Identitäten: **401** (Handler: nicht erfüllt).
-- Positiv: angemeldete Identität trägt das Recht, unangemeldete Identität daneben stört nicht: 200.
-- **Widerrufene Person** mit nicht angemeldeter Identität vorn, durch die ganze Kette: 401, kein Durchkommen.
-- **Prüfung je Datensatz** und **Besitzerprüfung** mit nicht angemeldeter Identität vorn und hinten.
-- **`IClaimsTransformation`:** angehängte Identität ohne `AuthenticationType` zählt nicht (403); dieselben Claims an der
-  angemeldeten Identität zählen (200). Beides als Test, damit der Migrationsweg belegt ist.
-- **Wächter über die ganze Kette:** auch mit `Without(PermissionEnforcement)`, also auf dem Weg über den Handler allein.
-- Dienst-Token: `permission` in der Dienst-Identität zählt unverändert (Entscheidung 4).
+- **Matrix** {`permission`, Rolle über Katalog, `*`, `kategorie:*`, `Permission:` mit `Resource`} × {unangemeldete Identität vorn,
+  hinten} mit angemeldeter Person ohne Recht: **403** in `PermissionMiddleware` **und** `PermissionAuthorizationHandler`.
+  Nur unangemeldete Identitäten: **401** (Handler: nicht erfüllt). Positiv: Recht an der angemeldeten Identität, unangemeldete
+  daneben stört nicht (200).
+- **Handler-Pfad der Standardkette mit `PermissionEnforcement`, Fall B, je Policy:** Katalog-Policy, `RequireAdminRole`, `AdminOnly`,
+  `RequireActiveAccount`, `RequireVerifiedEmail`, `ResourceOwner` (Policy mit `OwnershipRequirement`), `ResourceRead`, und der
+  eigenständige `ResourceOwnerRequirement` (Handler `ResourceOwnerHandler`, keine benannte Policy). Das sind die Zeilen, die rot werden,
+  wenn Entscheidung 2 ohne Entscheidung 3 landet. Dazu: nur unangemeldete Identität bei Katalog- und Rollen-Policies.
+- **Widerruf:** widerrufene Person mit unangemeldeter Identität vorn/hinten, durch die ganze Kette: 401. Zwei Personen-Schemes in
+  beiden Reihenfolgen, eines widerrufen: 401. Auch mit `Without(PermissionEnforcement)`.
+- **Prüfung je Datensatz und Besitzerprüfung** (Middleware und Handler) mit unangemeldeter Identität mit fremder ID vorn und hinten.
+- **Kontostand:** unangemeldete Identität mit `account_status=Active` vorn, angemeldete `Suspended`: abgelehnt.
+- **Mandant und Kapazität:** unangemeldetes `tenant` hinter der Person: `ICurrentPrincipal.Current` bleibt Person, `ActingForCompany`
+  nicht erfüllt, `ActingAsSelf` erfüllt, in beiden Reihenfolgen.
+- **Audit:** Nutzer-ID im Protokoll stammt aus der angemeldeten Identität.
+- **`IClaimsTransformation`:** zusätzliche Identität ohne `AuthenticationType` zählt nicht (403); dieselben Claims an der angemeldeten
+  Personen-Identität zählen (200); mit Dienst-Principal hängt die Beispiel-Transformation **nichts** an die Dienst-Identität.
+- **Dienst-Identität plus unangemeldete Identität an einer Tür:** Dienst-Claims zählen unverändert, die unangemeldete nicht.
+- Dienst-Token: `permission` in der Dienst-Identität zählt unverändert (Entscheidung 6).
 
 ## Folgen
 
-- `MIGRATION.md` bekommt einen Abschnitt „7.2.0“ mit dem Bruch und dem Weg aus Entscheidung 7. Das README nennt die Regel an der
-  Stelle, die Rechte und Rollen erklärt.
-- Unter `docs/befunde/` entsteht ein Befund: was die Prüfung tat, was sie versprach, Noelia-only-Reproduktion, Status.
+- `MIGRATION.md` bekommt einen Abschnitt „7.2.0“ mit dem Bruch, dem Weg aus Entscheidung 9, dem Hinweis auf `IPrincipalFactory`
+  (Entscheidung 5) und dem Hinweis, dass eigener Code (`[Authorize(Roles=…)]`, `RequireRole`, `RequireClaim`, `User.IsInRole`)
+  weiter alle Identitäten zählt. Das README nennt die Regel dort, wo Rechte und Rollen erklärt werden.
+- Unter `docs/befunde/` entsteht ein Befund: was die Prüfungen taten, was sie versprachen, Noelia-only-Reproduktion (auch
+  Mandant), Status.
+- Die Remarks von `ServiceCallerIdentity.PersonPartOf` werden angepasst (Entscheidung 5).
 - Die Versionsnummer bleibt in diesem Gate bei 7.1.1; den Sprung auf 7.2.0 und die Veröffentlichung macht der Owner im Release.
-- Issue für die Stellen aus Entscheidung 6.
+- Issue „Nacharbeit G-0018“ für die Stellen aus Entscheidung 8.
