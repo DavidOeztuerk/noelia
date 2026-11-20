@@ -120,8 +120,15 @@ getroffen wurde (`UseAuthorization` läuft vor `PermissionMiddleware`, `Middlewa
      Die Katalog-Policy zählt weiter nur den `permission`-Claim; die offene Roadmap-Frage `README.md:2218–2224` wird nicht
      nebenbei entschieden. Policy-Namen und öffentliche API bleiben gleich. Der gemeinsame `HasPermission` wird dafür **nicht**
      wiederverwendet (er kennt Wildcards und Katalogrollen).
-   - **Handler gelten als „mindestens eine angemeldete Personen-Identität **und** jede besteht“. Keine Person heißt nicht erfüllt**,
-     wie heute (Nutzer-ID bzw. Claim fehlt). Das „Durchlassen ohne Person“ aus Entscheidung 4 gilt **nur** für die beiden Middlewares,
+   - **Die fünf Personen-Handler** (`ActiveAccountHandler`, `EmailVerifiedHandler`, `ResourceAuthorizationHandler`,
+     `OwnershipAuthorizationHandler`, `ResourceOwnerHandler`) **gelten als „mindestens eine angemeldete Personen-Identität **und** jede
+     besteht“. Keine Person heißt nicht erfüllt**, und zwar durch `context.Fail()` (wie heute: Nutzer-ID bzw. Claim fehlt; heute rufen alle
+     fünf `Fail()`). Bei `ResourceAuthorizationHandler` stimmt „wie heute“ nur dank der Noelia-Provider; mit einem eigenen Provider ist die
+     Regel strenger als heute, und `MIGRATION.md` sagt das. **Für die Rechte- und Rollen-Handler** (`PermissionAuthorizationHandler` und
+     die Handler der Katalog- und Rollen-Policies) gilt etwas anderes, ausdrücklich: Es reicht **irgendeine** angemeldete Identität
+     (nicht „jede“), eine **Dienst-Identität zählt mit** (ihr `permission`-Claim gilt unverändert, Entscheidung 6), und kein angemeldetes
+     Konto heißt nicht erfüllt. Der Absatz hier gilt nicht für sie.
+     Das „Durchlassen ohne Person“ aus Entscheidung 4 gilt **nur** für die beiden Middlewares,
      die bloß filtern; in einem Handler hieße es „Succeed“, also eine Zulassung für anonyme Aufrufer und reine Dienst-Principals.
      Dazu bekommen `RequireActiveAccount`, `RequireVerifiedEmail`, `ResourceRead`, `ResourceWrite`, `ResourceDelete` und
      `ResourceOwner` zusätzlich `RequireAuthenticatedUser`.
@@ -228,8 +235,18 @@ Rot zuerst, dann grün, je Zeile mit Mutationsprobe (Körper des Fixes entfernen
 - **Audit:** Nutzer-ID im Protokoll stammt aus der angemeldeten Identität.
 - **`IClaimsTransformation`:** zusätzliche Identität ohne `AuthenticationType` zählt nicht (403); dieselben Claims an der angemeldeten
   Personen-Identität zählen (200); mit Dienst-Principal hängt die Beispiel-Transformation **nichts** an die Dienst-Identität.
-- **Keine Person (Fassung 4):** anonym und nur Dienst-Identität an `RequireActiveAccount`, `RequireVerifiedEmail`, `ResourceOwner`,
-  `ResourceRead`: nicht erfüllt.
+- **Keine Person (Fassung 4), je Personen-Handler direkt geprüft** (`ActiveAccountHandler`, `EmailVerifiedHandler`,
+  `ResourceAuthorizationHandler`, `OwnershipAuthorizationHandler`, `ResourceOwnerHandler`), und zwar **ohne** `RequireAuthenticatedUser`
+  (eine Konsumenten-Policy kann ohne es auf den Handler zeigen; der eigenständige `ResourceOwnerRequirement` hat keine benannte
+  Policy; die Anforderungstypen sind öffentlich). Drei Fälle je Handler, jeder `Fail()`/nicht erfüllt:
+  (a) Principal ganz ohne Identität;
+  (b) nur eine unangemeldete Identität **mit** `NameIdentifier`, `account_status=Active`, `email_verified=true` und `Admin`;
+  (c) Dienst-Identität plus diese unangemeldete Identität.
+  Mutationsproben: ohne die Prüfung „mindestens eine Person“ werden (b) und (c) rot; gibt `PersonPartOf` den Principal wie bisher
+  unverändert zurück (Entscheidung 5), wird (b) rot; ein Handler, der über die leere Menge „alle bestehen“ prüft, wird bei (a) rot
+  und würde ohne diese Fälle anonymen und reinen Dienst-Principals Besitz zusprechen. Zusätzlich die benannten Policies
+  (`RequireActiveAccount`, `RequireVerifiedEmail`, `ResourceOwner`, `ResourceRead`) mit (a) und nur Dienst-Identität: nicht erfüllt.
+  Rechte- und Rollen-Handler: kein angemeldetes Konto nicht erfüllt, Dienst-Identität mit `permission` erfüllt (Entscheidung 6).
 - **Zwei angemeldete Personen-Identitäten (Fassung 3):** Sitzung der zweiten widerrufen, `sid`/`session_id` gemischt: 401. `sub`
   von A und `tenant` von B: `Current` ist Person A ohne Mandant, `ActingForCompany` nicht erfüllt. Kontostand: eine Identität ohne
   Aussage und eine mit `Active`: abgelehnt. Prüfung je Datensatz: jede muss bestehen, ohne `jti` (Cookie) kein 401.
