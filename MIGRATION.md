@@ -1,3 +1,50 @@
+# Noelia 7.1.1 → 7.1.2
+
+**Behoben: `noelia.m2m.caller-policy` sah beim Start keine Routen** ([ADR-0004](docs/adr/0004-pruefungen-nach-dem-start-der-routen.md),
+#62). Die Sicherheitsprüfungen liefen in `StartAsync`, bevor ASP.NET die Routen in den
+Container übertragen hatte. Die Prüfung sah null Türen: Ein Aussteller meldete immer Fail
+(„0 token endpoints“), ein reiner Empfänger meldete Pass über null Türen, also ein Pass, der
+nichts geprüft hatte. Die Prüfungen laufen jetzt ein zweites Mal, sobald alle Dienste
+gestartet sind. Das ändert, was der Bericht zeigt:
+
+- Ein korrekter **Aussteller** meldet **Pass statt Fail**.
+- Ein **Empfänger mit einer Tür, die `AllowAnonymous` trägt,** meldet **Fail statt Pass**; eine Tür **ohne Fallback** meldet **Warning statt Pass**.
+- Ein **Empfänger ganz ohne gemappte Tür** meldet **Warning statt Pass** („nothing was checked“).
+- Zwischen Start der Dienste und zweitem Lauf meldet die Prüfung Warning („routes not built yet“).
+  Die Prüfung scheitert nie den Start: Schlägt der zweite Lauf selbst fehl, bleibt der erste.
+
+Wer den Bericht in CI oder Monitoring auf `Pass` prüft, sieht für Empfänger ohne Tür jetzt
+Warning. Keine API-Änderung, keine Konfiguration.
+
+**Zu #58 (siehe unten):** Keine API-Änderung. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
+an `ActingForCompanyHandler` und `ActingAsSelfHandler`; der bisherige Konstruktor bleibt
+binär- und quellkompatibel.
+
+**Behoben: Kapazitäts-Policies hinter `UseAuth()`** ([ADR-0006](docs/adr/0006-kapazitaets-policies-unabhaengig-von-der-reihenfolge.md),
+#58). `ActingForCompany` und `ActingAsSelf` lasen `ICurrentPrincipal.Current`, das erst
+`UsePrincipal()` setzt. `UseAuth()` enthält aber die Rechteprüfung, sie lief also davor,
+und jede Person bekam 403. Die Handler übersetzen jetzt `context.User` selbst, genau wie
+`UsePrincipal()`, und die Reihenfolge spielt keine Rolle mehr. Das ändert Antworten:
+
+- Wer nach dem README aufgebaut hat (`.UseAuth().UsePrincipal()`), bekommt für gültige
+  Personen **200 statt 403**. Wer die Policies umgangen hat, merkt nichts.
+- An einer Dienst-Tür mit einer Person neben dem Dienst und `ActingAsSelf` kommt die
+  Person durch: **200 statt 404** (ADR-0003, Entscheidung 6).
+- Mit `UseTokenRevocation()` hinter `UseAuth()` bekommt eine widerrufene Person an diesen
+  Policies **401 statt 403**: Die Policy erlaubt, die Widerrufsprüfung dahinter lehnt ab,
+  der Endpoint läuft nie. **Ohne** Widerrufsschritt (die Standardkette und die README-Kette
+  enthalten keinen) gibt es nichts, was ein widerrufenes Token ablehnt, und die Person
+  bekommt jetzt **200 statt 403**; wer Widerruf braucht, hängt `UseTokenRevocation()` an.
+- Ein Dienst-Token ist weiter keine Person und bekommt keine Rolle.
+
+**Verhaltensänderung, scheitert geschlossen:** Ein ersetztes oder gefälschtes
+`ICurrentPrincipal`, etwa in Integrationstests, erfüllt die beiden Policies **nicht mehr**.
+Der Konstruktor `(ICurrentPrincipal)` nimmt sein Argument noch an, **liest es aber nicht
+mehr**. Die Claims gehören in den User: `sub`, und für `ActingForCompany` der
+`tenant`-Claim. Wer eigene Tests hat, die nur `ICurrentPrincipal` austauschen, muss sie
+anpassen. Der Mandantenfilter liest weiter `ICurrentPrincipal` und fällt in einem eigenen
+Authorization-Handler auf `TenantId.None` zurück.
+
 # Noelia 7.1.0 → 7.1.1
 
 Keine neue öffentliche API. Es ist nichts umzustellen.

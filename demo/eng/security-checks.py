@@ -179,6 +179,26 @@ def expected_services(expectations: dict, profile: str) -> dict[str, set[str]]:
     return expected
 
 
+def expected_statuses(expectations: dict, profile: str) -> dict[str, dict[str, str]]:
+    """Instance name -> {check ID: the status it must report}, for the few checks
+    that must say more than "I ran".
+
+    `ExpectedStatus` maps a check to {service role: status}. It exists because a
+    check can be present and still not examine anything: `noelia.m2m.caller-policy`
+    answers NotApplicable on a host where nothing is composed, so a gate that only
+    asks for the line would stay green on an issuer that lost its token endpoint.
+    """
+    wanted: dict[str, dict[str, str]] = {}
+    for scenario in scenarios_for(expectations, profile):
+        for service in expectations["Scenarios"][scenario]["Services"]:
+            role = expectations["Services"].get(service)
+            for check_id, by_role in expectations.get("ExpectedStatus", {}).items():
+                if role in by_role:
+                    wanted.setdefault(f"{service}-{scenario}", {})[check_id] = by_role[role]
+
+    return wanted
+
+
 # --- allowances ------------------------------------------------------------
 
 
@@ -236,6 +256,7 @@ def evaluate(
     expected: dict[str, set[str]],
     allowances: list[tuple[str, str, str]],
     fail_on_warning: bool = False,
+    expected_status: dict[str, dict[str, str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Returns (report lines, problems). No problems means the gate passes."""
     lines: list[str] = []
@@ -274,6 +295,17 @@ def evaluate(
 
             if check_id not in expected[instance]:
                 note += "   (not expected here)"
+
+            # A Fail is already judged above (and may be allowed); this is the
+            # case where the status is not a failure and still not the promise.
+            wanted = (expected_status or {}).get(instance, {}).get(check_id)
+            if wanted and check["status"] != wanted and check["status"] not in FAILING:
+                # An allowance covers a Warning (the docstring: Fail or Warning), never a NotApplicable.
+                if reason and check["status"] in NOTEWORTHY:
+                    mark, note = "~", f"   allowed: {reason}"
+                else:
+                    mark = "!"
+                    problems.append(f"{instance}: {check_id} is {check['status']}, expected {wanted}")
 
             lines.append(f"  {mark} {check_id:38} {check['status']:14} {check['severity']}{note}")
 
@@ -325,7 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"security-checks: cannot read the logs: {error}", file=sys.stderr)
         return 2
 
-    lines, problems = evaluate(parse_runs(text), expected, allowances, arguments.fail_on_warning)
+    lines, problems = evaluate(parse_runs(text), expected, allowances, arguments.fail_on_warning,
+                               expected_statuses(expectations, arguments.profile))
     print("\n".join(lines))
     print()
 

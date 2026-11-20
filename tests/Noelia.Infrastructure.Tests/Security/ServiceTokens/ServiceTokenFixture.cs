@@ -22,10 +22,11 @@ internal static class ServiceTokenFixture
     /// A value from the ADR shell recipe and the hash that recipe prints for it. Both are
     /// throwaway test vectors generated for this file; they protect nothing.
     /// </summary>
-    public const string KnownVector = "vTFQKHO5s-d6tcHO3FIL9VsySJbH4BtwgcszEdEnybw";
+    // gitleaks:allow — a throwaway test vector generated for this file; it protects nothing.
+    public const string KnownVector = "vTFQKHO5s-d6tcHO3FIL9VsySJbH4BtwgcszEdEnybw"; // gitleaks:allow
     public const string KnownHash = "sha256:rWpn3cMgvuFTUlyssEse2ZRB29ydKiG75UV2pFxISQU";
 
-    public const string OtherVector = "UwML9_1YhWhQSsggG1_xl8sXZIu_Y54wctD5M0uX8vg";
+    public const string OtherVector = "UwML9_1YhWhQSsggG1_xl8sXZIu_Y54wctD5M0uX8vg"; // gitleaks:allow
     public const string OtherHash = "sha256:60DzB4MF4xu8p3fpei6ICmgPD-VUhI8jPLHvkDIwpNA";
 
     public static GeneratedKeyPair KeyPair { get; } = SigningKey.GenerateKeyPair("m2m-test");

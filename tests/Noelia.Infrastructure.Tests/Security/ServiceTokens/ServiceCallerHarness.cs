@@ -273,7 +273,8 @@ internal static class Wire
         string? clientIdClaim = null,
         TimeSpan? lifetime = null,
         string? subject = "person-1",
-        string? tokenId = null)
+        string? tokenId = null,
+        string? tenant = null)
     {
         var now = DateTime.UtcNow;
         var expires = lifetime ?? TimeSpan.FromMinutes(5);
@@ -291,6 +292,11 @@ internal static class Wire
         if (clientIdClaim is not null)
         {
             claims["client_id"] = clientIdClaim;
+        }
+
+        if (tenant is not null)
+        {
+            claims[Noelia.Infrastructure.Security.Identity.NoeliaClaimTypes.Tenant] = tenant;
         }
 
         return Sign(new SecurityTokenDescriptor

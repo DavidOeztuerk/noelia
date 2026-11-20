@@ -46,6 +46,12 @@ public sealed class ServiceFactory<TEntryPoint>(
         if (mayIssue)
         {
             builder.UseSetting("Jwt:PrivateKey", keys.PrivateKey);
+
+            // The issuer reads the hash of its one client's secret from the
+            // environment, by the flat name the README gives. A deployment
+            // gets it from a Docker secret; a test host from this run's own
+            // generated pair, so no secret in this repository is ever real.
+            builder.UseSetting(M2mTestClient.HashVariable, M2mTestClient.Secret.Hash);
         }
 
         if (databasePath is not null)
@@ -53,6 +59,17 @@ public sealed class ServiceFactory<TEntryPoint>(
             builder.UseSetting("Database:Path", databasePath);
         }
     }
+}
+
+/// <summary>The one machine client the issuer knows, with a secret generated for this run.</summary>
+internal static class M2mTestClient
+{
+    internal const string Id = "todo-service";
+    internal const string Audience = "user-service";
+    internal const string HashVariable = "NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH";
+
+    internal static Noelia.Infrastructure.Security.ServiceTokens.ServiceClientSecret Secret { get; } =
+        Noelia.Infrastructure.Security.ServiceTokens.ServiceClientSecret.Generate(Id);
 }
 
 /// <summary>A master key for this test run, and no longer.</summary>

@@ -20,6 +20,12 @@ namespace Noelia.Infrastructure.Security.Identity;
 /// translate and <see cref="ICurrentPrincipal.Current"/> stays <c>null</c>; a person
 /// authenticated beside the service is translated as usual (ADR-0003).
 /// </para>
+/// <para>
+/// The step sets the principal for the steps and endpoints after it. The capacity policies
+/// do not need it: they translate the user they are handed in the same way, so they hold
+/// wherever this step stands, including behind <c>UseAuth()</c> where authorization has
+/// already run (ADR-0006).
+/// </para>
 /// </remarks>
 public sealed class PrincipalMiddleware
 {

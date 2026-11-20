@@ -13,6 +13,7 @@ internal static class SecurityCheckRegistration
         services.TryAddSingleton<SecurityCheckReport>();
         services.TryAddSingleton<ISecurityCheckReport>(
             provider => provider.GetRequiredService<SecurityCheckReport>());
+        services.TryAddSingleton<RoutesBuiltState>();
         services.TryAddSingleton<ISecurityCheckRunner, SecurityCheckRunner>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, SecurityCheckStartupService>());

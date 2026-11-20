@@ -19,6 +19,8 @@ packages.
 
 ```bash
 cp .env.example .env     # a key pair and an operator secret; see below
+# or, for a throwaway copy (a worktree on a tag, a clone): eng/fresh-copy-env.sh
+# writes every value itself. Run `docker compose --profile all down -v` afterwards.
 
 docker compose --profile dev     up -d --build --wait
 docker compose --profile staging up -d --build --wait
@@ -229,7 +231,8 @@ This still does not cover the application's login/logout journeys.
 
 ### Runtime secrets
 
-`.env` holds three values and is gitignored. Copy `.env.example` and fill it in:
+`.env` holds four values and is gitignored. Copy `.env.example` and fill it in
+(the fourth, `NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH`, is described after the block):
 
 ```bash
 # A key pair. The issuing service gets the private half; everyone else
@@ -252,6 +255,26 @@ are read by the `KeyPerFile` configuration provider from `/run/secrets`. A
 container's environment is visible to anyone on the host through
 `docker inspect` and `/proc/<pid>/environ`; a tmpfs mounted into one container
 is not.
+
+**The issuer's machine client.** `user-service` also issues service tokens
+(`POST /m2m/token`, OAuth 2.0 client credentials). It knows one client,
+`todo-service`, and one audience, `user-service`, both written in
+`UserService.Api/Program.cs`; configuration holds only the **hash** of the client's
+secret, as a fourth Docker secret on the three `user-*` services (not on the
+monolith). Nothing in the demo calls the endpoint yet, so the plaintext secret is
+not needed anywhere and is not stored. Make the hash exactly as the main README
+describes ("Making a secret"), keeping only the hash line:
+
+```bash
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+S=$(openssl rand 32 | b64url)
+echo "NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH=sha256:$(printf %s "$S" | openssl dgst -sha256 -binary | b64url)"
+```
+
+The endpoint is rate limited (20 a minute per caller address) by a policy the
+service registers itself: `RequireRateLimiting` alone is only metadata, and
+`noelia.m2m.caller-policy` can see the metadata but not whether a limiter runs, so
+`ServiceTokenIssuerTests` asserts the 429.
 
 ## Checking it
 
@@ -286,6 +309,13 @@ the provider set, and takes each service role's modules from
 other only where its module is in the role — so a module left out on purpose
 (`OmittedModules` in the expectations file) takes its checks with it and is not a
 failure, while the same absence undeclared is one.
+
+Presence is not always enough, so the file also carries `ExpectedStatus`: a check, a
+service role and the status it must report. `noelia.m2m.caller-policy` must be `Pass`
+on the issuer (`user` in every stage). Without that line the check would be present
+and `NotApplicable` on a host that had lost its token endpoint, and the gate green.
+A status other than the expected one is a finding even when it is not a Fail, and an
+acceptance covers a Warning of it but never a `NotApplicable`.
 
 Acceptances are scoped, never global: `eng/accepted-findings.txt` lines read
 `<scope> <check id> <reason>`, scope being a stage (`prod`) or one service
@@ -386,17 +416,26 @@ like failures; the only acceptance is
 Before a Noelia version is on nuget.org:
 
 ```bash
-dotnet pack ../Noelia.slnx -c Release -o .local-feed
-rm -rf ~/.nuget/packages/noelia.*
-dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
+V=$(grep -o '<VersionPrefix>[^<]*' ../Directory.Build.props | cut -d'>' -f2)-local.$(date -u +%Y%m%d%H%M%S)
+PKGS=$(mktemp -d)
+dotnet pack ../Noelia.slnx -c Release -p:Version=$V -o .local-feed/$V
+# NuGet.Config maps * to nuget.org, so a bare --source is ignored: say where Noelia.* comes from
+cat > $PKGS/NuGet.Config <<EOF
+<configuration><packageSources><clear />
+<add key="candidate" value="$PWD/.local-feed/$V" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
+<packageSourceMapping><packageSource key="candidate"><package pattern="Noelia.*" /></packageSource>
+<packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
+EOF
+dotnet restore Noelia.TodoDemo.sln --packages $PKGS --configfile $PKGS/NuGet.Config -p:NoeliaVersion=$V
 
-NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
+NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 ```
 
-The cache has to be cleared by hand: a candidate keeps its version number while
-its contents change, and NuGet has no way to know that. Prefer the release gate
-above, which gives every candidate a fresh version and an isolated restore path, so
-nothing global has to be deleted.
+A candidate gets a version of its own and a package folder of its own. NuGet keys
+its global folder on id and version only, so a test build under a real version
+number would sit in `~/.nuget/packages` and be handed to every other project on
+the machine that restores that number. Nothing here is packed under a real number
+and nothing global is deleted. The release gate above does the same.
 
 ## What is in here
 

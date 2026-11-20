@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Demo.Platform;
+using Microsoft.AspNetCore.RateLimiting;
 using Noelia.Abstractions.Hosting;
 using Noelia.Abstractions.Security.Sessions;
 using Noelia.Core.Identity;
@@ -6,6 +8,7 @@ using Noelia.Infrastructure.Builder;
 using Noelia.Infrastructure.Builder.Modules;
 using Noelia.Infrastructure.Extensions;
 using Noelia.Infrastructure.Http;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Noelia.Dashboard;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -51,11 +54,43 @@ builder.Services.AddNoelia(
                 builder.Configuration["Jwt:PublicKey"]
                 ?? throw new InvalidOperationException("Jwt:PublicKey is not configured."),
                 keyId))
+        // The service that signs people in is also the one that signs for other
+        // services: it holds the only private key, so it is the only place a
+        // service token can come from. The client and the audience are written
+        // here, in code, so the list a reviewer reads is the list that runs;
+        // configuration holds only the hash of the client's secret, from
+        // NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH (a Docker secret in the
+        // compose stack, see docker-compose.yml). Nothing calls the endpoint
+        // yet: the demo has no service-to-service call, and this is the issuing
+        // half only.
+        .UseServiceTokenIssuer(issuer => issuer
+            .Clients(builder.Configuration, "todo-service")
+            .Audiences("user-service"))
         .Use(NoeliaModule.Principal)
         .Use(NoeliaModule.PasswordHashing)
         .Use(NoeliaModule.TokenSessions)
         .UseDemoProviders(demo, serviceName, readsTokens: true, ownsSessions: true)
         .UseDemoDashboard(demo, builder.Environment, "GateCanary"));
+
+// The brake the token endpoint names. RequireRateLimiting("m2m-token") is only
+// metadata: it limits something when ASP.NET's limiter middleware runs
+// (UseRateLimiter below) and a policy of this name exists, and otherwise it is
+// a promise nobody keeps — which is the defect class the security check
+// noelia.m2m.caller-policy cannot see from the metadata alone. Per caller
+// address (the real one: forwarded headers are applied first), because the
+// callers it is for have no identity yet.
+builder.Services.AddRateLimiter(limiter =>
+{
+    limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.AddPolicy("m2m-token", http => RateLimitPartition.GetFixedWindowLimiter(
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
+});
 
 builder.Services
     .AddUserApplication()
@@ -91,6 +126,15 @@ app.UseNoelia(builder.Environment, serviceName, pipeline => pipeline
     // After the principal: an audit entry that cannot name who acted is a
     // record of a request, not of a decision.
     .UseSecurityAudit());
+
+// After the pipeline above, so the forwarded address is already the caller's.
+// It runs before any endpoint, which is where the token endpoint's policy bites.
+app.UseRateLimiter();
+
+// Exactly one token endpoint, and a rate limit on it: both are what the check
+// noelia.m2m.caller-policy looks for on an issuer.
+app.MapServiceTokenEndpoint("/m2m/token")
+    .RequireRateLimiting("m2m-token");
 
 var auth = app.MapGroup("/api/auth");
 

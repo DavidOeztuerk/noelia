@@ -50,6 +50,25 @@ x-issuer-secrets: &issuer-secrets
   - source: master_key
     target: Encryption__MasterKey
 
+# user-service issues service tokens as well as person tokens (the monolith does
+# not), so it additionally holds the hash of its one machine client's secret. A hash, never the secret: the plaintext belongs in the folder of the
+# service that calls, and no service in this demo calls yet. The name is the
+# flat one the README gives (NOELIA_M2M_CLIENT_<ID>_SECRET_HASH); there is no
+# `__` in it, so KeyPerFile hands the file's name over as the key unchanged.
+x-user-secrets: &user-secrets
+  - source: jwt_key_id
+    target: Jwt__KeyId
+  - source: jwt_private_key
+    target: Jwt__PrivateKey
+  - source: jwt_public_key
+    target: Jwt__PublicKey
+  - source: operator_secret
+    target: Demo__Dashboard__OperatorSecret
+  - source: master_key
+    target: Encryption__MasterKey
+  - source: m2m_todo_service_secret_hash
+    target: NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH
+
 # No private key. This service verifies signatures and holds nothing it could
 # sign with, so taking it over grants no ability to impersonate anyone.
 x-verifier-secrets: &verifier-secrets
@@ -81,6 +100,8 @@ secrets:
     environment: NOELIA_DASHBOARD_OPERATOR_SECRET
   master_key:
     environment: NOELIA_MASTER_KEY
+  m2m_todo_service_secret_hash:
+    environment: NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH
 
 services:
 
@@ -152,7 +173,7 @@ services:
       Demo__TrustedProxies__0: ${NOELIA_NET_DEV:-172.29.10}.2
       Demo__TrustedProxies__1: ${NOELIA_NET_DEV:-172.29.10}.3
       Database__Path: /data/user-service.db
-    secrets: *issuer-secrets
+    secrets: *user-secrets
     volumes:
       - user-dev-data:/data
     networks:
@@ -272,7 +293,7 @@ services:
       Demo__TrustedProxies__1: ${NOELIA_NET_STAGING:-172.29.20}.3
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-staging:6379
-    secrets: *issuer-secrets
+    secrets: *user-secrets
     volumes:
       - user-staging-data:/data
     depends_on:
@@ -393,7 +414,7 @@ services:
       Demo__TrustedProxies__1: ${NOELIA_NET_PROD:-172.29.30}.3
       Database__Path: /data/user-service.db
       Demo__Providers__Redis: valkey-prod:6379
-    secrets: *issuer-secrets
+    secrets: *user-secrets
     volumes:
       - user-prod-data:/data
     depends_on:

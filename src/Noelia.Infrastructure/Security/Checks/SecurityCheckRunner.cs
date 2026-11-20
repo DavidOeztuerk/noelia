@@ -163,12 +163,74 @@ internal sealed partial class SecurityCheckRunner(
     }
 }
 
-internal sealed class SecurityCheckStartupService(ISecurityCheckRunner runner) : IHostedService
+/// <summary>
+/// Whether ASP.NET has copied the mapped routes into the container yet. One instance per
+/// container, never static: two hosts in one process (every test host, a service that
+/// builds a second one) must not tell each other the routes exist.
+/// </summary>
+internal sealed class RoutesBuiltState
 {
+    private volatile bool _built;
+
+    public bool Built => _built;
+
+    internal void MarkBuilt() => _built = true;
+}
+
+/// <summary>
+/// Runs the checks twice: in <c>StartAsync</c>, and again in <c>StartedAsync</c> once every
+/// hosted service has started (ADR-0004).
+/// </summary>
+/// <remarks>
+/// A check that reads the routes cannot see them in <c>StartAsync</c>:
+/// <c>GenericWebHostService</c> builds the pipeline and fills the container's
+/// <c>EndpointDataSource</c> in its own <c>StartAsync</c>, which on a
+/// <c>WebApplicationBuilder</c> is the last service to run. <c>StartedAsync</c> is awaited
+/// before <c>StartAsync()</c> of the host returns, so the report is the real one once the host
+/// has started (Kestrel may already accept requests before that, and in that window the report
+/// still holds the first run's “routes not built yet”). <c>ApplicationStarted</c> would not
+/// give that guarantee: it is
+/// synchronous, so an async body would be <c>async void</c> and an exception from it would
+/// end the process.
+/// </remarks>
+internal sealed class SecurityCheckStartupService(
+    ISecurityCheckRunner runner,
+    RoutesBuiltState routes,
+    ILogger<SecurityCheckStartupService> logger) : IHostedLifecycleService
+{
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public async Task StartAsync(CancellationToken cancellationToken) =>
         await runner.RunAsync(cancellationToken);
 
+    public async Task StartedAsync(CancellationToken cancellationToken)
+    {
+        routes.MarkBuilt();
+        try
+        {
+            await runner.RunAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // An exception out of StartedAsync stops the host, and a service must not fail to
+            // start because its self-check did. The report keeps the first, honest run
+            // ("routes not built yet"). Only the type is logged, as everywhere in this
+            // feature: the message of a provider's exception may carry a value.
+            logger.LogError(
+                "The second security check run after startup failed ({ExceptionType}); the report keeps the first run",
+                exception.GetType().Name);
+        }
+    }
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 internal static class SecurityCheckResultFactory

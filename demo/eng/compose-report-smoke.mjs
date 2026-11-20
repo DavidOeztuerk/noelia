@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,6 +56,12 @@ Object.assign(env, {
   NOELIA_JWT_PUBLIC_KEY: pair.publicKey.toString('base64'),
   NOELIA_MASTER_KEY: randomBytes(32).toString('base64'),
   NOELIA_DASHBOARD_OPERATOR_SECRET: randomBytes(32).toString('hex'),
+  // The issuer's one machine client. Only the hash is needed: the secret is thrown
+  // away here, because nothing in this stack calls the token endpoint. Same form as
+  // ServiceClientSecret: a 43-character base64url secret from 32 random bytes,
+  // hashed over its ASCII, as `sha256:` + base64url without padding.
+  NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH:
+    `sha256:${createHash('sha256').update(randomBytes(32).toString('base64url')).digest('base64url')}`,
   NOELIA_SOURCE: source, NOELIA_VERSION: version,
   NOELIA_HTTP_PORT: fixedPort('NOELIA_SMOKE_HTTP_PORT'), NOELIA_HTTPS_PORT: fixedPort('NOELIA_SMOKE_HTTPS_PORT'),
   COMPOSE_PARALLEL_LIMIT: '2',
@@ -120,7 +126,7 @@ try {
     // must not take the stack away from the caller's later steps.
     await mkdir(keepState, { recursive: true, mode: 0o700 });
     const names = ['NOELIA_JWT_KID', 'NOELIA_JWT_PRIVATE_KEY', 'NOELIA_JWT_PUBLIC_KEY', 'NOELIA_MASTER_KEY',
-      'NOELIA_DASHBOARD_OPERATOR_SECRET', 'NOELIA_SOURCE', 'NOELIA_VERSION', 'NOELIA_HTTP_PORT', 'NOELIA_HTTPS_PORT',
+      'NOELIA_DASHBOARD_OPERATOR_SECRET', 'NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH', 'NOELIA_SOURCE', 'NOELIA_VERSION', 'NOELIA_HTTP_PORT', 'NOELIA_HTTPS_PORT',
       'COMPOSE_PARALLEL_LIMIT'];
     await writeFile(path.join(keepState, 'stack.env'), names.map(name => `${name}=${env[name]}`).join('\n') + '\n', { mode: 0o600 });
     await writeFile(path.join(keepState, 'stack.json'), JSON.stringify({ project, httpPort, httpsPort, version }), { mode: 0o600 });

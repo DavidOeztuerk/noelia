@@ -627,7 +627,7 @@ builder.Services.AddSharedInfrastructure(
 
 app.UseNoelia(builder.Environment, "jobs-service", pipeline => pipeline
     .UseAuth()          // authentication, then authorization
-    .UsePrincipal());   // translates the token once
+    .UsePrincipal());   // sets the principal for later steps and endpoints
 ```
 
 `AddPrincipal` is separate from `AddJwtAuthentication` on purpose: a gateway
@@ -646,6 +646,16 @@ Endpoints declare the capacity they need:
 [Authorize(Policy = NoeliaPolicies.ActingForCompany)]
 [Authorize(Policy = NoeliaPolicies.ActingAsSelf)]
 ```
+
+`UsePrincipal()` sets the principal for the steps and endpoints after it. The two
+capacity policies do not need it: they translate the user ASP.NET hands them, the way
+`UsePrincipal()` does, so they hold behind `UseAuth()` although authorization runs
+before that step. A service token is not a person and gets no capacity. A person whose
+claims cannot be translated (no `sub`, an unusable tenant) is refused with 403 at the
+policy; the 401 above is what an endpoint without the policy gets. The tenant filter
+reads `ICurrentPrincipal`; inside your own authorization handler it falls back to
+`TenantId.None`, which shows no tenant's rows. A replaced or faked `ICurrentPrincipal`
+does not satisfy the policies: put `sub` and the tenant claim in the user.
 
 Issue a company token only after verifying membership. `AddJwtAuthentication`
 registers `IJwtService` for that — the same module that verifies tokens issues
@@ -1236,7 +1246,8 @@ nothing the caller sent is ever written.
 Rate limits, output caching and CORS go on the **group**, never on one door:
 anything that answers differently on a door than on the fallback tells a caller
 which paths exist. The check `noelia.m2m.caller-policy` (it is not applicable when nothing
-here is in use, so the dashboard shows one more row and no new warning) verifies
+here is in use, so the dashboard shows one more row; in the short window before the
+second run it reads “routes not built yet” as a warning) verifies
 the fallback, the 404 handler and the single token endpoint.
 
 ### Behind a door
@@ -1359,7 +1370,12 @@ new services: its token lives in the distributed cache and it has no audience.
 
 Security checks answer a different question from health checks: not “can this
 process take traffic?”, but “does the active composition still enforce its
-declared security boundary?”. `AddNoelia` runs them once at startup. An operator
+declared security boundary?”. `AddNoelia` runs them twice: once while the hosted
+services start, and again once every hosted service has started, because a check that
+reads the mapped routes cannot see them earlier (ASP.NET copies them into the container
+when the web host starts). Until the second run a route-reading check reports a
+`Warning`, “routes not built yet”; the report then holds the second result
+([ADR-0004](docs/adr/0004-pruefungen-nach-dem-start-der-routen.md)). An operator
 can run the same bounded checks explicitly and read the latest completed report:
 
 ```csharp

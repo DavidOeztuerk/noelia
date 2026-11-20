@@ -39,15 +39,25 @@ dotnet test tests/Noelia.Infrastructure.Tests --settings tests/Noelia.Infrastruc
 
 dotnet pack Noelia.slnx -c Release -o packages
 
-# the demo, against a candidate that is not published yet
-dotnet pack Noelia.slnx -c Release -o demo/.local-feed
-rm -rf ~/.nuget/packages/noelia.*          # a candidate keeps its version
+# the demo, against a candidate that is not published yet: a version no
+# release will ever carry, its own feed, its own package folder — never the
+# real number, never ~/.nuget/packages (#63)
+V=$(grep -o '<VersionPrefix>[^<]*' Directory.Build.props | cut -d'>' -f2)-local.$(date -u +%Y%m%d%H%M%S)
+PKGS=$(mktemp -d)
+dotnet pack Noelia.slnx -c Release -p:Version=$V -o demo/.local-feed/$V
 cd demo
-dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
-dotnet build Noelia.TodoDemo.sln --no-restore -c Release
-dotnet test  Noelia.TodoDemo.sln --no-build  -c Release
+# demo/NuGet.Config maps * to nuget.org, so a bare --source is ignored: say where Noelia.* comes from
+cat > $PKGS/NuGet.Config <<EOF
+<configuration><packageSources><clear />
+<add key="candidate" value="$PWD/.local-feed/$V" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
+<packageSourceMapping><packageSource key="candidate"><package pattern="Noelia.*" /></packageSource>
+<packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
+EOF
+dotnet restore Noelia.TodoDemo.sln --packages $PKGS --configfile $PKGS/NuGet.Config -p:NoeliaVersion=$V
+dotnet build Noelia.TodoDemo.sln --no-restore -c Release -p:NoeliaVersion=$V
+dotnet test  Noelia.TodoDemo.sln --no-build  -c Release -p:NoeliaVersion=$V
 
-NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
+NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 python3 eng/security-checks.py             # fails on an unallowed security Fail
 cd src/frontend && npm test && npm run e2e
 ```
