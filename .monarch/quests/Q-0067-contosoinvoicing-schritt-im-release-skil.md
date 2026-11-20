@@ -3,7 +3,7 @@ id: Q-0067
 gate: G-0017
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - "Design (ADR-0005) in einfacher Sprache im PR, Warden (Opus) gibt frei"
   - "Skript demo/eng/contoso-candidate-check.sh: Wegwerf-Kopie, eindeutige Kandidatennummer, NUGET_PACKAGES für alles, Source-Mapping per --configfile, Tool des Kandidaten"
