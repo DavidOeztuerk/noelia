@@ -3,7 +3,7 @@ id: Q-0064
 gate: G-0017
 kind: main
 rank: C
-state: proposed
+state: in_progress
 dod:
   - "Kommentar gitleaks:allow mit einem Satz Begründung an den Konstanten, Umbenennung bleibt"
   - "CLAUDE.md-Pin stimmt mit VersionPrefix überein"
