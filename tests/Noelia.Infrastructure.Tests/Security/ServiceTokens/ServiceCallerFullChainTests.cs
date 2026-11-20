@@ -306,11 +306,11 @@ public class ServiceCallerFullChainTests
     [InlineData(PersonSchemeFirst)]
     public async Task An_identity_nobody_authenticated_next_to_a_service_is_not_a_person(string door)
     {
-        // Without permission enforcement, because this is about the steps of ADR-0003.
-        // PermissionMiddleware reads only the first identity, and the merge can put the
-        // unauthenticated one there; it then answers 401, which fails closed and is a
-        // limit of that step, named in the ADR. Once #59 is fixed this runs with the module.
-        await using var host = await Chain(permissions: false);
+        // With permission enforcement. Until #59 was fixed (ADR-0007) this ran without the module:
+        // PermissionMiddleware read only the first identity, and the merge can put the unauthenticated
+        // one there, so it answered 401. It looks at the signed-in identities now, and the case that
+        // once had to be left out is the one this test is about.
+        await using var host = await Chain();
 
         using var response = await host.Client.SendAsync(
             await BothAt(door, "person-token", HeaderPersonHandler.Unauthenticated));

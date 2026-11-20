@@ -40,8 +40,23 @@ internal static class ServiceCallerIdentity
         Of(principal)?.FindFirst(ServiceTokenDefaults.CallerClaim)?.Value;
 
     /// <summary>
+    /// The signed-in person identities of the principal, in their order: every
+    /// authenticated identity except the service's. The identities are shared, not copied.
+    /// </summary>
+    internal static IEnumerable<ClaimsIdentity> PersonsOf(ClaimsPrincipal? principal) =>
+        principal?.Identities.Where(identity => identity.IsAuthenticated && !IsService(identity)) ?? [];
+
+    /// <summary>
+    /// The claim of that type on the first signed-in person identity, so that a user id in a
+    /// log line or an alert comes from a signed-in person and never from an identity nobody
+    /// signed in (ADR-0007). Read from that one identity, never across two.
+    /// </summary>
+    internal static string? FirstPersonClaim(ClaimsPrincipal? principal, string claimType) =>
+        PersonsOf(principal).FirstOrDefault()?.FindFirst(claimType)?.Value;
+
+    /// <summary>
     /// What is left of the principal for the steps that are about a person: every
-    /// other authenticated identity, or nothing at all on a plain door.
+    /// signed-in identity except the service's, or nothing at all on a plain door.
     /// </summary>
     /// <remarks>
     /// Revocation, the principal and the check per record all look for a person, and
@@ -53,16 +68,16 @@ internal static class ServiceCallerIdentity
     /// and <c>iat</c> from the service token and <c>sub</c> from the person, so a
     /// revoked person went unnoticed.
     /// <para>
-    /// A principal without a service identity comes back as it went in: nothing on the
-    /// way of an ordinary request changes, and a person's token without a <c>sub</c> is
-    /// refused exactly as before. See ADR-0003.
+    /// The filter applies to every principal, with or without a service identity in it
+    /// (ADR-0007, which replaces the part of ADR-0003 that handed a principal without a
+    /// service identity back as it went in): an identity nobody signed in is never part
+    /// of it either, so a claim it carries cannot speak for the person. A factory the
+    /// consumer wrote itself is handed this principal and therefore sees only signed-in
+    /// identities, never the service's.
     /// </para>
     /// </remarks>
-    internal static ClaimsPrincipal PersonPartOf(ClaimsPrincipal principal) =>
-        Of(principal) is null
-            ? principal
-            : new ClaimsPrincipal(principal.Identities.Where(
-                identity => identity.IsAuthenticated && !IsService(identity)));
+    internal static ClaimsPrincipal PersonPartOf(ClaimsPrincipal? principal) =>
+        new(PersonsOf(principal));
 
     private static bool IsService(ClaimsIdentity identity) =>
         identity.IsAuthenticated

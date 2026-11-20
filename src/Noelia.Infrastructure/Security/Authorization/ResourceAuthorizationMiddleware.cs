@@ -15,6 +15,12 @@ namespace Noelia.Infrastructure.Security.Authorization;
 /// A right is per door and not per record (ADR-0002), and the list of a door has
 /// already decided by the time this runs, so the identity the service scheme
 /// authenticated is never put to the service. A person beside it is (ADR-0003).
+/// <para>
+/// Each signed-in person identity is put to the provider on its own and every one must pass;
+/// an identity nobody signed in is never asked about, and an exception in the provider
+/// refuses the request rather than letting it through (ADR-0007). This step reads neither
+/// <c>jti</c> nor <c>iat</c>, so a person without a <c>jti</c> (a cookie) is not refused here.
+/// </para>
 /// </remarks>
 public class ResourceAuthorizationMiddleware
 {
@@ -37,11 +43,11 @@ public class ResourceAuthorizationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var person = ServiceCallerIdentity.PersonPartOf(context.User);
-
-        // Skip for non-authenticated requests. Written as "is not true": a door leaves a
-        // principal with no identity at all, and "!x == true" is false for a null x.
-        if (person.Identity?.IsAuthenticated != true)
+        // Every signed-in person identity is asked about on its own and every one must pass
+        // (ADR-0007): a principal can hold two, and the record of one is not the other's.
+        // Skip when there is none; a door leaves a principal with no identity at all.
+        var persons = ServiceCallerIdentity.PersonsOf(context.User).ToList();
+        if (persons.Count == 0)
         {
             await _next(context);
             return;
@@ -54,9 +60,21 @@ public class ResourceAuthorizationMiddleware
             return;
         }
 
-        try
+        foreach (var identity in persons)
         {
-            var authResult = await CheckResourceAuthorizationAsync(context, person);
+            var person = new ClaimsPrincipal(identity);
+            AuthorizationResult authResult;
+            try
+            {
+                authResult = await CheckResourceAuthorizationAsync(context, person);
+            }
+            catch (Exception ex)
+            {
+                // Fail closed (ADR-0007): a provider that throws is not a provider that said yes.
+                // Until 7.2.0 this branch let the request through "so as not to block valid requests".
+                _logger.LogError(ex, "Error during resource authorization check; refusing");
+                authResult = AuthorizationResult.Fail("The resource authorization check could not be completed");
+            }
 
             if (!authResult.Succeeded)
             {
@@ -70,11 +88,6 @@ public class ResourceAuthorizationMiddleware
                 await HandleAuthorizationFailure(context, authResult);
                 return;
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during resource authorization check");
-            // Continue processing - don't block valid requests due to authorization check errors
         }
 
         await _next(context);

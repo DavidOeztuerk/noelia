@@ -6,6 +6,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
+using Noelia.Infrastructure.Security.ServiceTokens;
+using System.Security.Claims;
 
 namespace Noelia.Infrastructure.Security.Authorization;
 
@@ -36,18 +38,20 @@ public static class AuthorizationExtensions
         // Add authorization policies
         services.AddAuthorization(options =>
         {
-            // Resource-based policies
+            // Resource-based policies. RequireAuthenticatedUser is the second line beside the
+            // handlers' own "at least one signed-in person" (ADR-0007): a policy without it would
+            // rest on its handler alone.
             options.AddPolicy("ResourceRead", policy =>
-                policy.Requirements.Add(new ResourceRequirement(NoeliaActions.READ)));
+                policy.RequireAuthenticatedUser().AddRequirements(new ResourceRequirement(NoeliaActions.READ)));
 
             options.AddPolicy("ResourceWrite", policy =>
-                policy.Requirements.Add(new ResourceRequirement(NoeliaActions.UPDATE)));
+                policy.RequireAuthenticatedUser().AddRequirements(new ResourceRequirement(NoeliaActions.UPDATE)));
 
             options.AddPolicy("ResourceDelete", policy =>
-                policy.Requirements.Add(new ResourceRequirement(NoeliaActions.DELETE)));
+                policy.RequireAuthenticatedUser().AddRequirements(new ResourceRequirement(NoeliaActions.DELETE)));
 
             options.AddPolicy("ResourceOwner", policy =>
-                policy.Requirements.Add(new OwnershipRequirement()));
+                policy.RequireAuthenticatedUser().AddRequirements(new OwnershipRequirement()));
 
             // Admin policies
             options.AddPolicy("AdminOnly", policy =>
@@ -125,6 +129,16 @@ public class ResourceAuthorizationHandler : AuthorizationHandler<ResourceRequire
         AuthorizationHandlerContext context,
         ResourceRequirement requirement)
     {
+        // At least one signed-in person, and the provider is asked about each on its own: a
+        // person identity is never judged by the claims of another, and an identity nobody signed
+        // in is not asked about at all (ADR-0007). No person is Fail(), not Succeed().
+        var persons = ServiceCallerIdentity.PersonsOf(context.User).ToList();
+        if (persons.Count == 0)
+        {
+            context.Fail();
+            return;
+        }
+
         var resourceType = requirement.ResourceType ?? GetResourceTypeFromContext(context, _resourceMap);
         var resourceData = GetResourceDataFromContext(context);
 
@@ -134,20 +148,22 @@ public class ResourceAuthorizationHandler : AuthorizationHandler<ResourceRequire
             return;
         }
 
-        var result = await _authorizationService.AuthorizeAsync(
-            context.User,
-            resourceType,
-            requirement.Action,
-            resourceData);
+        foreach (var person in persons)
+        {
+            var result = await _authorizationService.AuthorizeAsync(
+                new ClaimsPrincipal(person),
+                resourceType,
+                requirement.Action,
+                resourceData);
 
-        if (result.Succeeded)
-        {
-            context.Succeed(requirement);
+            if (!result.Succeeded)
+            {
+                context.Fail();
+                return;
+            }
         }
-        else
-        {
-            context.Fail();
-        }
+
+        context.Succeed(requirement);
     }
 
     internal static string? GetResourceTypeFromContext(
@@ -311,11 +327,26 @@ public class OwnershipAuthorizationHandler : AuthorizationHandler<OwnershipRequi
         AuthorizationHandlerContext context,
         OwnershipRequirement requirement)
     {
-        var userId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userId))
+        // At least one signed-in person, each with a user id of their own, and each must own the
+        // record. No person is Fail() (ADR-0007), not Succeed() over the empty set.
+        var persons = ServiceCallerIdentity.PersonsOf(context.User).ToList();
+        if (persons.Count == 0)
         {
             context.Fail();
             return;
+        }
+
+        var userIds = new List<string>();
+        foreach (var person in persons)
+        {
+            var userId = person.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                context.Fail();
+                return;
+            }
+
+            userIds.Add(userId);
         }
 
         var resourceType = requirement.ResourceType
@@ -328,16 +359,16 @@ public class OwnershipAuthorizationHandler : AuthorizationHandler<OwnershipRequi
             return;
         }
 
-        var isOwner = await _authorizationService.IsResourceOwnerAsync(userId, resourceType, resourceId);
+        foreach (var userId in userIds)
+        {
+            if (!await _authorizationService.IsResourceOwnerAsync(userId, resourceType, resourceId))
+            {
+                context.Fail();
+                return;
+            }
+        }
 
-        if (isOwner)
-        {
-            context.Succeed(requirement);
-        }
-        else
-        {
-            context.Fail();
-        }
+        context.Succeed(requirement);
     }
 
     internal static string? GetResourceIdFromContext(

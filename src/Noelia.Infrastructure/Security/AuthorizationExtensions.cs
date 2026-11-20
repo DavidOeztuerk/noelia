@@ -33,11 +33,13 @@ public static class AuthorizationExtensions
             options.AddPolicy(Policies.RequireUserRole, policy =>
                 policy.RequireSignedInRole(Roles.User, Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
 
+            // The handlers insist on a signed-in person themselves; RequireAuthenticatedUser is the
+            // second, independent line (ADR-0007).
             options.AddPolicy(Policies.RequireVerifiedEmail, policy =>
-                policy.AddRequirements(new EmailVerifiedRequirement()));
+                policy.RequireAuthenticatedUser().AddRequirements(new EmailVerifiedRequirement()));
 
             options.AddPolicy(Policies.RequireActiveAccount, policy =>
-                policy.AddRequirements(new ActiveAccountRequirement()));
+                policy.RequireAuthenticatedUser().AddRequirements(new ActiveAccountRequirement()));
 
             foreach (var permission in catalog.AllPermissions)
             {

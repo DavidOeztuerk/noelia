@@ -6,6 +6,7 @@ using Noelia.Infrastructure.Extensions;
 using Noelia.Infrastructure.Middleware;
 using Noelia.Infrastructure.Observability;
 using Noelia.Infrastructure.Security;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Noelia.Infrastructure.Security.Headers;
 using Noelia.Infrastructure.Security.InputSanitization;
 using Microsoft.AspNetCore.Authentication;
@@ -77,19 +78,27 @@ public static class MiddlewarePipelineModule
         step.App.UseSerilogRequestLogging(options =>
         {
             options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
-            options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
-            {
-                diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value ?? "");
-                diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
-                diagnosticContext.Set("UserAgent", httpContext.Request.Headers.UserAgent.FirstOrDefault() ?? "");
-                diagnosticContext.Set("RemoteIP", httpContext.Connection.RemoteIpAddress?.ToString() ?? "");
-
-                if (httpContext.User?.Identity?.IsAuthenticated == true)
-                {
-                    diagnosticContext.Set("UserId", httpContext.User.FindFirst("sub")?.Value ?? "");
-                }
-            };
+            options.EnrichDiagnosticContext = EnrichRequestLog;
         }));
+
+    /// <summary>
+    /// What Serilog's request line carries besides the standard properties. Separate from the
+    /// step so that the user id it writes can be tested on its own.
+    /// </summary>
+    internal static void EnrichRequestLog(IDiagnosticContext diagnosticContext, HttpContext httpContext)
+    {
+        diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value ?? "");
+        diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
+        diagnosticContext.Set("UserAgent", httpContext.Request.Headers.UserAgent.FirstOrDefault() ?? "");
+        diagnosticContext.Set("RemoteIP", httpContext.Connection.RemoteIpAddress?.ToString() ?? "");
+
+        // The id of the first signed-in person identity (ADR-0007): an identity nobody signed in
+        // cannot put a foreign id into the log line.
+        if (ServiceCallerIdentity.PersonsOf(httpContext.User).Any())
+        {
+            diagnosticContext.Set("UserId", ServiceCallerIdentity.FirstPersonClaim(httpContext.User, "sub") ?? "");
+        }
+    }
 
     /// <summary>The cross-origin rules the service was configured with.</summary>
     public static InfrastructureMiddlewareBuilder UseCors(this InfrastructureMiddlewareBuilder builder) =>

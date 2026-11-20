@@ -90,7 +90,27 @@ public class PermissionHandlerAuthenticatedIdentityTests
         context.HasSucceeded.Should().BeTrue();
     }
 
-    private sealed class CapturingLog : ILogger<PermissionAuthorizationHandler>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ServiceIdentityBesideAnUnauthenticatedOne_OnlyTheServicesClaimsCount(bool unauthenticatedFirst)
+    {
+        // ADR-0007 decisions 6 and 7: the right on the unauthenticated identity does not count,
+        // the same right on the service identity does, whatever the order.
+        var service = new ClaimsIdentity(
+            [new Claim("client_id", "advisor")], ServiceTokenDefaults.AuthenticationScheme);
+        var serviceWithRight = new ClaimsIdentity(
+            [new Claim("permission", Required)], ServiceTokenDefaults.AuthenticationScheme);
+        var stranger = Unauthenticated(new Claim("permission", Required));
+
+        var (refused, _) = await Run(Of(unauthenticatedFirst, service, stranger));
+        var (met, _) = await Run(Of(unauthenticatedFirst, serviceWithRight, Unauthenticated()));
+
+        refused.HasSucceeded.Should().BeFalse();
+        met.HasSucceeded.Should().BeTrue();
+    }
+
+    private sealed class CapturingLog: ILogger<PermissionAuthorizationHandler>
     {
         public List<string> Messages { get; } = [];
 

@@ -7,7 +7,7 @@ namespace Noelia.Infrastructure.Security;
 /// </summary>
 /// <remarks>
 /// The issuer writes <see cref="Issued"/> and every reader goes through
-/// <see cref="Read"/>, so the two cannot drift apart again: until 7.0.1 the
+/// <see cref="Read(ClaimsPrincipal)"/>, so the two cannot drift apart again: until 7.0.1 the
 /// issuer wrote <c>session_id</c> while the revocation check asked for
 /// <c>sid</c>, and <c>RevokeSessionAsync</c> never reached a token.
 /// </remarks>
@@ -24,5 +24,15 @@ public static class SessionClaims
     {
         ArgumentNullException.ThrowIfNull(principal);
         return principal.FindFirst(Issued)?.Value ?? principal.FindFirst(Standard)?.Value;
+    }
+
+    /// <summary>
+    /// The session of one identity. Revocation reads the token of each person identity on its own,
+    /// so the session of one must not come from another (ADR-0007).
+    /// </summary>
+    internal static string? Read(ClaimsIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        return identity.FindFirst(Issued)?.Value ?? identity.FindFirst(Standard)?.Value;
     }
 }
