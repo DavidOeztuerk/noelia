@@ -3,7 +3,7 @@ id: Q-0063
 gate: G-0017
 kind: main
 rank: A
-state: proposed
+state: abandoned
 dod:
   - "Roter Test zuerst: unauthentifizierte Identity vorn neben authentifizierter führt nicht zu 401"
   - "Test An_identity_nobody_authenticated_next_to_a_service_is_not_a_person läuft mit PermissionEnforcement"

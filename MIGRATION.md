@@ -1,6 +1,22 @@
 # Noelia 7.1.1 → 7.1.2
 
-Keine API-Änderung. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
+**Behoben: `noelia.m2m.caller-policy` sah beim Start keine Routen** ([ADR-0004](docs/adr/0004-pruefungen-nach-dem-start-der-routen.md),
+#62). Die Sicherheitsprüfungen liefen in `StartAsync`, bevor ASP.NET die Routen in den
+Container übertragen hatte. Die Prüfung sah null Türen: Ein Aussteller meldete immer Fail
+(„0 token endpoints“), ein reiner Empfänger meldete Pass über null Türen, also ein Pass, der
+nichts geprüft hatte. Die Prüfungen laufen jetzt ein zweites Mal, sobald alle Dienste
+gestartet sind. Das ändert, was der Bericht zeigt:
+
+- Ein korrekter **Aussteller** meldet **Pass statt Fail**.
+- Ein **Empfänger mit einer Tür ohne Fallback oder mit `AllowAnonymous`** meldet **Fail statt Pass**.
+- Ein **Empfänger ganz ohne gemappte Tür** meldet **Warning statt Pass** („nothing was checked“).
+- Zwischen Start der Dienste und zweitem Lauf meldet die Prüfung Warning („routes not built yet“).
+  Die Prüfung scheitert nie den Start: Schlägt der zweite Lauf selbst fehl, bleibt der erste.
+
+Wer den Bericht in CI oder Monitoring auf `Pass` prüft, sieht für Empfänger ohne Tür jetzt
+Warning. Keine API-Änderung, keine Konfiguration.
+
+Keine API-Änderung für #58. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
 an `ActingForCompanyHandler` und `ActingAsSelfHandler`; der bisherige Konstruktor bleibt
 binär- und quellkompatibel.
 

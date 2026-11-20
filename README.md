@@ -1369,7 +1369,12 @@ new services: its token lives in the distributed cache and it has no audience.
 
 Security checks answer a different question from health checks: not “can this
 process take traffic?”, but “does the active composition still enforce its
-declared security boundary?”. `AddNoelia` runs them once at startup. An operator
+declared security boundary?”. `AddNoelia` runs them twice: once while the hosted
+services start, and again once every hosted service has started, because a check that
+reads the mapped routes cannot see them earlier (ASP.NET copies them into the container
+when the web host starts). Until the second run a route-reading check reports a
+`Warning`, “routes not built yet”; the report then holds the second result
+([ADR-0004](docs/adr/0004-pruefungen-nach-dem-start-der-routen.md)). An operator
 can run the same bounded checks explicitly and read the latest completed report:
 
 ```csharp

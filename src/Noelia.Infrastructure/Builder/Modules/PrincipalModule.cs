@@ -31,7 +31,10 @@ public static class PrincipalModule
     /// </summary>
     /// <remarks>
     /// Belongs after <c>UseAuth()</c>: it reads the claims authentication
-    /// established, and placed before it every request looks anonymous.
+    /// established, and placed before it every request looks anonymous. It sets the
+    /// principal for the steps and endpoints that follow. The capacity policies
+    /// (<c>ActingForCompany</c>, <c>ActingAsSelf</c>) do not need it: they translate the
+    /// request's user themselves, so they work wherever the step stands (ADR-0006).
     /// </remarks>
     public static InfrastructureMiddlewareBuilder UsePrincipal(
         this InfrastructureMiddlewareBuilder builder) =>
