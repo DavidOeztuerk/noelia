@@ -89,10 +89,21 @@ as `Pass`. It runs with the demo test run above, so it needs the same candidate.
 ## 5. The stack, and a service that is not the demo
 
 ```bash
+cd demo
+[ -f .env ] || eng/fresh-copy-env.sh    # a fresh copy has no .env (it is gitignored)
 NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 python3 eng/security-checks.py          # fails on an unallowed Fail
 cd src/frontend && npm test && npm run e2e
 ```
+
+`demo/.env` is gitignored, so a fresh copy (a worktree on a tag, a clone) stops at
+the first variable compose needs: `NOELIA_JWT_KID … is not set`. In the main copy
+it never shows, because the file is already there. `eng/fresh-copy-env.sh` writes
+throwaway values (key pair, operator secret, master key, the issuer's client-secret
+hash), never overwrites an existing file, and prints no value. The project name
+`noelia-demo` is fixed, so every copy shares the volumes: **after a run with
+throwaway keys, `docker compose --profile all down -v`**, or the next run with other
+keys meets a key ring encrypted with a master key it does not have.
 
 `security-checks.py` now expects `noelia.m2m.caller-policy` to be `Pass` on the
 demo UserService (the issuer, with its one rate-limited token endpoint); `NotApplicable`

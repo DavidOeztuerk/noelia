@@ -19,6 +19,8 @@ packages.
 
 ```bash
 cp .env.example .env     # a key pair and an operator secret; see below
+# or, for a throwaway copy (a worktree on a tag, a clone): eng/fresh-copy-env.sh
+# writes every value itself. Run `docker compose --profile all down -v` afterwards.
 
 docker compose --profile dev     up -d --build --wait
 docker compose --profile staging up -d --build --wait
