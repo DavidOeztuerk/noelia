@@ -656,6 +656,10 @@ policy; the 401 above is what an endpoint without the policy gets. The tenant fi
 reads `ICurrentPrincipal`; inside your own authorization handler it falls back to
 `TenantId.None`, which shows no tenant's rows. A replaced or faked `ICurrentPrincipal`
 does not satisfy the policies: put `sub` and the tenant claim in the user.
+`sub` and the tenant claim are read from the same signed-in person identity, never
+across two identities, and an identity without an `AuthenticationType` is ignored
+(see [Permissions](#permissions)). A custom `IPrincipalFactory` receives only the
+signed-in identities, without the service identity.
 
 Issue a company token only after verifying membership. `AddJwtAuthentication`
 registers `IJwtService` for that — the same module that verifies tokens issues
@@ -732,6 +736,21 @@ builder.Services.AddEndpointAccessPolicy(p => p
 
 The attribute wins over the policy. `users:*` satisfies any permission in that
 category, and `*` satisfies everything.
+
+**Only signed-in identities count.** A `ClaimsPrincipal` can carry several
+identities. Permissions, roles, the user id, the account state and the tenant are
+read from the identities that are signed in (`IsAuthenticated`, that is, one that
+carries an `AuthenticationType`), never from one that is not. The permission
+middleware, the permission handler, the catalogue and role policies, and the
+ownership, account and resource handlers all use the same filter, so none of them
+answers differently from the others. A request with no signed-in identity gets 401;
+one with a signed-in identity that lacks the permission gets 403, whatever the order
+of the identities. If you add claims in an `IClaimsTransformation`, add them to the
+signed-in person identity: an extra identity without an `AuthenticationType` no
+longer grants anything. Your own `[Authorize(Roles = …)]`, `RequireRole`,
+`RequireClaim` and `User.IsInRole` are ASP.NET's and still count every identity. See
+[MIGRATION.md](MIGRATION.md) (7.1.2 → 7.2.0) for the worked example and
+[ADR-0007](docs/adr/0007-rechte-und-rollen-nur-aus-angemeldeten-identitaeten.md) for the reasoning.
 
 ## Resources
 

@@ -32,6 +32,7 @@ erst mit 5.0.
 | [`JwtConfigurationValidator` prüft einen Abschnitt, den Noelia nicht liest](jwt-pruefer-falscher-abschnitt.md) | Lücke | niedrig | `Noelia.Infrastructure` | 4.4.3 veröffentlicht |
 | [Erklärtes Vermittler-Vertrauen wurde nie angewandt](vermittler-vertrauen-ohne-wirkung.md) | Lücke | mittel | `Noelia.Infrastructure` | in 5.1.0 behoben |
 | [Der Health-Endpunkt liefert den Ausnahmetext des Treibers aus](health-endpunkt-nennt-den-treiber.md) | Fehler | niedrig–mittel | `Noelia.Infrastructure`, `Noelia.Redis` | in 5.1.0 behoben |
+| [Rechte und Rollen zählten aus Identitäten, die niemand angemeldet hatte](2026-11-g0018-unangemeldete-identitaeten.md) | Lücke | hoch | `Noelia.Infrastructure` | behoben in G-0018; Release 7.2.0 durch den Owner |
 
 ## Geprüft und in Ordnung
 
