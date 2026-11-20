@@ -3,7 +3,7 @@ id: Q-0062
 gate: G-0017
 kind: main
 rank: A
-state: proposed
+state: in_progress
 dod:
   - "Roter Test zuerst: gültige Person an ActingAsSelf bekommt mit UseAuth().UsePrincipal() 200"
   - "Dienst-Identität gehört nicht in den Principal (ADR-0003)"

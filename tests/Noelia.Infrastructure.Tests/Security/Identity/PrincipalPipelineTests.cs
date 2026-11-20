@@ -149,13 +149,23 @@ public class PrincipalMiddlewareTests
 [Trait("Category", "Unit")]
 public class CapacityPolicyTests
 {
-    private static AuthorizationHandlerContext ContextFor(IAuthorizationRequirement requirement) =>
-        new([requirement], new ClaimsPrincipal(), resource: null);
+    // The handlers read the user ASP.NET hands the policy (ADR-0006): the claims are in the
+    // user, not in an ICurrentPrincipal. The fake the constructor still takes is never read.
+    private static AuthorizationHandlerContext ContextFor(
+        IAuthorizationRequirement requirement, params Claim[] claims) =>
+        new([requirement], claims.Length == 0
+                ? new ClaimsPrincipal()
+                : new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")),
+            resource: null);
 
-    private static ICurrentPrincipal Acting(Principal? principal)
+    private static Claim Sub() => new(JwtRegisteredClaimNames.Sub, SubjectId.New().ToString());
+
+    private static Claim Tenant() => new(NoeliaClaimTypes.Tenant, TenantId.New().ToString());
+
+    private static ICurrentPrincipal Unread()
     {
         var accessor = Substitute.For<ICurrentPrincipal>();
-        accessor.Current.Returns(principal);
+        accessor.Current.Returns(Principal.Person(SubjectId.New()));
         return accessor;
     }
 
@@ -163,11 +173,9 @@ public class CapacityPolicyTests
     public async Task ActingForCompany_SucceedsForACompanyCaller()
     {
         var requirement = new ActingForCompanyRequirement();
-        var context = ContextFor(requirement);
+        var context = ContextFor(requirement, Sub(), Tenant());
 
-        await new ActingForCompanyHandler(
-                Acting(Principal.Company(SubjectId.New(), TenantId.New())))
-            .HandleAsync(context);
+        await new ActingForCompanyHandler(Unread()).HandleAsync(context);
 
         context.HasSucceeded.Should().BeTrue();
     }
@@ -176,10 +184,9 @@ public class CapacityPolicyTests
     public async Task ActingForCompany_FailsForAPersonCaller()
     {
         var requirement = new ActingForCompanyRequirement();
-        var context = ContextFor(requirement);
+        var context = ContextFor(requirement, Sub());
 
-        await new ActingForCompanyHandler(Acting(Principal.Person(SubjectId.New())))
-            .HandleAsync(context);
+        await new ActingForCompanyHandler(Unread()).HandleAsync(context);
 
         context.HasSucceeded.Should().BeFalse();
     }
@@ -188,11 +195,9 @@ public class CapacityPolicyTests
     public async Task ActingAsSelf_FailsForACompanyCaller()
     {
         var requirement = new ActingAsSelfRequirement();
-        var context = ContextFor(requirement);
+        var context = ContextFor(requirement, Sub(), Tenant());
 
-        await new ActingAsSelfHandler(
-                Acting(Principal.Company(SubjectId.New(), TenantId.New())))
-            .HandleAsync(context);
+        await new ActingAsSelfHandler(Unread()).HandleAsync(context);
 
         context.HasSucceeded.Should().BeFalse();
     }
@@ -201,10 +206,9 @@ public class CapacityPolicyTests
     public async Task ActingAsSelf_SucceedsForAPersonCaller()
     {
         var requirement = new ActingAsSelfRequirement();
-        var context = ContextFor(requirement);
+        var context = ContextFor(requirement, Sub());
 
-        await new ActingAsSelfHandler(Acting(Principal.Person(SubjectId.New())))
-            .HandleAsync(context);
+        await new ActingAsSelfHandler(Unread()).HandleAsync(context);
 
         context.HasSucceeded.Should().BeTrue();
     }
@@ -214,13 +218,25 @@ public class CapacityPolicyTests
     {
         var company = new ActingForCompanyRequirement();
         var companyContext = ContextFor(company);
-        await new ActingForCompanyHandler(Acting(null)).HandleAsync(companyContext);
+        await new ActingForCompanyHandler(Unread()).HandleAsync(companyContext);
 
         var self = new ActingAsSelfRequirement();
         var selfContext = ContextFor(self);
-        await new ActingAsSelfHandler(Acting(null)).HandleAsync(selfContext);
+        await new ActingAsSelfHandler(Unread()).HandleAsync(selfContext);
 
         companyContext.HasSucceeded.Should().BeFalse();
         selfContext.HasSucceeded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AFakedCurrentPrincipalDoesNotSatisfyThePolicies()
+    {
+        var company = ContextFor(new ActingForCompanyRequirement());
+        var fake = Substitute.For<ICurrentPrincipal>();
+        fake.Current.Returns(Principal.Company(SubjectId.New(), TenantId.New()));
+
+        await new ActingForCompanyHandler(fake).HandleAsync(company);
+
+        company.HasSucceeded.Should().BeFalse("the claims belong in the user, ADR-0006");
     }
 }

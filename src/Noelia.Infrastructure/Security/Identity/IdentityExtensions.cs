@@ -15,7 +15,9 @@ public static class IdentityExtensions
         services.AddHttpContextAccessor();
         services.AddSingleton<IPrincipalFactory, PrincipalFactory>();
         services.AddScoped<ICurrentPrincipal, HttpContextCurrentPrincipal>();
-        // Scoped, not singleton: both handlers depend on the scoped ICurrentPrincipal.
+        // Scoped, not singleton: the constructors still take the scoped ICurrentPrincipal
+        // (compatibility; the handlers no longer read it, they translate the user they are
+        // handed, so they do not depend on the principal step having run, ADR-0006).
         services.AddScoped<IAuthorizationHandler, ActingForCompanyHandler>();
         services.AddScoped<IAuthorizationHandler, ActingAsSelfHandler>();
 

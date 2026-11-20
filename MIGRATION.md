@@ -1,3 +1,31 @@
+# Noelia 7.1.1 → 7.1.2
+
+Keine API-Änderung. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
+an `ActingForCompanyHandler` und `ActingAsSelfHandler`; der bisherige Konstruktor bleibt
+binär- und quellkompatibel.
+
+**Behoben: Kapazitäts-Policies hinter `UseAuth()`** ([ADR-0006](docs/adr/0006-kapazitaets-policies-unabhaengig-von-der-reihenfolge.md),
+#58). `ActingForCompany` und `ActingAsSelf` lasen `ICurrentPrincipal.Current`, das erst
+`UsePrincipal()` setzt. `UseAuth()` enthält aber die Rechteprüfung, sie lief also davor,
+und jede Person bekam 403. Die Handler übersetzen jetzt `context.User` selbst, genau wie
+`UsePrincipal()`, und die Reihenfolge spielt keine Rolle mehr. Das ändert Antworten:
+
+- Wer nach dem README aufgebaut hat (`.UseAuth().UsePrincipal()`), bekommt für gültige
+  Personen **200 statt 403**. Wer die Policies umgangen hat, merkt nichts.
+- An einer Dienst-Tür mit einer Person neben dem Dienst und `ActingAsSelf` kommt die
+  Person durch: **200 statt 404** (ADR-0003, Entscheidung 6).
+- Eine widerrufene Person bekommt an diesen Policies **401 statt 403**: Die Policy
+  erlaubt, die Widerrufsprüfung dahinter lehnt ab, der Endpoint läuft nie.
+- Ein Dienst-Token ist weiter keine Person und bekommt keine Rolle.
+
+**Verhaltensänderung, scheitert geschlossen:** Ein ersetztes oder gefälschtes
+`ICurrentPrincipal`, etwa in Integrationstests, erfüllt die beiden Policies **nicht mehr**.
+Der Konstruktor `(ICurrentPrincipal)` nimmt sein Argument noch an, **liest es aber nicht
+mehr**. Die Claims gehören in den User: `sub`, und für `ActingForCompany` der
+`tenant`-Claim. Wer eigene Tests hat, die nur `ICurrentPrincipal` austauschen, muss sie
+anpassen. Der Mandantenfilter liest weiter `ICurrentPrincipal` und fällt in einem eigenen
+Authorization-Handler auf `TenantId.None` zurück.
+
 # Noelia 7.1.0 → 7.1.1
 
 Keine neue öffentliche API. Es ist nichts umzustellen.

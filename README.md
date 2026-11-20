@@ -627,7 +627,7 @@ builder.Services.AddSharedInfrastructure(
 
 app.UseNoelia(builder.Environment, "jobs-service", pipeline => pipeline
     .UseAuth()          // authentication, then authorization
-    .UsePrincipal());   // translates the token once
+    .UsePrincipal());   // sets the principal for later steps and endpoints
 ```
 
 `AddPrincipal` is separate from `AddJwtAuthentication` on purpose: a gateway
@@ -646,6 +646,16 @@ Endpoints declare the capacity they need:
 [Authorize(Policy = NoeliaPolicies.ActingForCompany)]
 [Authorize(Policy = NoeliaPolicies.ActingAsSelf)]
 ```
+
+`UsePrincipal()` sets the principal for the steps and endpoints after it. The two
+capacity policies do not need it: they translate the user ASP.NET hands them, the way
+`UsePrincipal()` does, so they hold behind `UseAuth()` although authorization runs
+before that step. A service token is not a person and gets no capacity. A person whose
+claims cannot be translated (no `sub`, an unusable tenant) is refused with 403 at the
+policy; the 401 above is what an endpoint without the policy gets. The tenant filter
+reads `ICurrentPrincipal`; inside your own authorization handler it falls back to
+`TenantId.None`, which shows no tenant's rows. A replaced or faked `ICurrentPrincipal`
+does not satisfy the policies: put `sub` and the tenant claim in the user.
 
 Issue a company token only after verifying membership. `AddJwtAuthentication`
 registers `IJwtService` for that — the same module that verifies tokens issues
