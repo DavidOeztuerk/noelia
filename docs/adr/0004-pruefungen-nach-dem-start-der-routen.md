@@ -70,7 +70,7 @@ Tests riefen die Prüfung nach dem Start auf und sahen es nicht.
 `StandaloneDashboardSecurityReport` (`src/Noelia.Dashboard`) hält einen zweiten Bericht und führt die
 Prüfungen nur in `StartAsync` aus. Es registriert keine eingebaute Prüfung, die Routen liest; nur eine
 Prüfung eines Nutzers wäre betroffen. Das liegt außerhalb des Scopes dieser Quest und wird als Folge-Issue
-geführt (Nummer: wird vor dem Merge eingetragen). Ein Test hält fest, dass die Prüfung `noelia.m2m.caller-policy` auf diesem Weg nicht registriert ist und keine `EndpointDataSource` besteht; eine künftige Prüfung, die Routen liest, erkennt er nicht.
+geführt (#64). Ein Test hält fest, dass die Prüfung `noelia.m2m.caller-policy` auf diesem Weg nicht registriert ist und keine `EndpointDataSource` besteht; eine künftige Prüfung, die Routen liest, erkennt er nicht.
 
 ## Verworfen
 

@@ -3,7 +3,7 @@ id: Q-0065
 gate: G-0017
 kind: side
 rank: C
-state: in_progress
+state: in_review
 dod:
   - "README: Prüfungen laufen zweimal, zweiter Lauf nach dem Start der Routen (#62)"
   - "MIGRATION (deutsch): Empfänger ohne Tür meldet Warning statt Pass, Aussteller Pass statt Fail (#62)"
