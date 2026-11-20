@@ -1,6 +1,6 @@
 # ADR-0007 — Rechte und Rollen zählen nur aus angemeldeten Identitäten
 
-**Status:** Entwurf (Fassung 4). Owner-Entscheid wörtlich eingehalten. Warden: changes-requested in der schmalen Prüfung; Korrektur (Handler ohne angemeldete Person = nicht erfüllt) eingearbeitet; Warden-Bestätigung offen. · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Angenommen für `develop` (Fassung 4). Owner-Entscheid wörtlich eingehalten. Warden: changes-requested in der schmalen Prüfung; Korrektur (Handler ohne angemeldete Person = nicht erfüllt) eingearbeitet; Warden-Bestätigung der Korrektur: approve ([#59, Kommentar](https://github.com/DavidOeztuerk/noelia/issues/59#issuecomment-7051317830)). Die Umsetzung (Q-0070) prüft der Warden in der Gate-Runde. · **Datum:** 2026-11-20 · **Gate:** G-0018 (Rank A, Rechte) · **Quest:** Q-0069 (Design), Q-0070 (Umsetzung) · **Issue:** #59 · **Ziel:** Minor 7.2.0 mit Migrationshinweis, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 ## Owner-Entscheid vom 20.11.2026 (wörtlich)
 
@@ -264,8 +264,12 @@ Rot zuerst, dann grün, je Zeile mit Mutationsprobe (Körper des Fixes entfernen
   API-Key und Konsumenten, die ihrer angehängten Identität einen `AuthenticationType` gegeben haben; scheitert geschlossen),
   dem Hinweis, dass die Datensatzprüfung bei einer Ausnahme im Provider jetzt ablehnt statt durchzulassen (Konsumenten mit einem
   eigenen, werfenden Provider sehen 403/401 statt 200),
+  dem Hinweis, dass die Personen-Handler ohne angemeldete Personen-Identität jetzt mit `Fail()` ablehnen (mit einem eigenen
+  Provider der Datensatzprüfung strenger als heute),
   und dem Hinweis, dass eigener Code (`[Authorize(Roles=…)]`, `RequireRole`, `RequireClaim`, `User.IsInRole`)
-  weiter alle Identitäten zählt. Das README nennt die Regel dort, wo Rechte und Rollen erklärt werden.
+  weiter alle Identitäten zählt. Hinweise für Q-0070 aus der Warden-Prüfung: Die Tests prüfen `HasFailed`, nicht nur
+  `!HasSucceeded`; „kein angemeldetes Konto“ heißt „keine angemeldete Identität“; ein Test hält fest, dass eine eigene
+  `IPrincipalFactory` nur angemeldete Identitäten ohne Dienst-Identität bekommt (Entscheidung 5). Das README nennt die Regel dort, wo Rechte und Rollen erklärt werden.
 - Unter `docs/befunde/` entsteht ein Befund: was die Prüfungen taten, was sie versprachen, Noelia-only-Reproduktion (auch
   Mandant), Status.
 - Die Remarks von `ServiceCallerIdentity.PersonPartOf` werden angepasst (Entscheidung 5).
