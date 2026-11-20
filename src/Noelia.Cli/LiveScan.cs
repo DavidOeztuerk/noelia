@@ -22,7 +22,6 @@ internal static class LiveScan
         string? operatorSecret,
         CancellationToken cancellationToken)
     {
-        var findings = new List<Finding>();
         var observations = new List<string>();
 
         var reportUrl = url.TrimEnd('/') + "/report.json";
@@ -89,9 +88,30 @@ internal static class LiveScan
             ], observations);
         }
 
-        Describe(report, observations);
+        return Interpret(report, reportUrl);
+    }
+
+    /// <summary>
+    /// The newest report schema this tool reads. The CLI does not reference
+    /// Noelia.Abstractions, so a test ties this to
+    /// <c>OperatorReport.SchemaVersion</c>; raise it together with the reader.
+    /// </summary>
+    internal const int KnownSchemaVersion = 3;
+
+    /// <summary>
+    /// Reads an already fetched report. Split from the HTTP part so the reading
+    /// can be tested without a running dashboard.
+    /// </summary>
+    internal static AnalysisResult Interpret(JsonElement report, string reportUrl)
+    {
+        var findings = new List<Finding>();
+        var observations = new List<string>();
+
+        var schema = SchemaOf(report);
+
+        Describe(report, schema, observations);
         Checks(report, findings);
-        Sovereignty(report, findings);
+        Sovereignty(report, schema, findings);
         Contracts(report, findings);
         Audit(report, findings);
 
@@ -103,17 +123,21 @@ internal static class LiveScan
             observations);
     }
 
-    private static void Describe(JsonElement report, List<string> observations)
+    private static int SchemaOf(JsonElement report) =>
+        report.TryGetProperty("schemaVersion", out var version)
+        && version.ValueKind == JsonValueKind.Number
+        && version.TryGetInt32(out var schema)
+            ? schema
+            : 0;
+
+    private static void Describe(JsonElement report, int schema, List<string> observations)
     {
         var service = Text(report, "service") ?? "unnamed";
         var environment = Text(report, "environment") ?? "unknown";
-        var schema = report.TryGetProperty("schemaVersion", out var version)
-            ? version.GetInt32()
-            : 0;
 
         observations.Add($"{service} in {environment}, report schema {schema}.");
 
-        if (schema > 2)
+        if (schema > KnownSchemaVersion)
         {
             observations.Add(
                 "The report is newer than this tool. Fields it does not know about were not "
@@ -147,7 +171,7 @@ internal static class LiveScan
         }
     }
 
-    private static void Sovereignty(JsonElement report, List<Finding> findings)
+    private static void Sovereignty(JsonElement report, int schema, List<Finding> findings)
     {
         if (!report.TryGetProperty("sovereignty", out var section)
             || Text(section, "state") != "Present")
@@ -155,7 +179,44 @@ internal static class LiveScan
             return;
         }
 
-        if (section.TryGetProperty("egressIsEnforced", out var enforced)
+        if (schema >= 3)
+        {
+            // From schema 3 egressIsEnforced is a legacy policy flag, explicitly
+            // not evidence of an installed guard, so it is no longer read: a
+            // configured policy with no guard would otherwise pass silently.
+            // httpEgress carries the evidence. Absent, Faulted and Unavailable
+            // (or an unreported isEnforcing) say nothing about enforcement and
+            // therefore raise nothing here; noelia.egress.guard speaks for them.
+            //
+            // observedCalls is deliberately not read: no outbound collector is
+            // wired in, so that section is always Unavailable and would only
+            // read as "nothing was called".
+            if (section.TryGetProperty("httpEgress", out var egress)
+                && Text(egress, "state") == "Present"
+                && egress.TryGetProperty("isEnforcing", out var enforcing)
+                && enforcing.ValueKind == JsonValueKind.False)
+            {
+                var targets = egress.TryGetProperty("allowedTargets", out var list)
+                    && list.ValueKind == JsonValueKind.Array
+                        ? list.GetArrayLength()
+                        : 0;
+
+                // Counts and shapes only; the allowed hosts are never copied.
+                findings.Add(new Finding(
+                    "noelia.egress.not-enforced",
+                    FindingSeverity.Warning,
+                    "sovereignty",
+                    "The HTTP guard is registered but its allow policy does not restrict "
+                    + $"requests (scope: {Text(egress, "scope") ?? "not reported"}, "
+                    + $"evidence: {Text(egress, "evidence") ?? "not reported"}, "
+                    + $"redirects: {Text(egress, "redirects") ?? "not reported"}, "
+                    + $"{targets} allowed target(s)). The destination register lists what "
+                    + "was configured rather than what is reachable.",
+                    "Declare the hosts this service may reach, so that what is absent from the "
+                    + "register is unreachable rather than merely unmentioned."));
+            }
+        }
+        else if (section.TryGetProperty("egressIsEnforced", out var enforced)
             && enforced.ValueKind == JsonValueKind.False)
         {
             findings.Add(new Finding(

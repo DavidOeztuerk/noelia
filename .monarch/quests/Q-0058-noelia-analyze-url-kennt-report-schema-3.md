@@ -3,7 +3,7 @@ id: Q-0058
 gate: G-0017
 kind: main
 rank: B
-state: proposed
+state: abandoned
 dod:
   - "Roter Test zuerst: Schema 3 gilt nicht als neuer als das Tool"
   - "Egress-Befund stützt sich auf httpEgress.isEnforcing, nicht auf das Legacy-Feld"
