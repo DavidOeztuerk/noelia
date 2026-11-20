@@ -1,3 +1,96 @@
+# Noelia 7.1.2 → 7.2.0
+
+**Version:** Im Repository steht weiter 7.1.1. 7.2.0 ist die vorgesehene Release-Nummer; den Sprung und die
+Veröffentlichung macht der Owner im Release. Dieser Abschnitt beschreibt, was der Fix aus G-0018 ändert.
+
+**Behoben: Rechte und Rollen zählen nur aus angemeldeten Identitäten** ([ADR-0007](docs/adr/0007-rechte-und-rollen-nur-aus-angemeldeten-identitaeten.md),
+#59). Ein `ClaimsPrincipal` kann mehrere Identitäten tragen. `PermissionMiddleware` und
+`PermissionAuthorizationHandler` fragten nur die **erste**, ob sie angemeldet ist, und lasen `permission` und Rollen
+dann aus **allen**. Eine angehängte, nicht angemeldete Identität (ohne `AuthenticationType`) mit einem
+`permission`-Claim ließ die Person durch. Jetzt lesen Rechte, Rollen, Nutzer-ID, Kontostand und Mandant nur noch aus
+angemeldeten Identitäten, in allen Prüfungen, die Noelia selbst mitbringt (Middleware, Handler, Katalog- und
+Rollen-Policies, Besitz-, Konto- und Datensatzprüfung, Widerruf, `PrincipalFactory`, Audit).
+
+## Bruch: `IClaimsTransformation` ohne `AuthenticationType`
+
+Wer in einer `IClaimsTransformation` mit `principal.AddIdentity(new ClaimsIdentity(...))` eine zusätzliche Identität
+**ohne** `AuthenticationType` anhängt und dort Rechte oder Rollen trägt, bekommt jetzt **403 statt 200**. Die Claims zählen
+nicht mehr. Ohne jede angemeldete Identität gibt es 401, mit einer angemeldeten ohne das Recht 403, unabhängig von der
+Reihenfolge der Identitäten. Das scheitert geschlossen, bricht aber diese Konsumenten; darum ein Minor.
+
+Wer die Claims schon an die angemeldete **Personen**-Identität hängt, merkt nichts.
+
+### Der Weg
+
+Eine `IClaimsTransformation` läuft bei **jedem** `AuthenticateAsync`, für **jedes** Scheme, auch für das Dienst-Scheme
+`NoeliaService`. Wähle deshalb die angemeldete Personen-Identität und leite die Rechte aus deren `sub` ab:
+
+```csharp
+// using System.Security.Claims; using Noelia.Infrastructure.Security.ServiceTokens;
+// `rights.LookupAsync` steht für Ihren eigenen Rechte-Speicher.
+var person = principal.Identities.FirstOrDefault(i =>
+    i.IsAuthenticated && i.AuthenticationType != ServiceTokenDefaults.AuthenticationScheme);
+// Schemes mit MapInboundClaims tragen NameIdentifier statt sub
+var sub = person?.FindFirst("sub")?.Value ?? person?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+if (person is not null && sub is not null)
+{
+    foreach (var right in await rights.LookupAsync(sub))            // Rechte aus dem sub nachschlagen
+    {
+        if (!person.HasClaim("permission", right))                  // die Transformation läuft mehrfach
+        {
+            person.AddClaim(new Claim("permission", right));
+        }
+    }
+}
+```
+
+Nicht:
+
+- an `principal.Identity` anhängen. Das kann die unangemeldete erste Identität sein, die Claims zählen dann nicht.
+- an die Dienst-Identität anhängen. Ein Dienst-Token bekäme Personenrechte. Dienst-Tokens ändern sich in 7.2.0 nicht:
+  ein `permission`-Claim in der Dienst-Identität zählt wie bisher.
+- der angehängten Identität selbst einen `AuthenticationType` geben, damit sie „zählt“. Das gäbe eine Identität als
+  angemeldet aus, die kein Scheme geprüft hat. Noelia kann nicht wissen, ob hinter einem gesetzten `AuthenticationType`
+  wirklich eine Prüfung stand.
+
+`ServiceTokenDefaults.AuthenticationScheme` ist öffentlich.
+
+## Weitere Verhaltensänderungen
+
+- **Eigene `IPrincipalFactory`:** Sie bekommt jetzt nur die angemeldeten Identitäten, ohne die Dienst-Identität
+  (`ServiceCallerIdentity.PersonPartOf` filtert immer; bisher kam ohne Dienst-Identität der Principal unverändert zurück).
+  Ohne angemeldete Person bekommt sie einen Principal ohne Identitäten. Das ersetzt diesen Teil von ADR-0003.
+  `PrincipalFactory` selbst liest `sub` und `tenant` aus derselben, der ersten angemeldeten Personen-Identität.
+- **Neues 401 bei mehreren Personen-Identitäten, scheitert geschlossen:** `TokenRevocationMiddleware` prüft bei aktivem
+  Widerruf jede angemeldete Personen-Identität einzeln. Eine **zweite** angemeldete Personen-Identität ohne
+  `jti`/`sub`/`iat` wird abgelehnt (401). Das trifft Policies mit mehreren Schemes wie Bearer plus Cookie oder API-Key und
+  Konsumenten, die ihrer angehängten Identität einen `AuthenticationType` gegeben haben. Wer das hat: Die zweite
+  Identität braucht diese Claims, oder sie ist keine angemeldete Identität.
+- **Datensatzprüfung lehnt bei Ausnahme ab:** `ResourceAuthorizationMiddleware` ließ bei einer Ausnahme im Provider
+  durch („Continue processing“). Jetzt wird abgelehnt. Konsumenten mit einem eigenen, werfenden Provider sehen 403/401
+  statt 200. Der Provider aus `Noelia.Redis` fängt Ausnahmen selbst und antwortet schon bisher mit „abgelehnt“
+  (`ResourceAuthorizationService`); der aus `Noelia.InMemory` fängt nichts, wirft also sein Resolver
+  (`GetRequiredPermissionsAsync`), gab es bisher 200 und jetzt 403.
+- **Personen-Handler lehnen ohne angemeldete Person ab:** `ActiveAccountHandler`, `EmailVerifiedHandler`,
+  `ResourceAuthorizationHandler`, `OwnershipAuthorizationHandler` und `ResourceOwnerHandler` rufen ohne angemeldete
+  Personen-Identität `Fail()` auf, auch wenn nur eine Dienst-Identität oder nur eine unangemeldete Identität da ist. Mit
+  mehreren Personen muss jede bestehen. Fehlte die Nutzer-ID oder der Claim, lehnten sie schon bisher ab; **neu** ist: Eine
+  unangemeldete Identität mit Nutzer-ID, Kontostand oder Admin-Rolle zählt nicht mehr als Person. Mit einem **eigenen**
+  Provider der Datensatzprüfung ist es strenger als heute.
+
+## Was sich nicht ändert
+
+Eigener Code zählt in ASP.NET weiter alle Identitäten: `[Authorize(Roles = …)]`, `RequireRole`, `RequireClaim` und
+`User.IsInRole`. Die Regel gilt für Noelias eigene Prüfungen. Eine Katalog-Policy zählt weiter nur den `permission`-Claim
+(keine Rolle, kein `*`, kein `kategorie:*`); die offene Roadmap-Frage im README ist damit nicht entschieden. Policy-Namen
+und öffentliche API bleiben gleich, es gibt keine neue Option.
+
+## Nicht in diesem Release
+
+Stellen, die weiter alle Identitäten lesen, stehen in ADR-0007, Entscheidung 8 (Issue #70).
+
+---
+
 # Noelia 7.1.1 → 7.1.2
 
 **Behoben: `noelia.m2m.caller-policy` sah beim Start keine Routen** ([ADR-0004](docs/adr/0004-pruefungen-nach-dem-start-der-routen.md),

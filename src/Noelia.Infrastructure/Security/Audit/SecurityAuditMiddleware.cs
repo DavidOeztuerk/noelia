@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using Noelia.Infrastructure.Http;
+using Noelia.Infrastructure.Security.ServiceTokens;
 
 namespace Noelia.Infrastructure.Security.Audit;
 
@@ -72,7 +73,7 @@ public class SecurityAuditMiddleware
             QueryString = context.Request.QueryString.Value ?? "",
             UserAgent = context.Request.Headers.UserAgent.FirstOrDefault() ?? "",
             IpAddress = ClientAddress.Of(context),
-            UserId = context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+            UserId = ServiceCallerIdentity.FirstPersonClaim(context.User, ClaimTypes.NameIdentifier),
             SessionId = context.Request.Headers["X-Session-Id"].FirstOrDefault(),
             RequestId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
             Timestamp = DateTime.UtcNow

@@ -13,10 +13,13 @@ namespace Noelia.Infrastructure.Security;
 /// </summary>
 /// <remarks>
 /// Reads <c>jti</c>, <c>sub</c>, <c>iat</c> and — when the issuer sets it —
-/// <c>session_id</c> (or the standard <c>sid</c>, see <see cref="SessionClaims"/>) from the authenticated principal and asks the registered
-/// <see cref="ITokenRevocationEvaluator"/>. A token missing any of the first
+/// <c>session_id</c> (or the standard <c>sid</c>, see <see cref="SessionClaims"/>) from each
+/// signed-in person identity and asks the registered
+/// <see cref="ITokenRevocationEvaluator"/> about each one. A token missing any of the first
 /// three cannot be checked and is refused: an unidentifiable token must not be
-/// the one that slips through.
+/// the one that slips through. A principal with two person identities (two schemes in one
+/// policy) is refused if either is revoked or unidentifiable (ADR-0007); an identity nobody
+/// signed in is not a token and is not asked about.
 /// <para>
 /// This is about people's tokens. A service token has no revocation, its short life
 /// stands in for one (ADR-0002), so the identity the service scheme authenticated is
@@ -43,47 +46,50 @@ public class TokenRevocationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var person = ServiceCallerIdentity.PersonPartOf(context.User);
-
-        if (person.Identity?.IsAuthenticated != true)
+        // Every signed-in person identity is one token and is checked on its own (ADR-0007):
+        // a principal can hold two, for instance Bearer and a cookie, and a revoked one must not
+        // get through because another one in the same principal stands. No person: through, as
+        // before; the refusal then comes from authentication and the permission checks.
+        foreach (var person in ServiceCallerIdentity.PersonsOf(context.User).ToList())
         {
-            await _next(context);
-            return;
+            if (!TryReadToken(person, out var token))
+            {
+                _logger.LogWarning(
+                    "Authenticated principal without jti/sub/iat claims on {Path}; refusing.",
+                    context.Request.Path);
+
+                await Refuse(context, "Token cannot be checked for revocation");
+                return;
+            }
+
+            var verdict = await _evaluator.EvaluateAsync(token, context.RequestAborted);
+
+            if (verdict.IsStale)
+            {
+                _logger.LogWarning(
+                    "Revocation verdict for {TokenId} came from stale state ({Reason}).",
+                    token.TokenId, verdict.Reason);
+            }
+
+            if (verdict.IsRevoked)
+            {
+                _logger.LogWarning(
+                    "Blocked revoked token: jti={TokenId}, sub={SubjectId}, reason={Reason}, path={Path}",
+                    token.TokenId, token.SubjectId, verdict.Reason, context.Request.Path);
+
+                await Refuse(context, "Token has been revoked");
+                return;
+            }
         }
 
-        if (!TryReadToken(person, out var token))
-        {
-            _logger.LogWarning(
-                "Authenticated principal without jti/sub/iat claims on {Path}; refusing.",
-                context.Request.Path);
-
-            await Refuse(context, "Token cannot be checked for revocation");
-            return;
-        }
-
-        var verdict = await _evaluator.EvaluateAsync(token, context.RequestAborted);
-
-        if (verdict.IsStale)
-        {
-            _logger.LogWarning(
-                "Revocation verdict for {TokenId} came from stale state ({Reason}).",
-                token.TokenId, verdict.Reason);
-        }
-
-        if (!verdict.IsRevoked)
-        {
-            await _next(context);
-            return;
-        }
-
-        _logger.LogWarning(
-            "Blocked revoked token: jti={TokenId}, sub={SubjectId}, reason={Reason}, path={Path}",
-            token.TokenId, token.SubjectId, verdict.Reason, context.Request.Path);
-
-        await Refuse(context, "Token has been revoked");
+        await _next(context);
     }
 
-    private static bool TryReadToken(ClaimsPrincipal user, out TokenIdentity token)
+    /// <summary>
+    /// Reads the token of one identity. <c>jti</c>, <c>sub</c>, <c>iat</c> and the session all come
+    /// from this identity (<c>identity.FindFirst</c>), never across the boundary of two.
+    /// </summary>
+    private static bool TryReadToken(ClaimsIdentity user, out TokenIdentity token)
     {
         token = default;
 

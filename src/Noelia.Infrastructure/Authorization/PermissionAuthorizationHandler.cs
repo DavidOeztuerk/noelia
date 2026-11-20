@@ -43,14 +43,18 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
-        if (!context.User.Identity?.IsAuthenticated ?? true)
+        // Same rule as PermissionMiddleware: any signed-in identity, read only from the
+        // signed-in ones, so that handler and middleware cannot answer differently
+        // (ADR-0007, #59). Not Fail(): a service-caller or other handler may still succeed.
+        if (!AuthenticatedIdentities.IsAuthenticated(context.User))
         {
             _logger.LogDebug("User is not authenticated");
             return Task.CompletedTask;
         }
 
-        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var userPermissions = GetUserPermissions(context.User);
+        var caller = AuthenticatedIdentities.Of(context.User);
+        var userId = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userPermissions = GetUserPermissions(caller);
 
         // Check if user has the required permission
         if (HasPermission(userPermissions, requirement.Permission, requirement.Resource))

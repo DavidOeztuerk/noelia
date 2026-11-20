@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using System.Threading;
 
 namespace Noelia.Infrastructure.Security.Monitoring;
@@ -481,7 +482,7 @@ public class SecurityAlertService : ISecurityAlertService
       Title = title,
       Message = message,
       Metadata = metadata ?? new Dictionary<string, object>(),
-      UserId = httpContext?.User?.Claims.FirstOrDefault(c => c.Type == "sub")?.Value,
+      UserId = ServiceCallerIdentity.FirstPersonClaim(httpContext?.User, "sub"),
       IPAddress = httpContext?.Connection?.RemoteIpAddress?.ToString(),
       UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
       Endpoint = httpContext?.Request?.Path.ToString(),

@@ -1,10 +1,10 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-20T03:03:55Z
+- Zeitpunkt: 2026-11-20T11:02:48Z
 - Plan: Pro
-- Mana 5h: 83% (Limit 90%, Reset 2026-11-20T05:40:00Z)
-- Mana 7d: 80% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 26% (Limit 90%, Reset 2026-11-20T15:40:00Z)
+- Mana 7d: 94% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
@@ -17,10 +17,8 @@
 - keine offenen DoD-Punkte
 
 ## Nächster konkreter Schritt
-Q-0061 (#63), Q-0060 (#55), Q-0062 (#58), Q-0063 (#59), Q-0065 (README/MIGRATION zu #62) abarbeiten; dann PR nach develop (ready), Folge-Issues anlegen (Dashboard-Standalone-Bericht, release-gate.mjs-Einbindung ContosoInvoicing, RequireRateLimiting braucht UseRateLimiter), eine Warden-Runde (Opus), gate verdict/merge/check, evidence sync, Aufräumen. Skill noelia-release am Ende gesamt abgleichen (Schritte 3,4,5 + rm -rf-Zeile entfaellt).
+Q-0070 starten (quest accept/start), TDD nach dem Prüfplan von docs/adr/0007 (Fassung 4): Rot-Tests je Zeile für Middleware und Handler, widerrufene Person, IClaimsTransformation; dann Fix mit internem Baustein AuthenticatedIdentities; MIGRATION.md, README, Befund; Kritiker; PR #69; Warden-Gate-Runde (Opus); gate verdict, gate merge, gate check; evidence sync Q-0069 und Q-0070; Aufräumen. Weiter ab 7d-Reset 2026-11-25T11:00Z (7d 94 %, Limit 96 %).
 
 ## Offene Entscheidungen
-- Docker war aus: Stack-Lauf (security-checks.py mit M2M-Pass am UserService, E2E) steht aus, Owner startet Docker
-- demo/.env braucht NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH (Rezept demo/README.md), sonst bricht der UserService ab; Q-0060 soll das in das .env-Skript aufnehmen
-- Control-Plane-Repo: Kopie der demo composition-baselines um ServiceTokenIssuing nachziehen
-- Q-0058 wurde wegen falschem Test-Scope durch Q-0066 ersetzt, Q-0059 durch Q-0067 (ADR-Scope)
+- ADR-0007 Fassung 4: Warden gab nach Runde 1, Delta-Runde und schmaler Prüfung kein approve; offen war nur ein Formulierungsfehler, behoben (Handler: keine Person = nicht erfüllt). ADR hält sich an den Owner-Entscheid und gilt nach Prompt als freigegeben. Warden prüft die Umsetzung in der Gate-Runde.
+- Nacharbeit-Issue für Entscheidung 8 (ClaimsPrincipalExtensions, RateLimiting, Telemetry, ResponseCaching, Dashboard, InitCommand) ist noch nicht angelegt.

@@ -25,26 +25,29 @@ public static class AuthorizationExtensions
         services.AddAuthorization(options =>
         {
             options.AddPolicy(Policies.RequireAdminRole, policy =>
-                policy.RequireRole(Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.Admin, Roles.SuperAdmin));
 
             options.AddPolicy(Policies.RequireModeratorRole, policy =>
-                policy.RequireRole(Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
 
             options.AddPolicy(Policies.RequireUserRole, policy =>
-                policy.RequireRole(Roles.User, Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.User, Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
 
+            // The handlers insist on a signed-in person themselves; RequireAuthenticatedUser is the
+            // second, independent line (ADR-0007).
             options.AddPolicy(Policies.RequireVerifiedEmail, policy =>
-                policy.AddRequirements(new EmailVerifiedRequirement()));
+                policy.RequireAuthenticatedUser().AddRequirements(new EmailVerifiedRequirement()));
 
             options.AddPolicy(Policies.RequireActiveAccount, policy =>
-                policy.AddRequirements(new ActiveAccountRequirement()));
+                policy.RequireAuthenticatedUser().AddRequirements(new ActiveAccountRequirement()));
 
             foreach (var permission in catalog.AllPermissions)
             {
-                options.AddPolicy(permission, policy => policy.RequireClaim("permission", permission));
+                options.AddPolicy(permission, policy => policy.RequireSignedInClaim("permission", permission));
             }
         });
 
+        services.AddSignedInPolicyHandlers();
         services.AddScoped<IAuthorizationHandler, ResourceOwnerHandler>();
         services.AddScoped<IAuthorizationHandler, EmailVerifiedHandler>();
         services.AddScoped<IAuthorizationHandler, ActiveAccountHandler>();

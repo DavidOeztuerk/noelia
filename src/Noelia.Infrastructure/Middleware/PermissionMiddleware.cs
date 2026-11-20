@@ -1,3 +1,4 @@
+using Noelia.Infrastructure.Security;
 using Noelia.Infrastructure.Security.Authorization;
 using Noelia.Infrastructure.Security.Monitoring;
 using Microsoft.AspNetCore.Authorization;
@@ -61,7 +62,10 @@ public class PermissionMiddleware
             return;
         }
 
-        if (!context.User.Identity?.IsAuthenticated ?? true)
+        // Any signed-in identity counts, wherever it stands: asking only the first one
+        // (Identity.IsAuthenticated) refused a signed-in person whenever an unsigned
+        // identity was attached in front of them (ADR-0007, #59).
+        if (!AuthenticatedIdentities.IsAuthenticated(context.User))
         {
             await HandleUnauthorized(context, "User is not authenticated");
             return;
@@ -74,14 +78,18 @@ public class PermissionMiddleware
             return;
         }
 
-        var userPermissions = GetUserPermissions(context.User);
+        // From here on only signed-in identities speak: rights, roles, the wildcards and
+        // the user id for log and alert. An identity nobody signed in (a claims
+        // transformation appended it without an AuthenticationType) lends none of them.
+        var caller = AuthenticatedIdentities.Of(context.User);
+        var userPermissions = GetUserPermissions(caller);
         if (HasPermission(userPermissions, requiredPermission))
         {
             await _next(context);
             return;
         }
 
-        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         _logger.LogWarning(
             "User {UserId} attempted to access {Path} without permission {Permission}",

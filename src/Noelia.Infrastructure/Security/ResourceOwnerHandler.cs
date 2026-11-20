@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using System.Security.Claims;
 
 namespace Noelia.Infrastructure.Security;
@@ -8,6 +9,11 @@ namespace Noelia.Infrastructure.Security;
 /// <summary>
 /// Handler for resource ownership authorization
 /// </summary>
+/// <remarks>
+/// At least one signed-in person identity has to be there and every one of them has to pass on
+/// its own: owner by its own user id, or admin by its own roles (ADR-0007). No person at all
+/// fails the requirement, also without <c>RequireAuthenticatedUser</c> in front.
+/// </remarks>
 public class ResourceOwnerHandler(
     IHttpContextAccessor httpContextAccessor,
     ILogger<ResourceOwnerHandler> logger)
@@ -27,20 +33,43 @@ public class ResourceOwnerHandler(
             return Task.CompletedTask;
         }
 
-        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        if (string.IsNullOrEmpty(userId))
+        var persons = ServiceCallerIdentity.PersonsOf(context.User).ToList();
+        if (persons.Count == 0)
         {
-            _logger.LogWarning("Resource owner check failed: No user ID found in claims");
+            _logger.LogWarning("Resource owner check failed: no signed-in person");
             context.Fail();
             return Task.CompletedTask;
         }
 
-        // Check if user is admin (admins can access all resources)
-        if (context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.SuperAdmin))
+        foreach (var person in persons)
         {
-            context.Succeed(requirement);
-            return Task.CompletedTask;
+            if (!IsOwnerOrAdmin(person, httpContext, requirement))
+            {
+                context.Fail();
+                return Task.CompletedTask;
+            }
+        }
+
+        context.Succeed(requirement);
+        return Task.CompletedTask;
+    }
+
+    private bool IsOwnerOrAdmin(ClaimsIdentity person, HttpContext httpContext, ResourceOwnerRequirement requirement)
+    {
+        var userId = person.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            _logger.LogWarning("Resource owner check failed: No user ID found in claims");
+            return false;
+        }
+
+        // Check if user is admin (admins can access all resources). The roles of this identity
+        // alone, read through its own RoleClaimType.
+        var alone = new ClaimsPrincipal(person);
+        if (alone.IsInRole(Roles.Admin) || alone.IsInRole(Roles.SuperAdmin))
+        {
+            return true;
         }
 
         // Get resource ID from route parameters
@@ -49,8 +78,7 @@ public class ResourceOwnerHandler(
         if (string.IsNullOrEmpty(resourceId))
         {
             _logger.LogWarning("Resource owner check failed: No resource ID found in route");
-            context.Fail();
-            return Task.CompletedTask;
+            return false;
         }
 
         // Check if the user owns the resource
@@ -58,15 +86,11 @@ public class ResourceOwnerHandler(
         // For now, we'll use a simple check if the resource ID matches user ID
         if (resourceId.Equals(userId, StringComparison.OrdinalIgnoreCase))
         {
-            context.Succeed(requirement);
-        }
-        else
-        {
-            _logger.LogWarning("Resource owner check failed: User {UserId} attempted to access resource {ResourceId}",
-                userId, resourceId);
-            context.Fail();
+            return true;
         }
 
-        return Task.CompletedTask;
+        _logger.LogWarning("Resource owner check failed: User {UserId} attempted to access resource {ResourceId}",
+            userId, resourceId);
+        return false;
     }
 }

@@ -1,5 +1,6 @@
 using Noelia.Abstractions.Security.Audit;
 using Microsoft.AspNetCore.Http;
+using Noelia.Infrastructure.Security.ServiceTokens;
 using Microsoft.Extensions.Logging;
 
 namespace Noelia.Infrastructure.Security;
@@ -59,7 +60,7 @@ public class SecurityAuditMiddleware
             {
                 EventType = eventType,
                 Description = $"{context.Request.Method} {context.Request.Path}",
-                UserId = context.User?.Identity?.Name,
+                UserId = ServiceCallerIdentity.PersonsOf(context.User).FirstOrDefault()?.Name,
                 IpAddress = context.Connection.RemoteIpAddress?.ToString(),
                 UserAgent = context.Request.Headers.UserAgent.ToString(),
                 Metadata = new Dictionary<string, object?>
