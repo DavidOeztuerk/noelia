@@ -6,6 +6,8 @@
 
 > „#59 bekommt ein eigenes Gate und wird Teil eines Minor-Release (7.2.0), weil der Fix Konsumenten brechen kann. Die Lücke wird geschlossen, nicht nur dokumentiert: Rechte und Rollen zählen nur aus angemeldeten Identitäten, in PermissionMiddleware und PermissionAuthorizationHandler gleich. Der Bruch für Konsumenten mit IClaimsTransformation steht in MIGRATION.md, mit dem Weg, wie sie ihre Claims richtig anhängen."
 
+### Auslegung durch dieses ADR (nicht Teil des Wortlauts)
+
 Dieses ADR setzt den Entscheid um. Es lässt nichts davon offen und wählt keine Alternative, die ihm widerspricht. Dass der Fix über die beiden genannten Pfade hinaus weitere Noelia-Prüfungen erfasst (Entscheidung 3), ist keine Abweichung, sondern seine Voraussetzung: Entscheidung 2 nimmt in der Standardkette die 401 weg, die diese Pfade heute verdeckt.
 
 ## In einfacher Sprache
@@ -83,7 +85,7 @@ Kontrolle jeweils: eine angemeldete Identität ohne Recht, Konto `Suspended`; al
 
 Das Gefährliche: **Ein Fix allein in der Middleware öffnet Wege.** Heute verdeckt die 401 aus
 `PermissionMiddleware.cs:64` in Fall B jede Handler-Entscheidung, die aus der vorn stehenden unangemeldeten Identität
-getroffen wurde (`UseAuthorization` läuft vor `PermissionMiddleware`, `MiddlewarePipelineModule.cs:238–239`,
+getroffen wurde (`UseAuthorization` läuft vor `PermissionMiddleware`, `MiddlewarePipelineModule.cs:239` gegen `:262`,
 `ServiceCollectionExtensions.cs:229–231`). Mit `Identities.Any(...)` allein käme außerdem eine **widerrufene Person durch**
 (Probe: nächster Schritt läuft, 200), sobald eine Policy das Personen-Scheme und ein fehlerhaftes zweites Scheme nennt.
 
