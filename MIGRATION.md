@@ -26,6 +26,8 @@ Eine `IClaimsTransformation` läuft bei **jedem** `AuthenticateAsync`, für **je
 `NoeliaService`. Wähle deshalb die angemeldete Personen-Identität und leite die Rechte aus deren `sub` ab:
 
 ```csharp
+// using System.Security.Claims; using Noelia.Infrastructure.Security.ServiceTokens;
+// `rights.LookupAsync` steht für Ihren eigenen Rechte-Speicher.
 var person = principal.Identities.FirstOrDefault(i =>
     i.IsAuthenticated && i.AuthenticationType != ServiceTokenDefaults.AuthenticationScheme);
 // Schemes mit MapInboundClaims tragen NameIdentifier statt sub
@@ -66,12 +68,15 @@ Nicht:
   Identität braucht diese Claims, oder sie ist keine angemeldete Identität.
 - **Datensatzprüfung lehnt bei Ausnahme ab:** `ResourceAuthorizationMiddleware` ließ bei einer Ausnahme im Provider
   durch („Continue processing“). Jetzt wird abgelehnt. Konsumenten mit einem eigenen, werfenden Provider sehen 403/401
-  statt 200. Mit den Providern aus `Noelia.InMemory` und `Noelia.Redis` ändert sich nichts.
+  statt 200. Der Provider aus `Noelia.Redis` fängt Ausnahmen selbst und antwortet schon bisher mit „abgelehnt“
+  (`ResourceAuthorizationService`); der aus `Noelia.InMemory` fängt nichts, wirft also sein Resolver
+  (`GetRequiredPermissionsAsync`), gab es bisher 200 und jetzt 403.
 - **Personen-Handler lehnen ohne angemeldete Person ab:** `ActiveAccountHandler`, `EmailVerifiedHandler`,
   `ResourceAuthorizationHandler`, `OwnershipAuthorizationHandler` und `ResourceOwnerHandler` rufen ohne angemeldete
   Personen-Identität `Fail()` auf, auch wenn nur eine Dienst-Identität oder nur eine unangemeldete Identität da ist. Mit
-  mehreren Personen muss jede bestehen. Mit den Noelia-Providern entspricht das dem Verhalten von heute; mit einem
-  **eigenen** Provider der Datensatzprüfung ist es strenger als heute.
+  mehreren Personen muss jede bestehen. Fehlte die Nutzer-ID oder der Claim, lehnten sie schon bisher ab; **neu** ist: Eine
+  unangemeldete Identität mit Nutzer-ID, Kontostand oder Admin-Rolle zählt nicht mehr als Person. Mit einem **eigenen**
+  Provider der Datensatzprüfung ist es strenger als heute.
 
 ## Was sich nicht ändert
 
