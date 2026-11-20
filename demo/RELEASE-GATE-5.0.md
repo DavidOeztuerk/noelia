@@ -55,6 +55,7 @@ Each project below directly references exactly one distinct `Noelia.*` package:
 | `Noelia.Http.Probe` | `Noelia.Http` | 1 |
 | `Noelia.InMemory.Probe` | `Noelia.InMemory` | 1 |
 | `Noelia.SecurityHeaders.Probe` | `Noelia.Infrastructure` | 7 |
+| `Noelia.M2M.Probe` | `Noelia.Infrastructure` | 6 |
 | `Noelia.Messaging.MassTransit.Probe` | `Noelia.Messaging.MassTransit` | 1 |
 | `Noelia.Passwords.Argon2.Probe` | `Noelia.Passwords.Argon2` | 1 |
 | `Noelia.Passwords.BCrypt.Probe` | `Noelia.Passwords.BCrypt` | 1 |

@@ -66,6 +66,13 @@ dotnet test   Noelia.TodoDemo.sln --no-build  -c Release
 project reference out of it. A gate compiling against the working tree it was cut
 from proves nothing about the packages.
 
+`demo/probes/Noelia.M2M.Probe` covers the receiving side of service-to-service
+rights as a package consumer: an issuer signs a token over HTTP, a receiver with
+one `RequireServiceCaller` door plus `MapServiceFallback` answers the named caller
+2xx and a stranger, no token and a person's token with the uniform 404, and the
+report after start (`ISecurityCheckReport.Latest`) shows `noelia.m2m.caller-policy`
+as `Pass`. It runs with the demo test run above, so it needs the same candidate.
+
 ## 5. The stack, and a service that is not the demo
 
 ```bash
@@ -73,6 +80,12 @@ NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
 python3 eng/security-checks.py          # fails on an unallowed Fail
 cd src/frontend && npm test && npm run e2e
 ```
+
+`security-checks.py` now expects `noelia.m2m.caller-policy` to be `Pass` on the
+demo UserService (the issuer, with its one rate-limited token endpoint); `NotApplicable`
+or `Warning` there is a finding, see `eng/security-check-expectations.json`. The
+receiving side (a door with its fallback) is not composed in any demo service and is
+covered by `Noelia.M2M.Probe` in step 4, not by the stack.
 
 Then **ContosoInvoicing** (`~/Projects/ContosoInvoicing`), which is outside the
 demo and declares things the demo never does. Every time it has been run against

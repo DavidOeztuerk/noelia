@@ -3,7 +3,7 @@ id: Q-0057
 gate: G-0017
 kind: main
 rank: B
-state: proposed
+state: in_progress
 dod:
   - "Der Demo-Stack liefert für noelia.m2m.caller-policy nicht überall NotApplicable"
   - "security-check-expectations.json erwartet dort Pass"
