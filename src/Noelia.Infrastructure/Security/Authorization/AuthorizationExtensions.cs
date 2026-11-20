@@ -26,6 +26,7 @@ public static class AuthorizationExtensions
         // AddInMemoryResourceAuthorization().
 
         // Register permission resolver
+        services.AddSignedInPolicyHandlers();
         services.AddSingleton<IPermissionResolver, PermissionResolver>();
 
         // Register authorization handlers
@@ -50,10 +51,10 @@ public static class AuthorizationExtensions
 
             // Admin policies
             options.AddPolicy("AdminOnly", policy =>
-                policy.RequireRole("Admin"));
+                policy.RequireSignedInRole("Admin"));
 
             options.AddPolicy("SuperAdminOnly", policy =>
-                policy.RequireRole("SuperAdmin"));
+                policy.RequireSignedInRole("SuperAdmin"));
 
         });
 

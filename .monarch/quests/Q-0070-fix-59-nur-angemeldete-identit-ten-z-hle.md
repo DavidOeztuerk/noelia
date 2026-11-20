@@ -3,7 +3,7 @@ id: Q-0070
 gate: G-0018
 kind: main
 rank: A
-state: proposed
+state: in_progress
 dod:
   - "Umsetzung nach ADR-0007 Entscheidungen 1 bis 9; der Prüfplan des ADR ist die Definition of Done"
   - "Rot-Tests vorher, grün nachher, je Zeile mit Mutationsprobe: Middleware und Handler, Matrix {permission, Rolle, *, cat:*, Permission mit Resource} x {unangemeldet vorn, hinten}: 403, nur unangemeldet 401"

@@ -25,13 +25,13 @@ public static class AuthorizationExtensions
         services.AddAuthorization(options =>
         {
             options.AddPolicy(Policies.RequireAdminRole, policy =>
-                policy.RequireRole(Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.Admin, Roles.SuperAdmin));
 
             options.AddPolicy(Policies.RequireModeratorRole, policy =>
-                policy.RequireRole(Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
 
             options.AddPolicy(Policies.RequireUserRole, policy =>
-                policy.RequireRole(Roles.User, Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
+                policy.RequireSignedInRole(Roles.User, Roles.Moderator, Roles.Admin, Roles.SuperAdmin));
 
             options.AddPolicy(Policies.RequireVerifiedEmail, policy =>
                 policy.AddRequirements(new EmailVerifiedRequirement()));
@@ -41,10 +41,11 @@ public static class AuthorizationExtensions
 
             foreach (var permission in catalog.AllPermissions)
             {
-                options.AddPolicy(permission, policy => policy.RequireClaim("permission", permission));
+                options.AddPolicy(permission, policy => policy.RequireSignedInClaim("permission", permission));
             }
         });
 
+        services.AddSignedInPolicyHandlers();
         services.AddScoped<IAuthorizationHandler, ResourceOwnerHandler>();
         services.AddScoped<IAuthorizationHandler, EmailVerifiedHandler>();
         services.AddScoped<IAuthorizationHandler, ActiveAccountHandler>();
