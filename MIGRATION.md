@@ -8,7 +8,7 @@ nichts geprüft hatte. Die Prüfungen laufen jetzt ein zweites Mal, sobald alle 
 gestartet sind. Das ändert, was der Bericht zeigt:
 
 - Ein korrekter **Aussteller** meldet **Pass statt Fail**.
-- Ein **Empfänger mit einer Tür ohne Fallback oder mit `AllowAnonymous`** meldet **Fail statt Pass**.
+- Ein **Empfänger mit einer Tür, die `AllowAnonymous` trägt,** meldet **Fail statt Pass**; eine Tür **ohne Fallback** meldet **Warning statt Pass**.
 - Ein **Empfänger ganz ohne gemappte Tür** meldet **Warning statt Pass** („nothing was checked“).
 - Zwischen Start der Dienste und zweitem Lauf meldet die Prüfung Warning („routes not built yet“).
   Die Prüfung scheitert nie den Start: Schlägt der zweite Lauf selbst fehl, bleibt der erste.
@@ -16,7 +16,7 @@ gestartet sind. Das ändert, was der Bericht zeigt:
 Wer den Bericht in CI oder Monitoring auf `Pass` prüft, sieht für Empfänger ohne Tür jetzt
 Warning. Keine API-Änderung, keine Konfiguration.
 
-Keine API-Änderung für #58. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
+**Zu #58 (siehe unten):** Keine API-Änderung. Neu ist nur je eine Überladung `(ICurrentPrincipal, IPrincipalFactory)`
 an `ActingForCompanyHandler` und `ActingAsSelfHandler`; der bisherige Konstruktor bleibt
 binär- und quellkompatibel.
 
@@ -30,8 +30,11 @@ und jede Person bekam 403. Die Handler übersetzen jetzt `context.User` selbst, 
   Personen **200 statt 403**. Wer die Policies umgangen hat, merkt nichts.
 - An einer Dienst-Tür mit einer Person neben dem Dienst und `ActingAsSelf` kommt die
   Person durch: **200 statt 404** (ADR-0003, Entscheidung 6).
-- Eine widerrufene Person bekommt an diesen Policies **401 statt 403**: Die Policy
-  erlaubt, die Widerrufsprüfung dahinter lehnt ab, der Endpoint läuft nie.
+- Mit `UseTokenRevocation()` hinter `UseAuth()` bekommt eine widerrufene Person an diesen
+  Policies **401 statt 403**: Die Policy erlaubt, die Widerrufsprüfung dahinter lehnt ab,
+  der Endpoint läuft nie. **Ohne** Widerrufsschritt (die Standardkette und die README-Kette
+  enthalten keinen) gibt es nichts, was ein widerrufenes Token ablehnt, und die Person
+  bekommt jetzt **200 statt 403**; wer Widerruf braucht, hängt `UseTokenRevocation()` an.
 - Ein Dienst-Token ist weiter keine Person und bekommt keine Rolle.
 
 **Verhaltensänderung, scheitert geschlossen:** Ein ersetztes oder gefälschtes

@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 6, weekly_pct: 2, gold_usd: 0 }
 boss: "Interpret eines Schema-3-Reports mit konfigurierter Policy und nicht installiertem Guard liefert einen Befund"
+board: { pr: 67 }
 ---
 # noelia analyze --url kennt Report-Schema 3 und wertet egressIsEnforced nicht als Beleg (#53)

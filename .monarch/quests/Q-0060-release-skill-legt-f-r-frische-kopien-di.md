@@ -13,5 +13,6 @@ scope:
   exclude: []
 estimate: { session_pct: 5, weekly_pct: 2, gold_usd: 0 }
 boss: "Frische Worktree: Skript, dann docker compose config ohne fehlende Variable"
+board: { pr: 67 }
 ---
 # Release-Skill legt für frische Kopien die demo/.env an (#55)

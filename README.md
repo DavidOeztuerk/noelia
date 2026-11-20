@@ -1246,7 +1246,8 @@ nothing the caller sent is ever written.
 Rate limits, output caching and CORS go on the **group**, never on one door:
 anything that answers differently on a door than on the fallback tells a caller
 which paths exist. The check `noelia.m2m.caller-policy` (it is not applicable when nothing
-here is in use, so the dashboard shows one more row and no new warning) verifies
+here is in use, so the dashboard shows one more row; in the short window before the
+second run it reads “routes not built yet” as a warning) verifies
 the fallback, the 404 handler and the single token endpoint.
 
 ### Behind a door

@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 6, weekly_pct: 2, gold_usd: 0 }
 boss: "python3 eng/security-checks.py meldet M2M Pass am Aussteller und am Empfänger der Demo"
+board: { pr: 67 }
 ---
 # M2M wird im Release-Gate als Paket geprüft (#56)

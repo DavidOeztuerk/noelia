@@ -13,5 +13,6 @@ scope:
   exclude: []
 estimate: { session_pct: 8, weekly_pct: 3, gold_usd: 0 }
 boss: "HTTP-Test über die README-Kette: Person 200, fremde Person 403"
+board: { pr: 67 }
 ---
 # ActingForCompany und ActingAsSelf lesen die Person unabhängig von der Reihenfolge (#58)

@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 2, weekly_pct: 1, gold_usd: 0 }
 boss: "README und MIGRATION nennen beide den zweiten Lauf"
+board: { pr: 67 }
 ---
 # README und MIGRATION nennen den Verhaltenswechsel der Prüfläufe (#62)

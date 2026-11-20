@@ -89,7 +89,7 @@ as `Pass`. It runs with the demo test run above, so it needs the same candidate.
 ## 5. The stack, and a service that is not the demo
 
 ```bash
-cd demo
+cd "$(git rev-parse --show-toplevel)/demo"
 [ -f .env ] || eng/fresh-copy-env.sh    # a fresh copy has no .env (it is gitignored)
 NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 python3 eng/security-checks.py          # fails on an unallowed Fail
@@ -123,6 +123,7 @@ wrong version. The script works on a throw-away copy, with an own package folder
 and fails instead of reporting green when it cannot prove the candidate ran.
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"      # the block below runs from the repository root
 V="$(sed -nE 's|.*<VersionPrefix>([0-9.]+)</VersionPrefix>.*|\1|p' Directory.Build.props)-gate.$(date -u +%Y%m%d%H%M%S)"
 FEED="$(mktemp -d)"
 dotnet pack Noelia.slnx -c Release -p:Version="$V" -o "$FEED"
@@ -141,8 +142,9 @@ What it proves, and fails on otherwise:
 `noelia analyze` exit 1 (findings) is printed and read by you; exit 2 (tool error)
 fails. A bare `X.Y.Z` is refused: the version needs the prerelease suffix. NU1900
 (NuGetAudit offline) under `-warnaserror` can be a false alarm of the network, not of
-the candidate; rerun online, never disable the audit. This step will be adjusted
-again with #55 (`.env`) and #63 (the cache purge above goes away).
+the candidate; rerun online, never disable the audit. A `demo/.env` that predates the
+issuer lacks `NOELIA_M2M_CLIENT_TODO_SERVICE_SECRET_HASH` and the demo UserService stops at
+start; `eng/fresh-copy-env.sh` writes it, an existing file needs the line added by hand.
 
 ## 6. Documentation, in the same commit
 

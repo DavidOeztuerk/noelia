@@ -14,5 +14,6 @@ scope:
   exclude: []
 estimate: { session_pct: 3, weekly_pct: 1, gold_usd: 0 }
 boss: "gitleaks git --staged meldet nichts"
+board: { pr: 67 }
 ---
 # gitleaks:allow an Testvektoren, CLAUDE.md-Pin, dashboard-mono-dev.png löschen (#51)

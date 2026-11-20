@@ -186,8 +186,10 @@ internal sealed class RoutesBuiltState
 /// <c>GenericWebHostService</c> builds the pipeline and fills the container's
 /// <c>EndpointDataSource</c> in its own <c>StartAsync</c>, which on a
 /// <c>WebApplicationBuilder</c> is the last service to run. <c>StartedAsync</c> is awaited
-/// before <c>StartAsync()</c> of the host returns, so the report is already the real one
-/// when the process is reachable. <c>ApplicationStarted</c> would not give that: it is
+/// before <c>StartAsync()</c> of the host returns, so the report is the real one once the host
+/// has started (Kestrel may already accept requests before that, and in that window the report
+/// still holds the first run's “routes not built yet”). <c>ApplicationStarted</c> would not
+/// give that guarantee: it is
 /// synchronous, so an async body would be <c>async void</c> and an exception from it would
 /// end the process.
 /// </remarks>

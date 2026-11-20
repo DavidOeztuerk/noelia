@@ -15,5 +15,6 @@ scope:
   exclude: []
 estimate: { session_pct: 12, weekly_pct: 4, gold_usd: 0 }
 boss: "Test startet eine echte WebApplication und liest /noelia/report.json: Aussteller Pass, Empfänger mit AllowAnonymous-Tür Fail"
+board: { pr: 67 }
 ---
 # Prüfung noelia.m2m.caller-policy sieht nach einem echten Start die gemappten Türen (#62)

@@ -20,8 +20,8 @@
 # possible false alarm of the environment, not a verdict on the candidate. The
 # audit is deliberately NOT switched off here; rerun with network access.
 #
-# Not here (tracked separately): .env handling (#55), dropping the cache purge
-# in the skill (#63).
+# The demo's .env (#55) and the cache purge (#63) are handled in eng/fresh-copy-env.sh
+# and in the skill's candidate recipe, not here.
 #
 # The Noelia checkout is only read (git rev-parse, packing is the caller's job).
 # Source this file to use the functions (the tests do); main runs only when the

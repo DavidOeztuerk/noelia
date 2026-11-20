@@ -13,5 +13,6 @@ scope:
   exclude: []
 estimate: { session_pct: 5, weekly_pct: 2, gold_usd: 0 }
 boss: "Nach dem Handweg enthält ~/.nuget/packages/noelia.* keine Quelle außer nuget.org"
+board: { pr: 67 }
 ---
 # Handweg gegen den Kandidaten legt keinen Testbau unter echter Nummer im globalen NuGet-Cache ab (#63)

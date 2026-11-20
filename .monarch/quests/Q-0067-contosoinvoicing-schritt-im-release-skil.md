@@ -15,5 +15,6 @@ scope:
   exclude: []
 estimate: { session_pct: 8, weekly_pct: 3, gold_usd: 0 }
 boss: "Das Skript bricht ab, wenn ein anderer Bau unter der Kandidatennummer im Feed liegt"
+board: { pr: 67 }
 ---
 # ContosoInvoicing-Schritt im Release-Skill prüft den Kandidaten (#54)
