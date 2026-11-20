@@ -46,20 +46,33 @@ restore first — it reads the restored graph, not the project file.
 ## 3. Pack to the local feed
 
 ```bash
-dotnet pack Noelia.slnx -c Release -o demo/.local-feed
-rm -rf ~/.nuget/packages/noelia.*     # a candidate keeps its version number
+V=$(grep -o '<VersionPrefix>[^<]*' Directory.Build.props | cut -d'>' -f2)-local.$(date -u +%Y%m%d%H%M%S)
+PKGS=$(mktemp -d)
+dotnet pack Noelia.slnx -c Release -p:Version=$V -o demo/.local-feed/$V
 ```
 
-The cache purge is not optional. Without it the demo restores yesterday's
-candidate under today's number and every test passes against the wrong code.
+The candidate carries a version of its own (`X.Y.Z-local.<stamp>`), lives in its
+own feed folder, and is restored into its own package folder (`$PKGS`). Nothing
+is packed under the real number, and nothing is deleted from
+`~/.nuget/packages`: a test build under a real version number in the global
+folder would be handed silently to every other project on the machine that
+restores that number (#63). The old `rm -rf ~/.nuget/packages/noelia.*` is gone
+for that reason, not forgotten. `demo/eng/release-gate.mjs` does the same.
 
 ## 4. The demo, as a foreign consumer
 
 ```bash
 cd demo
-dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
-dotnet build  Noelia.TodoDemo.sln --no-restore -c Release
-dotnet test   Noelia.TodoDemo.sln --no-build  -c Release
+# demo/NuGet.Config maps * to nuget.org, so a bare --source is ignored: say where Noelia.* comes from
+cat > $PKGS/NuGet.Config <<EOF
+<configuration><packageSources><clear />
+<add key="candidate" value="$PWD/.local-feed/$V" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
+<packageSourceMapping><packageSource key="candidate"><package pattern="Noelia.*" /></packageSource>
+<packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
+EOF
+dotnet restore Noelia.TodoDemo.sln --packages $PKGS --configfile $PKGS/NuGet.Config -p:NoeliaVersion=$V
+dotnet build  Noelia.TodoDemo.sln --no-restore -c Release -p:NoeliaVersion=$V
+dotnet test   Noelia.TodoDemo.sln --no-build  -c Release -p:NoeliaVersion=$V
 ```
 
 `DemoStaysAForeignConsumerTests` enforces that nothing under `demo/` takes a
@@ -76,7 +89,7 @@ as `Pass`. It runs with the demo test run above, so it needs the same candidate.
 ## 5. The stack, and a service that is not the demo
 
 ```bash
-NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
+NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 python3 eng/security-checks.py          # fails on an unallowed Fail
 cd src/frontend && npm test && npm run e2e
 ```

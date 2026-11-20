@@ -414,17 +414,26 @@ like failures; the only acceptance is
 Before a Noelia version is on nuget.org:
 
 ```bash
-dotnet pack ../Noelia.slnx -c Release -o .local-feed
-rm -rf ~/.nuget/packages/noelia.*
-dotnet restore Noelia.TodoDemo.sln --configfile NuGet.Local.Config --force --no-cache
+V=$(grep -o '<VersionPrefix>[^<]*' ../Directory.Build.props | cut -d'>' -f2)-local.$(date -u +%Y%m%d%H%M%S)
+PKGS=$(mktemp -d)
+dotnet pack ../Noelia.slnx -c Release -p:Version=$V -o .local-feed/$V
+# NuGet.Config maps * to nuget.org, so a bare --source is ignored: say where Noelia.* comes from
+cat > $PKGS/NuGet.Config <<EOF
+<configuration><packageSources><clear />
+<add key="candidate" value="$PWD/.local-feed/$V" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
+<packageSourceMapping><packageSource key="candidate"><package pattern="Noelia.*" /></packageSource>
+<packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
+EOF
+dotnet restore Noelia.TodoDemo.sln --packages $PKGS --configfile $PKGS/NuGet.Config -p:NoeliaVersion=$V
 
-NOELIA_SOURCE=/src/.local-feed docker compose --profile all up -d --build --wait
+NOELIA_VERSION=$V NOELIA_SOURCE=/src/.local-feed/$V docker compose --profile all up -d --build --wait
 ```
 
-The cache has to be cleared by hand: a candidate keeps its version number while
-its contents change, and NuGet has no way to know that. Prefer the release gate
-above, which gives every candidate a fresh version and an isolated restore path, so
-nothing global has to be deleted.
+A candidate gets a version of its own and a package folder of its own. NuGet keys
+its global folder on id and version only, so a test build under a real version
+number would sit in `~/.nuget/packages` and be handed to every other project on
+the machine that restores that number. Nothing here is packed under a real number
+and nothing global is deleted. The release gate above does the same.
 
 ## What is in here
 
