@@ -1,7 +1,7 @@
 # PostgreSQL-Beweis für ADR-0008
 
 **Gate:** G-0020 (Issue #73, Nacharbeit G-0006) · **Art:** Beweis, kein Fix. Unter `src/` ändert sich in diesem Gate
-nichts, die Version bleibt 7.1.1. · **Stand:** Design, Fassung 2 (nach Warden-Runde 1: 4 Major, 10 Minor eingearbeitet), noch ohne Ergebnis.
+nichts, die Version bleibt 7.1.1. · **Stand:** Design, Fassung 3 (Warden-Runde 1: 4 Major, 10 Minor eingearbeitet; Delta-Runde: approve), noch ohne Ergebnis.
 
 ## In einfacher Sprache
 
@@ -61,7 +61,9 @@ ein Fall mit `CloseAllSessionsAsync` zeigt die Gleichwertigkeit.
   `Transaction.Current` der Transaktion von C bei.
 - **Das Opfer wird festgelegt, nicht erhofft** (Warden, Major 1): `deadlock_timeout` je Verbindung über
   `Options=-c deadlock_timeout=…`: C 2 s, G 60 s. PostgreSQL prüft je Wartendem einmal nach dessen Frist, also bricht es C
-  ab, auch wenn G spät einsteigt. Vorbedingung des Tests: C scheitert mit SQLSTATE 40P01 und G nicht. „Opfer G" ist
+  ab, sofern G innerhalb von 2 s nach dem Wartebeginn von C selbst zu warten beginnt (sonst wird G nach 60 s das Opfer,
+  Aufbaufehler). Darum wird G sofort nach dem erreichten Zustand freigegeben und in Abständen von höchstens 50 ms
+  abgefragt. Vorbedingung des Tests: C scheitert mit SQLSTATE 40P01 und G nicht. „Opfer G" ist
   ein Aufbaufehler, nie grün.
 - Der Zähler `pg_stat_database.deadlocks` steigt verzögert (nach dem Rückgeben der Verbindung). Abgefragt wird in
   Autocommit mit Frist (10 s) bis `>= vorher + 1`, dann genau `+ 1`. Erster Beleg ist das abgefangene 40P01 auf C.
@@ -133,7 +135,20 @@ Server. Was bleibt und wirklich geprüft wird, heißt nach dem, was es zeigt:
 die Redis-Integrationstests heute, und die PostgreSQL-Tests laufen dort mit, ohne Änderung an der Pipeline. Lokal:
 `dotnet test tests/Noelia.Infrastructure.Tests --filter "Category=Integration"` mit laufendem Docker; ohne Docker
 schlagen sie fehl, nicht still durch. Die Laufzeit steigt um den Containerstart (einige Sekunden je Klasse) und etwa
-eine Sekunde je F4-Fall (`deadlock_timeout`).
+mindestens 2 s je Deadlock-Fall (`deadlock_timeout` von C); ein Lauf mit Opfer G kostet 60 s und ist ein Aufbaufehler.
+
+## Fassung 3: Umsetzungsregeln aus der Delta-Runde (approve)
+
+- **Kontrolle:** Die Backend-Id von C kommt aus dem Interceptor an der Verbindung des Pass-UPDATE
+  (`NpgsqlConnection.ProcessID`), denn ohne Klammer gibt es keinen Ort „innerhalb der Klammer". Das 40P01 auf C hält
+  `CommandFailed` fest, weil der Store es abfängt.
+- **Generationen:** (i) Erwartet ist 0 offen; die Vorhersage ist Rot (das Schließen wirft nach 32 Durchläufen, O_32
+  bleibt offen). (ii) Vorbedingung: S hat genau eine offene Zeile, sonst kappt A eine Zeile, die C schon geschlossen hat,
+  und der Test hängt. (iii) In der Klammer ist „A antwortet Revoked" ein Aufbaufehler: vor der ersten Rotation von außen
+  wird geprüft (`Enlist=false`), dass die Markierung unsichtbar ist. Jedes Warten hat eine Frist.
+- **Index-Test:** `ALTER DATABASE … SET enable_seqscan = off` wirkt nur auf neue Sitzungen. Es wird direkt nach
+  `CREATE DATABASE` gesetzt, vor `EnsureCreated`; `current_setting('enable_seqscan')` auf der Verbindung des Tests
+  belegt es.
 
 ## 5. Was offen bleibt (SQL Server und Weiteres)
 

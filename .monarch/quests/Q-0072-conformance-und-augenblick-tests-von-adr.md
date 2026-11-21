@@ -3,7 +3,7 @@ id: Q-0072
 gate: G-0020
 kind: main
 rank: A
-state: proposed
+state: in_review
 dod:
   - "RefreshTokenStoreConformance läuft zusätzlich gegen PostgreSQL (Testcontainers, Category=Integration), wirft ohne Container-Runtime statt zu überspringen"
   - "Augenblick-Tests als abstrakte Basis mit SQLite- und PostgreSQL-Erbe; Zahl und Namen der SQLite-Tests unverändert"
