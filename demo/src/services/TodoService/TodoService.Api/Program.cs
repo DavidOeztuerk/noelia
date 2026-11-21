@@ -74,6 +74,11 @@ app.UseNoelia(builder.Environment, serviceName, pipeline => pipeline
     .UseHealthCheckEndpoints()
     .UseRateLimiting()
     .UseAuth()
+    // Right after authentication and before the principal. This service only
+    // reads tokens, but a token the user service has signed out must stop
+    // working here too; the cutoff arrives through the shared store (Valkey in
+    // Staging and Production). The default chain leaves this step out.
+    .UseTokenRevocation()
     .UsePrincipal()
     // After the principal: an audit entry that cannot name who acted is a
     // record of a request, not of a decision.

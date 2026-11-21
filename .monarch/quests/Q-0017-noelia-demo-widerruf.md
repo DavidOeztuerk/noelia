@@ -5,7 +5,7 @@ kind: main
 rank: A
 severity: low
 risk_tags: [auth]
-state: proposed
+state: in_review
 findings: [N1]
 scope:
   repo: Noelia
