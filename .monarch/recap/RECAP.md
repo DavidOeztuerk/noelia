@@ -1,10 +1,10 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-21T01:12:25Z
+- Zeitpunkt: 2026-11-21T03:31:56Z
 - Plan: Pro
-- Mana 5h: 96% (Limit 90%, Reset 2026-11-21T02:20:00Z)
-- Mana 7d: 13% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 40% (Limit 90%, Reset 2026-11-21T07:40:00Z)
+- Mana 7d: 19% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
@@ -25,7 +25,8 @@
 - Q-0070: MIGRATION.md (Bruch, Weg, IPrincipalFactory, 401 bei zweiter Identität, eigener Code), README, Befund unter docs/befunde/; kein Release, keine Versionserhöhung
 
 ## Nächster konkreter Schritt
-ADR-0008 Fassung 2 nach .monarch/knowledge/G-0006-warden-r1-korrektur.md (M1 Zeilensperren, M2 Demo-Tests, Minors), Kritiker, Commit, eine Delta-Runde Warden (Opus); danach TDD Q-0016, Q-0071, Q-0017, Q-0018
+Schmale Warden-Prüfung des N1-Fixes (ADR-0008 Fassung 3, Head 301d0c4) abwarten bzw. lesen: PR #71 Kommentar 'Warden: schmale Prüfung N1-Fix'. Bei approve: PR-Text auf Fassung 3 bringen (Scratchpad-Write war per Scope-Hook verweigert; erst wenn keine Quest den Scope sperrt), dann TDD Q-0016 (Knight, Sonnet), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden. Delta-Runde: https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373 (N1 major behoben in Fassung 3; N2-N4, K1, K2 eingearbeitet; N5 -> Issue Nacharbeit G-0006 mit PG-Conformance, Release-Gate-Widerrufsschritt, Sperrzeile 8.0).
 
 ## Offene Entscheidungen
-- Neue Majors der Delta-Runde außerhalb der Korrektur: dem User zeigen, bevor das ADR erweitert wird
+- Kein approve der schmalen Prüfung oder Einwand gegen den angepassten 8-Tab-Test (Erlaubnis 8, Regel 4): Frage an den User, nichts erzwingen.
+- Q-0026 steht weiter in G-0006 (gate show), obwohl nach G-0019 verschoben; blockiert es gate merge: stoppen und den User fragen.
