@@ -1,7 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Noelia.Abstractions.Security.Sessions;
+using Noelia.Core.Identity;
 using Noelia.Infrastructure.Security.Keys;
+using Noelia.Infrastructure.Security.Sessions;
 using UserService.Contracts;
 
 namespace Demo.Tests;
@@ -145,22 +151,114 @@ public class SignInTests : IDisposable
     }
 
     /// <summary>
-    /// And the access token it was carrying keeps working until it expires.
+    /// Signing out takes the access token with it, and every other session of
+    /// the same person.
     /// </summary>
     /// <remarks>
-    /// Stated rather than hidden. That window is the price of verifying a token
-    /// from its signature alone, and it is a number a deployment sets —
-    /// <c>JwtSettings:ExpireMinutes</c> — not a server it has to run. Closing
-    /// it to zero is what a revocation store is for, and it stays optional.
+    /// This replaces a test that asserted the opposite, that the token lived on
+    /// until it expired. The cutoff is written after the sessions are closed and
+    /// rounded up to a full second, so a token issued earlier in the same second
+    /// as the sign-out is refused too, unless the sign-out lands exactly on the
+    /// boundary millisecond: the assertions below need no sleep.
+    /// </remarks>
+    [Theory]
+    [InlineData("/api/auth/sign-out")]
+    [InlineData("/api/auth/sign-out-everywhere")]
+    public async Task SignOut_RevokesAccessToken(string endpoint)
+    {
+        var first = await SessionFor("revoked@example.com", "Revoked Person");
+
+        // A second session of the same person, with its own cookie jar.
+        using var other = _factory.CreateClient();
+        var second = await (await other.PostAsJsonAsync("/api/auth/login",
+            new SignInRequest("revoked@example.com", "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>();
+
+        (await Get("/api/users/me", first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await Post(endpoint, first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        (await Get("/api/users/me", first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await _client.PostAsync("/api/auth/refresh", null)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await other.PostAsync("/api/auth/refresh", null)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await Get("/api/users/me", second!.AccessToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// If closing the sessions throws, the cutoff is written anyway and the
+    /// answer is an error.
+    /// </summary>
+    /// <remarks>
+    /// Revoked access tokens with an open refresh chain are the worse half of
+    /// the two failures, so the endpoint takes the better one and tells the
+    /// caller to repeat.
     /// </remarks>
     [Fact]
-    public async Task The_access_token_outlives_the_sign_out_until_it_expires()
+    public async Task A_failing_close_still_writes_the_cutoff_and_answers_with_an_error()
     {
-        var session = await SessionFor("window@example.com", "Window Person");
-        await Post("/api/auth/sign-out", session.AccessToken);
+        using var failing = _factory.WithWebHostBuilder(host => host.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITokenSessionService>();
+            services.AddScoped<ITokenSessionService>(provider =>
+                new ClosingThrows(ActivatorUtilities.CreateInstance<TokenSessionService>(provider)));
+        }));
+        using var client = failing.CreateClient();
+        var session = await (await client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("Failing Person", "failing@example.com", "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>();
 
-        (await Get("/api/users/me", session.AccessToken)).StatusCode
-            .Should().Be(HttpStatusCode.OK);
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/sign-out");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session!.AccessToken);
+        var answer = await client.SendAsync(request);
+
+        ((int)answer.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+        (await answer.Content.ReadAsStringAsync()).Should().NotContain("closing is down");
+
+        var me = new HttpRequestMessage(HttpMethod.Get, "/api/users/me");
+        me.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
+        (await client.SendAsync(me)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// A new sign-in after the cutoff's second has passed works.
+    /// </summary>
+    /// <remarks>
+    /// The same-second rejection stays what it is: the cutoff is rounded up, so
+    /// a token issued in the second of the sign-out is refused. This waits for
+    /// the boundary instead of sleeping for a fixed time.
+    /// </remarks>
+    [Fact]
+    public async Task A_sign_in_after_the_boundary_works_again()
+    {
+        var first = await SessionFor("again@example.com", "Again Person");
+        (await Post("/api/auth/sign-out", first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var next = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 1);
+        var wait = next - DateTimeOffset.UtcNow;
+        if (wait > TimeSpan.Zero)
+        {
+            await Task.Delay(wait + TimeSpan.FromMilliseconds(50));
+        }
+
+        var again = await (await _client.PostAsJsonAsync("/api/auth/login",
+            new SignInRequest("again@example.com", "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>();
+
+        (await Get("/api/users/me", again!.AccessToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private sealed class ClosingThrows(ITokenSessionService inner) : ITokenSessionService
+    {
+        public Task<SignInResult> SignInAsync(SubjectId subject, string? clientFingerprint = null, CancellationToken cancellationToken = default) =>
+            inner.SignInAsync(subject, clientFingerprint, cancellationToken);
+        public Task<RefreshResult> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default) =>
+            inner.RefreshAsync(refreshToken, cancellationToken);
+        public Task SignOutAsync(SessionId session, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("closing is down");
+        public Task SignOutEverywhereAsync(SubjectId subject, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("closing is down");
+        public Task<IReadOnlyList<SessionSummary>> ActiveSessionsAsync(SubjectId subject, CancellationToken cancellationToken = default) =>
+            inner.ActiveSessionsAsync(subject, cancellationToken);
     }
 
     [Fact]

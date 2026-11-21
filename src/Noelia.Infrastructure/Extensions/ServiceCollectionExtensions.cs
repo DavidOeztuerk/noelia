@@ -316,8 +316,33 @@ public static class ServiceCollectionExtensions
   /// separate issuing from verifying: every service holding the secret can mint
   /// a token for any subject. Pass a key pair to
   /// <c>AddJwtAuthentication(o => ...)</c> to separate the two.
+  /// <para>
+  /// Calling this directly is the silent fallback: the host logs one warning at
+  /// start, because Noelia 8.0 will refuse it. <c>UseJwt(jwt =&gt;
+  /// jwt.FromSharedSecret())</c> is the explicit way to the same ring and does not
+  /// warn.
+  /// </para>
   /// </remarks>
   public static IServiceCollection AddJwtAuthentication(
+      this IServiceCollection services,
+      IConfiguration configuration,
+      IHostEnvironment environment)
+  {
+    AddSharedSecretJwtAuthentication(services, configuration, environment);
+    SharedSecretFallbackWarning.AddSharedSecretFallbackWarning(services);
+    return services;
+  }
+
+  /// <summary>
+  /// The shared-secret registration without the start-up warning, for the caller
+  /// that chose it on purpose (<c>JwtBuilder.FromSharedSecret()</c>).
+  /// </summary>
+  /// <remarks>
+  /// The warning is set at the call site rather than in here, so that the
+  /// explicit and the silent route share every line of the registration and
+  /// differ only in whether they say so.
+  /// </remarks>
+  internal static IServiceCollection AddSharedSecretJwtAuthentication(
       this IServiceCollection services,
       IConfiguration configuration,
       IHostEnvironment environment)

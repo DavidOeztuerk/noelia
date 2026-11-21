@@ -92,12 +92,14 @@ public sealed class JwtBuilder
     /// The weakest arrangement Noelia supports, and the one to leave behind
     /// first: every service holding the secret can mint a token for any subject,
     /// so there is no such thing as a read-only service. Reads <c>JWT_SECRET</c>
-    /// or <c>JwtSettings:Secret</c>, and refuses a placeholder value.
+    /// or <c>JwtSettings:Secret</c>, and refuses a placeholder value. Naming it
+    /// here is the explicit choice, so it does not log the start-up warning that
+    /// the silent shared-secret fallback does.
     /// </remarks>
     public JwtBuilder FromSharedSecret()
     {
         Decide();
-        _noelia.Services.AddJwtAuthentication(_noelia.Configuration, _noelia.Environment);
+        _noelia.Services.AddSharedSecretJwtAuthentication(_noelia.Configuration, _noelia.Environment);
         return this;
     }
 

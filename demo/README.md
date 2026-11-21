@@ -76,9 +76,21 @@ because a gateway that can be walked around is not a boundary.
 | Cache | in the process | Valkey |
 | Rate counters | in the process, per replica | Valkey, across replicas |
 | Token revocation | in the process, per replica | Valkey |
+| Signed-out tokens refused | monolith: yes; microservices: only in the process that wrote the cutoff, not in the todo service | in every service that reads tokens |
 | Refresh tokens | SQLite | SQLite |
 | Data protection key ring | this container's filesystem | Valkey, encrypted with the master key |
 | Users and todos | in the process | **in the process too** — lost on a service restart, even in Production |
+
+**Signing out refuses the access token at once.** `/auth/sign-out` and
+`/auth/sign-out-everywhere` end every session of the person and write a cutoff
+that the user service, the todo service and the monolith check on every request.
+With a shared store (Valkey, Staging and Production) that holds across services;
+in Development the store is per process, so the todo service of a microservice
+setup does not see a cutoff the user service wrote. One race remains: if a
+refresh passed its store step before the sessions were closed, its access token
+is still issued afterwards, and if its `iat` falls a second boundary behind the
+rounded-up cutoff that one token lives until it expires (bounded by
+`JwtSettings:ExpireMinutes`); the refresh chain is closed anyway.
 
 **What survives a restart, and what does not.** Valkey runs with an append-only
 file (`appendonly yes`, `everysec`) on a named volume per stage

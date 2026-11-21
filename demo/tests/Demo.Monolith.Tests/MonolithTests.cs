@@ -1,7 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Noelia.Abstractions.Security.Sessions;
+using Noelia.Core.Identity;
 using Noelia.Infrastructure.Security.Keys;
+using Noelia.Infrastructure.Security.Sessions;
 using TodoService.Contracts;
 using UserService.Contracts;
 
@@ -87,6 +93,88 @@ public sealed class MonolithTests : IDisposable
         html.Should().Contain("TokenSessions");
         html.Should().NotContain("Ocelot");
         html.Should().NotContain(GateCanary.Value);
+    }
+
+    /// <summary>
+    /// Signing out takes the access token with it, the refresh chain, and every
+    /// other session of the same person, and it does so for the todos too: one
+    /// process, one store.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/auth/sign-out")]
+    [InlineData("/api/auth/sign-out-everywhere")]
+    public async Task SignOut_RevokesAccessToken(string endpoint)
+    {
+        var first = await Register("revoked@example.com");
+        using var other = _factory.CreateClient();
+        var second = await (await other.PostAsJsonAsync("/api/auth/login",
+            new SignInRequest("revoked@example.com", "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>();
+
+        (await Send(HttpMethod.Get, "/api/todos", first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await Send(HttpMethod.Post, endpoint, first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        (await Send(HttpMethod.Get, "/api/todos", first.AccessToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await _client.PostAsync("/api/auth/refresh", null)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await other.PostAsync("/api/auth/refresh", null)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await Send(HttpMethod.Get, "/api/todos", second!.AccessToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// If closing the sessions throws, the cutoff is written anyway and the
+    /// answer is an error.
+    /// </summary>
+    [Fact]
+    public async Task A_failing_close_still_writes_the_cutoff_and_answers_with_an_error()
+    {
+        using var failing = _factory.WithWebHostBuilder(host => host.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITokenSessionService>();
+            services.AddScoped<ITokenSessionService>(provider =>
+                new ClosingThrows(ActivatorUtilities.CreateInstance<TokenSessionService>(provider)));
+        }));
+        using var client = failing.CreateClient();
+        var session = await (await client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("Failing Person", "failing@example.com", "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>();
+
+        var signOut = new HttpRequestMessage(HttpMethod.Post, "/api/auth/sign-out");
+        signOut.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session!.AccessToken);
+        var answer = await client.SendAsync(signOut);
+
+        ((int)answer.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+        (await answer.Content.ReadAsStringAsync()).Should().NotContain("closing is down");
+
+        var todos = new HttpRequestMessage(HttpMethod.Get, "/api/todos");
+        todos.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
+        (await client.SendAsync(todos)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    private async Task<SessionResponse> Register(string email) =>
+        (await (await _client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("Monolith Person", email, "a-long-enough-password")))
+            .Content.ReadFromJsonAsync<SessionResponse>())!;
+
+    private Task<HttpResponseMessage> Send(HttpMethod method, string path, string token)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return _client.SendAsync(request);
+    }
+
+    private sealed class ClosingThrows(ITokenSessionService inner) : ITokenSessionService
+    {
+        public Task<SignInResult> SignInAsync(SubjectId subject, string? clientFingerprint = null, CancellationToken cancellationToken = default) =>
+            inner.SignInAsync(subject, clientFingerprint, cancellationToken);
+        public Task<RefreshResult> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default) =>
+            inner.RefreshAsync(refreshToken, cancellationToken);
+        public Task SignOutAsync(SessionId session, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("closing is down");
+        public Task SignOutEverywhereAsync(SubjectId subject, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("closing is down");
+        public Task<IReadOnlyList<SessionSummary>> ActiveSessionsAsync(SubjectId subject, CancellationToken cancellationToken = default) =>
+            inner.ActiveSessionsAsync(subject, cancellationToken);
     }
 
     public void Dispose()

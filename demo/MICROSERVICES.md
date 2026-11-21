@@ -100,16 +100,27 @@ curl -s -b jar -o /dev/null -w "danach:   %{http_code}\n" -X POST http://localho
 server had to be running for that to take effect. This is the check the demo
 used to need an extra container for.
 
-**The access token it was carrying keeps working until it expires.** That is the
-trade, stated rather than hidden:
+**The access token it was carrying stops working too**, and so does every other
+sign-in of the same person (`/sign-out` and `/sign-out-everywhere` do the same):
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/users/me -H "Authorization: Bearer $TOKEN"
 ```
 
-Still `200`. The window is `JwtSettings:ExpireMinutes` — 15 minutes here — and
-it is a number you set, not infrastructure you deploy. Closing it to zero is
-what a revocation store is for, and this demo deliberately runs without one.
+`401`. Signing out writes a cutoff for the person into the revocation store,
+and the user service, the todo service and the monolith refuse every token
+issued before it. Across services that works where the store is shared: in
+Staging and Production (Valkey) and in the monolith. In Development the store
+is in the process, so for the microservices the cutoff only reaches the process
+that wrote it: the user service refuses the token, the todo service does not
+until it expires.
+
+**A residual race, stated rather than hidden.** If a refresh has passed its
+store step before the sessions are closed, its access token is still issued
+afterwards. When its `iat` falls a second boundary behind the rounded-up
+cutoff, that one access token lives until it expires, at most
+`JwtSettings:ExpireMinutes` (15 minutes here). The refresh chain is closed
+either way.
 
 The refresh token never appears in a response body:
 
