@@ -1,6 +1,6 @@
 # ADR-0008 — Sitzungsende und Widerruf gelten je angemeldeter Person
 
-**Status:** Entwurf (Fassung 3: Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190), dazu der Fix von N1 aus der [Delta-Runde](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373); Fassung 4: Markierungszeile nach der [schmalen Prüfung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056847467) und dem Owner-Entscheid F1), schmale Prüfung der Markierungszeile offen. · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Entwurf (Fassung 3: Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190), dazu der Fix von N1 aus der [Delta-Runde](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373); Fassung 4: Markierungszeile nach der [schmalen Prüfung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056847467) und dem Owner-Entscheid F1; Fassung 5: F4 bis F6 nach der [Prüfung der Markierung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7061382243) und dem Owner-Entscheid F4), schmale Prüfung von F4 bis F6 offen. Release 7.2.0 erst nach einem eigenen Gate mit PostgreSQL-Beweis (Owner 21.11.). · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 Minor, weil 7.2.0 schon die Änderungen aus G-0018 trägt; der Fix allein wäre ein Patch. Der Text von Q-0016 sagt noch „Patch-Release“; das ist durch die Owner-Entscheide vom 21.11. überholt.
 
@@ -46,6 +46,19 @@ Minor, weil 7.2.0 schon die Änderungen aus G-0018 trägt; der Fix allein wäre 
 - **F3:** `CloseAllSessionsAsync` zählt nur die Sitzungen, die es zu Beginn gesehen hat.
 - **K3:** Das Kettenende ist nicht sicher das älteste Token; Überzählige „können“ `Revoked` bekommen.
 
+## Was Fassung 5 ändert (Prüfung der Markierung, Owner-Entscheid F4)
+
+- **F4 (major):** Die Grenze „Transaktion des Aufrufers“ gilt für Abmelden **und** Wiedergebrauchszweig und für beide
+  Mechanismen (Generationen, Deadlock). Owner-Entscheid: README-Rat ändern, Restrisiko annehmen; vor Release 7.2.0
+  ein eigenes Gate mit PostgreSQL-Beweis und einem Test, der F4 nachstellt; ist er rot, wird F4 technisch geschlossen.
+- **F5 (major):** Schritt 1 wählt die zu markierenden Sitzungen über `SessionExpiresAt` statt über „offen“, damit
+  sperrendes READ COMMITTED keine Sitzung übersieht.
+- **F6:** Nach einem Schlüsselkonflikt löst der Store die Markierung aus dem ChangeTracker; einzeln, nach `SessionId`
+  geordnet; der Effekt von `SaveChanges` steht in Entscheidung 7.
+- **K4–K8:** feste Bytefolge der Id mit Testvektor; Wartezeiten bei der Wiederholung; Update und Zählung von
+  `CloseAllSessionsAsync` nur über die Sitzungen aus Schritt 1; `TransactionScope` gilt als Transaktion des Aufrufers;
+  Zeilenlängen.
+
 ## Owner-Entscheide (wörtlich)
 
 Wortlaut aus den Owner-Antworten der Sitzungen vom 27.10. und 21.11.2026, so in Fassung 1 übernommen; im Repository
@@ -59,6 +72,14 @@ sonst nicht festgehalten (sinngemäß: `.monarch/quests/Q-0017-…md`, DoD).
   Migration, aber neue Zeilenart = Datenformat). Refresh prüft sie und schreibt danach nichts mehr. Abmelden endet
   dann immer nach ~2 Durchläufen, ein Deadlock darf wiederholt werden. Die Gegenoption war, das Restrisiko aus
   Fassung 3 anzunehmen. (Wortlaut aus dieser Sitzung, Auswahl über die Rückfrage.)
+- **21.11.2026, F4 (Diebstahl-Erkennung und Abmelden in einer Transaktion der Anwendung):** „Option 1 (Rat ändern +
+  Rest annehmen). Zwei Ergänzungen: 1) Die eigene Verbindung für die Markierung ist kein 8.0-Kandidat. Vor Release
+  7.2.0 kommt ein eigenes Gate mit PostgreSQL-Beweis (Testcontainers), darin ein Test, der F4 nachstellt. Ist er rot,
+  schließen wir F4 technisch. Schreib das so ins ADR und ins Nacharbeit-Issue. 2) Nach dem Merge von G-0006 keine
+  Release-Vorbereitung 7.2.0, die kommt erst nach dem PostgreSQL-Beweis.“ Option 1 hieß ausgeführt: README rät
+  künftig, Refresh und Abmelden nicht in eine eigene Transaktion zu legen, wenn der Schutz gegen Token-Diebstahl
+  unter Last zählt (Audit-Zeile danach schreiben); das Muster bleibt erlaubt, das Restrisiko steht in README,
+  MIGRATION und Remarks und als Owner-Entscheid im ADR. (Wortlaut aus dieser Sitzung.)
 
 ### Auslegung durch dieses ADR (nicht Teil des Wortlauts)
 
@@ -207,16 +228,19 @@ Warnung; in 8.0 startet er so nicht mehr.
      offenen Zeilen, auch das jüngste Geschwister, bevor der nächste Durchlauf des Schließens es erreichte; ein stetiger
      Strom paralleler Anfragen trieb das Schließen so bis zur Grenze (Delta-Runde, N1).
    - **Schließen: zuerst markieren, dann wiederholen, bis eine frische Zählung nichts Offenes findet.**
-     1. **Markierung (Owner 21.11., F1):** Zuerst liest das Schließen die Sitzungen, die ein offenes Token haben
-        (`CloseSessionAsync`: die eine Sitzung; `CloseAllSessionsAsync`: alle der Person), und schreibt für jede eine
-        geschlossene Markierungszeile, falls es noch keine gibt (Aufbau unten). Dieselbe Regel gilt im
-        Wiedergebrauchszweig, der `CloseSessionAsync` ruft. Eine Sitzung ohne offenes Token ist schon beendet und
-        bekommt keine Markierung, denn sie kann kein offenes Token mehr bekommen: Jeder Schreiber braucht eine offene
-        Zeile (Invariante unten), und geschlossene Zeilen öffnen sich nie (Entscheidung 2).
-     2. Dann das bedingte Update, danach in einer eigenen Anweisung die Zählung der offenen Zeilen der Sitzung. Bei
-        `CloseAllSessionsAsync` zählen nur die Sitzungen aus Schritt 1: Eine Anmeldung, die während des Abmeldens
-        beginnt, verlängert es nicht und bleibt offen; eine Anmeldung nach dem Abmelden ist zulässig (Schmale Prüfung,
-        F3). Ist die Zahl größer als null, folgt der nächste Durchlauf.
+     1. **Markierung (Owner 21.11., F1):** Zuerst bestimmt das Schließen die Sitzungen, die es markiert, über eine
+        Bedingung, die kein Update ändert: `CloseSessionAsync` die eine Sitzung, wenn sie überhaupt eine Zeile hat;
+        `CloseAllSessionsAsync` jede Sitzung der Person mit einer Zeile, deren `SessionExpiresAt` nach `at` liegt,
+        offen oder nicht. Für jede schreibt es eine geschlossene Markierungszeile, falls es noch keine gibt (Aufbau
+        unten), einzeln und nach `SessionId` geordnet. Dieselbe Regel gilt im Wiedergebrauchszweig, der
+        `CloseSessionAsync` ruft. Fassung 4 wählte „Sitzungen mit offenem Token“; unter sperrendem READ COMMITTED
+        (SQL Server ohne RCSI) kann dieses Lesen eine Sitzung übersehen, in der gerade rotiert wird, und mit F3 bliebe
+        sie still offen (schmale Prüfung, F5). Eine Markierung auf einer schon beendeten Sitzung schadet nicht. Eine
+        Sitzung, deren Obergrenze erreicht ist, kann kein brauchbares Token mehr bekommen (`SessionExpired`).
+     2. Dann das bedingte Update, danach in einer eigenen Anweisung die Zählung der offenen Zeilen. Bei
+        `CloseAllSessionsAsync` treffen Update und Zählung nur die Sitzungen aus Schritt 1: Eine Anmeldung, die während
+        des Abmeldens beginnt, verlängert es nicht und bleibt offen; eine Anmeldung nach dem Abmelden ist zulässig
+        (schmale Prüfung, F3). Ist die Zahl größer als null, folgt der nächste Durchlauf.
      3. Nach **32** Durchläufen wirft die Methode eine `InvalidOperationException`. Mit der Markierung ist das kein
         erwarteter Fall mehr, sondern ein Netz (Terminierung unten). Das ist **laut, nicht geschlossen**: Das Abmelden
         meldet einen Fehler, die Sitzung kann offen bleiben, und Wiederholen ist idempotent. Still zurückkehren wäre
@@ -229,18 +253,29 @@ Warnung; in 8.0 startet er so nicht mehr.
      der Nachfolger offen ist. Die Zählung danach ist eine neue Anweisung und sieht ihn.
    **Die Markierungszeile** ist eine gewöhnliche Zeile der bestehenden Tabelle `noelia_refresh_tokens`, ohne neue Spalte
    und ohne Migration (`NoeliaRefreshToken.cs:84–91` lässt sie zu):
-   - `Id`: die ersten 16 Bytes von SHA-256 über den Domain-Separator `noelia.refresh-token.session-ended.v1` und die
-     `SessionId`. Deterministisch, darum höchstens eine je Sitzung. Ein gleichzeitiges zweites Schließen trifft den
-     Primärschlüssel und gilt als „schon markiert“, wenn die Zeile danach existiert.
+   - `Id`: `new Guid(SHA256(UTF8("noelia.refresh-token.session-ended.v1") ‖ sessionId.ToByteArray())[0..16])`, also
+     die Bytefolge von .NET für `ToByteArray` und den `Guid(ReadOnlySpan<byte>)`-Konstruktor; ein fester Testvektor
+     sichert sie. Deterministisch, darum höchstens eine je Sitzung.
+   - Geschrieben wird über `Add` und `SaveChanges`, nachdem ein Lesen keine Markierung fand. Trifft ein gleichzeitiges
+     zweites Schließen den Primärschlüssel (zwei Tabs melden ab), löst der Store die Entität sofort aus dem
+     ChangeTracker und prüft frisch, ob die Zeile existiert; dann gilt sie als „schon markiert“, sonst wirft er. Der
+     Schlüsselkonflikt ist nicht transient und wird nicht wiederholt. In einer Transaktion des Aufrufers bricht er
+     unter PostgreSQL die ganze Transaktion ab, und das frische Prüfen scheitert mit; ein zweites Abmelden wartet dort
+     bis zum Commit der ersten Markierung. Das ist laut, nur durch Rollback aufzuheben, fällt unter die Grenze aus F4
+     und gehört in den F4-Test.
+   - Hat die Sitzung keine Zeile, gibt es nichts zu schließen und keine Markierung.
    - `TokenHash`: 32 Zufallsbytes, kein Hash eines ausgegebenen Tokens; `TryConsumeAsync` findet die Zeile darum nie.
    - `SessionId`, `SubjectId`, `SessionStartedAt`, `SessionExpiresAt` aus einer Zeile der Sitzung;
      `IssuedAt = ExpiresAt = RevokedAt = at`; `ReplacedBy` und `ClientFingerprint` leer.
    - Sie ist von Anfang an geschlossen und abgelaufen: Sie zählt nie als offen, erscheint nicht in
      `ActiveSessionsAsync`, zählt nicht in der Rückgabe des Schließens und fällt beim Purge wie jede geschlossene Zeile.
-     Hat die Sitzung keine Zeile, gibt es nichts zu schließen und keine Markierung.
+     `PurgeAsync` ruft die Anwendung selbst; sein Horizont muss weit hinter der Gegenwart liegen, sonst entfernt er
+     die Markierung mitten im Schließen (Remarks).
    **Schreiber lesen sie.** Die Rotation prüft in ihrer Transaktion **vor** dem bedingten Update, der Grace-Zweig
-   **nach** seiner Sperre auf E, ob die Markierung ihrer Sitzung existiert (ein Lesen über den Primärschlüssel). Wenn
-   ja, schreiben sie nichts, und das Ergebnis ist `Revoked`.
+   **nach** seiner letzten Sperre auf E, ob die Markierung ihrer Sitzung existiert (ein Lesen über den
+   Primärschlüssel). Wenn ja, schreiben sie nichts, und das Ergebnis ist `Revoked`. Der Grace-Zweig prüft zusätzlich
+   schon vor der Sperre, damit sich Anfragen nach der Markierung nicht an E anstellen; entscheidend ist die Prüfung
+   danach.
    **Was die Datenbank dafür leisten muss** (READ COMMITTED): (a) Ein Update sperrt die getroffenen Zeilen bis zum
    Commit. (b) Ein Update, das auf eine Sperre wartet, prüft seine Bedingung danach am zuletzt bestätigten Stand der
    Zeile. (c) Eine Anweisung, die nach einem Commit beginnt, sieht ihn. Für PostgreSQL ist das dokumentiertes
@@ -259,7 +294,10 @@ Warnung; in 8.0 startet er so nicht mehr.
    Commit von X nicht geschlossen, und dieser Commit liegt nach σ. War O vor σ bestätigt, hätte die Zählung O als
    offen gesehen: Widerspruch. Sonst hat eine frühere Transaktion O nach σ bestätigt, und für sie gilt dasselbe. Diese
    Kette ist endlich und endet bei einer Zeile, die vor σ bestätigt war, denn die Sitzung bestand schon beim Abmelden.
-   Wieder ein Widerspruch. Die Markierung braucht der Beweis nicht; sie sorgt für das Ende (Terminierung).
+   Wieder ein Widerspruch. Für `CloseSessionAsync` braucht der Beweis die Markierung nicht; sie sorgt für das Ende
+   (Terminierung). Für `CloseAllSessionsAsync` hängt er zusätzlich an Schritt 1, weil Update und Zählung nur dessen
+   Sitzungen treffen: Jede Sitzung, die noch ein brauchbares Token bekommen kann, hat eine Zeile mit `SessionExpiresAt`
+   nach `at`, und diese Bedingung ändert kein Update.
    Für den Grace-Zweig heißt das: Sperrt er zuerst, wartet das Schließen auf seinen Commit und schließt danach auch das
    Geschwister. Die Antwort an den Client lautet dann `RotatedWithinGrace`, aber das Token ist zu, sobald das Abmelden
    zurückkehrt. Schließt das Abmelden zuerst, findet die Sperre E geschlossen, und das Ergebnis ist `Revoked`. Für zwei
@@ -279,17 +317,35 @@ Warnung; in 8.0 startet er so nicht mehr.
    wie schnell ein Akteur rotiert. Die Klebrigkeit des Kettenendes (Entscheidung 2) bleibt: Sie macht `Revoked` für
    spätere Grace-Anfragen auch ohne Blick auf die Markierung eindeutig und trägt den Beweis. Die Grenze von 32
    Durchläufen bleibt als Netz; wird sie erreicht, ist das ein Fehler im Store oder der Fall unten.
-   **Grenze: Schließen in einer Transaktion des Aufrufers.** Dann sehen andere Verbindungen die Markierung erst mit dem
-   Commit des Aufrufers. Bis dahin endet das Schließen nur über die Klebrigkeit. Es bleibt das Restrisiko aus Fassung 3:
-   Ein Akteur, der je Durchlauf eine Generation rotiert (je Generation ein Netz-Roundtrip), kann es bis zur Grenze
-   treiben. Remarks und README raten darum, Abmelden nicht in eine Transaktion des Aufrufers zu legen. Weder
-   `TokenSessionService` noch die Demo tun das.
+   **Grenze: Schließen in einer Transaktion des Aufrufers (Owner-Entscheid F4, 21.11.).** Das betrifft zwei Wege: das
+   Abmelden und den Wiedergebrauchszweig eines Refresh, den der Aufrufer in seine Klammer legt (das Muster aus
+   `README.md:853–866`, abgesichert in `TransactionBracketTests.cs:121–142`; das ist der Diebstahlsfall). Das Schließen
+   im Wiedergebrauchszweig läuft außerhalb der eigenen Grace-Transaktion des Stores, die dort noch nicht offen ist,
+   aber innerhalb der Klammer des Aufrufers. Andere Verbindungen sehen die Markierung dann erst mit deren Commit. Bis
+   dahin bleiben beide Mechanismen aus F1 offen:
+   - **Generationen:** Ein Akteur, der je Durchlauf eine Generation rotiert, kann das Schließen bis zur Grenze treiben.
+   - **Deadlock:** Grace-Anfragen sehen die Markierung nicht, schreiben ein Geschwister und warten in ihrer Kappung auf
+     Zeilen, die ein voriger Durchlauf gesperrt hat. Der nächste Durchlauf wartet auf E. Mit einer Flut lässt sich
+     dieser Deadlock herbeiführen. Ein Treffer genügt, denn in der Klammer gibt es keine Wiederholung. Unter PostgreSQL
+     ist danach die Transaktion des Aufrufers abgebrochen, und der Rollback nimmt Markierung und Schließungen mit.
+     Unter sperrendem READ COMMITTED kommt ein zweiter Zyklus dazu: Die Grace-Anfrage hält E und wartet beim Lesen der
+     Markierung auf deren unbestätigtes INSERT.
+   Auf einer Verbindung lässt sich das nicht schließen, weil die Markierung erst mit dem Commit sichtbar wird. Der
+   Owner hat am 21.11. entschieden („Rat ändern“): Das README, das das Muster heute ohne Einschränkung erlaubt,
+   ergänzt einen Rat (Refresh und Abmelden nicht in eine eigene Transaktion
+   legen, wenn der Schutz gegen Token-Diebstahl unter Last zählt; die Audit-Zeile danach schreiben). Das Muster bleibt
+   erlaubt, und das Restrisiko steht in README, `MIGRATION.md` und den Remarks. **Vor Release 7.2.0** kommt ein eigenes
+   Gate mit PostgreSQL-Beweis (Testcontainers). Darin stellt ein Test F4 nach; ist er rot, wird F4 technisch
+   geschlossen, etwa mit einer eigenen Verbindung für die Markierung. Weder `TokenSessionService` noch die Demo
+   öffnen eine Transaktion.
    **Transaktion des Aufrufers:** Unter READ COMMITTED gilt dasselbe. Die Sperren halten bis zum Commit des Aufrufers,
    ein gleichzeitiges Abmelden wartet so lange. Eine lange Transaktion verzögert also das Abmelden, öffnet aber kein
    Fenster. Die Grenze aus Fassung 1 (ein offenes Fenster für die Dauer der Transaktion) entfällt; zur Grenze für das
    Ende des Schließens siehe oben. Der README-Abschnitt „Inside a transaction you already have“
-   (`README.md:851–872`) nennt künftig die Isolation, das Warten und den Rat, Refresh und Abmelden nicht in lange
-   Transaktionen zu legen; die Remarks von `IRefreshTokenStore` und `TokenSessionService` ebenso.
+   (`README.md:851–874`) nennt künftig die Isolation, das Warten, die Grenze für Abmelden und Wiedergebrauch und den
+   geänderten Rat; die Remarks von `IRefreshTokenStore` und `TokenSessionService` ebenso. Als Transaktion des
+   Aufrufers gilt `Database.CurrentTransaction` und ebenso eine umgebende `TransactionScope`
+   (`System.Transactions.Transaction.Current`).
    **REPEATABLE READ, SERIALIZABLE oder SNAPSHOT** (vom Aufrufer gewählt): Unter PostgreSQL (REPEATABLE READ,
    SERIALIZABLE) und SQL Server (SNAPSHOT) erwarten wir bei einer Überschneidung einen Fehler der Datenbank
    (Serialisierungs- bzw. Update-Konflikt), also ein lautes Scheitern, nie still eine offene Sitzung. Geprüft ist das
@@ -302,21 +358,24 @@ Warnung; in 8.0 startet er so nicht mehr.
    RevokedAt)` (`NoeliaRefreshToken.cs:90–91`). Kreuzen sich diese Reihenfolgen, bricht die Datenbank eine Transaktion
    ab.
    - **Trifft es einen Refresh,** scheitert er laut, seine Transaktion wird zurückgerollt, und er hinterlässt nichts.
-   - **Trifft es das Schließen,** wiederholt der Store die abgebrochene Anweisung bis zu dreimal, wenn er keine
-     Transaktion des Aufrufers hat und die Ausnahme eine `DbException` mit `IsTransient` ist (auch als innere Ausnahme;
-     Npgsql setzt das für Deadlocks, für andere Anbieter erwarten wir es, geprüft ist es nicht).
-   - Nach der Markierung können neue Schreiber an keinem Deadlock mehr teilnehmen: Der Grace-Zweig hält nur E und
-     schreibt nichts, die Rotation sperrt gar nicht. Ein Deadlock beim Schließen kommt also nur mit Schreibern zustande,
-     die vor der Markierung begonnen haben, und eine Wiederholung nach ihrem Ende gelingt. Ein Akteur kann Deadlocks
-     darum nicht wiederholt herbeiführen.
-   - Scheitert auch die dritte Wiederholung, oder liegt eine Transaktion des Aufrufers vor, scheitert das Abmelden laut, und
-     die Sitzung kann offen sein; ein erneutes Abmelden ist idempotent.
+   - **Trifft es das Schließen,** wiederholt der Store die abgebrochene Anweisung bis zu dreimal, nach kurzen
+     Wartezeiten (20, 100, 500 ms), wenn er keine Transaktion des Aufrufers hat und die Ausnahme eine `DbException`
+     mit `IsTransient` ist (auch als innere Ausnahme; Npgsql setzt das für Deadlocks und Serialisierungsfehler, für
+     andere Anbieter erwarten wir es, geprüft ist es nicht).
+   - **Ohne Transaktion des Aufrufers** können neue Schreiber nach der Markierung an keinem Deadlock mehr teilnehmen:
+     Der Grace-Zweig hält nur E und wartet dabei auf nichts, die Rotation sperrt gar nicht. Ein Deadlock beim Schließen
+     kommt also nur mit Schreibern zustande, die vor der Markierung begonnen haben. Ihre Menge steht mit der Markierung
+     fest, darum endet auch das Kreuzen. Ein Akteur kann Deadlocks nicht wiederholt herbeiführen. In einer Transaktion
+     des Aufrufers gilt das nicht (Grenze oben).
+   - Scheitert auch die dritte Wiederholung, oder liegt eine Transaktion des Aufrufers vor, scheitert das Abmelden
+     bzw. der Refresh laut, und die Sitzung kann offen sein; ein erneutes Abmelden ist idempotent.
    Folgen und `MIGRATION.md` nennen das.
    **InMemory** braucht keine Sperren: Ein Lock umfasst Prüfen, Schreiben, Kappen und Schließen. Er entscheidet am
    selben Kriterium (Kettenende offen), damit beide Stores dieselbe Conformance-Suite bestehen.
    **Getestet ist nur SQLite.** Die Tests laufen gegen einen einzigen Schreiber. Damit belegen sie die Reihenfolge der
    Schritte, aber nicht (b) auf einer MVCC-Datenbank. Conformance- und Augenblick-Tests gegen PostgreSQL über
-   Testcontainers (`Category=Integration`, wie bei Redis) kommen als Folge-Issue (Nacharbeit G-0006).
+   Testcontainers (`Category=Integration`, wie bei Redis) kommen als Folge-Issue (Nacharbeit G-0006) in ein eigenes
+   Gate vor Release 7.2.0, mit dem Test für F4 (Grenze oben).
 
 4. **Wessen Sitzungen: nur die der angemeldeten Person (auf ADR-0007).** Die Person, deren Sitzungen ein Abmelden
    beendet, kommt aus `ICurrentPrincipal` (seit G-0018 nur aus angemeldeten Personen-Identitäten:
@@ -390,12 +449,15 @@ Warnung; in 8.0 startet er so nicht mehr.
 7. **Keine neue öffentliche API, Minor 7.2.0.** Kein neuer Enum-Wert, keine neue Methode, keine neue Spalte. Für
    Konsumenten ändert sich Verhalten an sechs Stellen, alle in die geschlossene oder laute Richtung, Text für
    `MIGRATION.md`:
-   - **Neu in der Tabelle:** je Sitzung, die beim Schließen noch ein offenes Token hatte, eine geschlossene, abgelaufene
-     Markierungszeile (Entscheidung 3). Keine
+   - **Neu in der Tabelle:** je Sitzung, die das Schließen nach Schritt 1 erfasst (die eine Sitzung bzw. jede Sitzung
+     der Person mit Obergrenze nach `at`), eine geschlossene, abgelaufene Markierungszeile (Entscheidung 3). Keine
      Spalte, keine Migration. Ihre `Id`-Ableitung mit dem Domain-Separator `noelia.refresh-token.session-ended.v1` ist
      Datenformat-Oberfläche: Sie zu ändern wäre eine Migration. Eigene Abfragen auf `noelia_refresh_tokens` sehen diese
      Zeilen als geschlossene Tokens. Ein Zurückgehen auf 7.1.x liest sie genauso und bleibt möglich. Jede Rotation
-     liest die Markierung einmal über den Primärschlüssel.
+     liest die Markierung einmal über den Primärschlüssel. Das Schließen ruft für die Markierung erstmals
+     `SaveChanges` auf dem geteilten Kontext; wie schon `CreateAsync` und die Rotation schreibt das ausstehende
+     Änderungen der Anwendung mit. In einer Transaktion der Anwendung gilt die Grenze aus Entscheidung 3 für
+     Abmelden und Wiedergebrauch, mit dem geänderten README-Rat.
    - Ein Refresh im Grace-Fenster ergibt `Revoked` statt eines neuen Tokens, wenn das Ende der Kette geschlossen ist:
      nach dem Abmelden, nach einer Kappung des Kettenendes und auf dem Weg über das erneute Lesen. Ebenso ergibt jede
      Rotation und jeder Grace-Refresh `Revoked`, der nach der Markierung eines laufenden Abmeldens kommt (EF).
@@ -515,17 +577,23 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
     Durchläufen zurück, nichts ist offen. Sichert ab; auf SQLite laufen Schreiber nacheinander, den Wettlauf unter MVCC
     prüft erst die PostgreSQL-Conformance (Nacharbeit).
   - `Close_OnATransientError_RetriesUpToThreeTimes`: Der Interceptor wirft beim ersten Durchlauf eine `DbException`
-    mit `IsTransient`. Erwartet: Das Schließen gelingt. Viermal geworfen → es wirft; in einer Transaktion des Aufrufers
-    → es wirft sofort. Rot.
-  - `Close_Twice_AtOnce_WritesOneMarker`: zwei gleichzeitige Schließen derselben Sitzung → keine Ausnahme, genau eine
-    Markierungszeile. Rot.
+    mit `IsTransient`. Erwartet: Das Schließen gelingt; rot, denn heute wiederholt es nicht. Viermal geworfen → es
+    wirft; in einer Transaktion des Aufrufers → es wirft sofort; diese beiden Teile sichern ab.
+  - `Close_WhenTheMarkerAppearsBetweenReadAndInsert_TreatsItAsMarked`: Ein Interceptor schreibt die Markierung
+    zwischen dem Lesen und dem INSERT (der Konfliktpfad, deterministisch). Erwartet: keine Ausnahme, genau eine
+    Markierungszeile, und ein `SaveChanges` danach auf demselben Kontext gelingt. Rot.
+  - `MarkerId_MatchesTheFixedTestVector`: eine feste `SessionId` ergibt eine feste Markierungs-Id. Rot.
+  - `CloseAll_MarksEverySessionBeforeItsCeiling`: Sitzungen der Person mit `SessionExpiresAt` nach `at` bekommen eine
+    Markierung, auch eine ohne offenes Token; eine mit erreichter Obergrenze nicht. Rot.
+  - `Close_InsideATransactionScope_DoesNotRetry`: eine umgebende `TransactionScope` gilt als Transaktion des
+    Aufrufers; ein transienter Fehler wird nicht wiederholt. Sichert ab (heute wiederholt nichts).
   - `TheMarker_IsNeverOpen_NeverListed_AndPurged`: nach dem Schließen zählt die Markierung nicht als offen, erscheint
     nicht in `ActiveSessionsAsync`, nicht in der Rückgabe, und der Purge entfernt sie. Rot (es gibt sie heute nicht).
   - `CloseAll_IgnoresASignInThatStartsDuringIt` (F3): Eine Anmeldung derselben Person zwischen Durchlauf 1 und
     Zählung bleibt offen, und das Schließen kehrt normal zurück. Sichert ab.
   - `Grace_InsideTheCallersTransaction_HoldsTheLockUntilItsCommit` (neben `TransactionBracketTests`): Der Grace-Zweig
     tritt einer offenen Transaktion des Aufrufers bei; ein Schließen auf einer zweiten Verbindung kehrt erst nach deren
-    Commit zurück, und danach ist nichts offen. Rot.
+    Commit zurück, und danach ist nichts offen. Sichert ab (auf SQLite hält die Klammer schon heute den Schreib-Lock).
 - **Q-0071:**
   - `SharedSecretFallback_LogsWarningAtStart` (Boss): `InfrastructureBuilder.AddJwtAuthentication()` ohne Schlüssel →
     beim Host-Start genau eine Warnung, ohne Geheimniswert. Rot.
@@ -571,14 +639,19 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
 - Ein Abmelden wartet auf laufende Refreshs derselben Sitzung, eine lange Transaktion des Aufrufers verzögert es. Ein
   Fenster öffnet das nicht.
 - Gegen einen schnellen Akteur mit einem gültigen Refresh-Token endet das Abmelden nach höchstens zwei Durchläufen nach
-  der Markierung. Ein Restrisiko bleibt nur für ein Abmelden in einer Transaktion des Aufrufers, bis zu deren Commit
-  (Entscheidung 3); Remarks und README raten davon ab.
+  der Markierung. Ein Restrisiko bleibt für Abmelden und Diebstahl-Erkennung in einer Transaktion der Anwendung, bis
+  zu deren Commit, über Generationen und über einen herbeigeführten Deadlock (Entscheidung 3). Der Owner hat es am
+  21.11. angenommen. Das README ergänzt einen Rat dagegen.
+- **Vor Release 7.2.0** kommt ein eigenes Gate mit PostgreSQL-Beweis (Testcontainers): Conformance- und
+  Augenblick-Tests gegen PostgreSQL und ein Test, der F4 nachstellt. Ist er rot, wird F4 technisch geschlossen, etwa
+  mit einer eigenen Verbindung für die Markierung. Bis dahin keine Release-Vorbereitung für 7.2.0 (Owner 21.11.).
 - Unter PostgreSQL und SQL Server sind Deadlocks zwischen Refresh, Kappung und Abmelden möglich. Ein Refresh scheitert
-  dann laut und hinterlässt nichts. Das Schließen wiederholt bis zu dreimal; danach, oder in einer Transaktion des
-  Aufrufers, scheitert das Abmelden laut, und die Sitzung kann offen sein.
+  dann laut und hinterlässt nichts. Das Schließen wiederholt bis zu dreimal; danach, oder in einer Transaktion der
+  Anwendung, scheitert das Abmelden bzw. der Refresh laut, und die Sitzung kann offen sein.
 - Neue Zeilenart in `noelia_refresh_tokens` (Markierung, Datenformat ohne Migration); jede Rotation liest sie einmal.
 - Getestet ist nur SQLite; PostgreSQL-Conformance über Testcontainers, die Bedingung „offen“ im Update der Kappung (N5,
   nur auf einer MVCC-Datenbank rot zu testen) und ein Widerrufsschritt im Release-Gate gegen den laufenden Stack
-  werden ein Folge-Issue (Nacharbeit G-0006).
+  werden ein Folge-Issue (Nacharbeit G-0006); der PostgreSQL-Teil mit dem F4-Test ist ein eigenes Gate vor Release
+  7.2.0.
 - Die Demo zeigt Widerruf in jedem Token-lesenden Dienst; das Release-Gate sieht ihn über S3, nicht im laufenden Stack.
 - G-0019 entfernt in 8.0 den stillen Fallback, mit derselben Abgrenzung von „still“.

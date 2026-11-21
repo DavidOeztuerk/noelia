@@ -1,10 +1,10 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-21T03:31:56Z
+- Zeitpunkt: 2026-11-21T10:19:38Z
 - Plan: Pro
-- Mana 5h: 40% (Limit 90%, Reset 2026-11-21T07:40:00Z)
-- Mana 7d: 19% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 19% (Limit 90%, Reset 2026-11-21T15:00:00Z)
+- Mana 7d: 23% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
@@ -25,8 +25,8 @@
 - Q-0070: MIGRATION.md (Bruch, Weg, IPrincipalFactory, 401 bei zweiter Identität, eigener Code), README, Befund unter docs/befunde/; kein Release, keine Versionserhöhung
 
 ## Nächster konkreter Schritt
-Schmale Warden-Prüfung des N1-Fixes (ADR-0008 Fassung 3, Head 301d0c4) abwarten bzw. lesen: PR #71 Kommentar 'Warden: schmale Prüfung N1-Fix'. Bei approve: PR-Text auf Fassung 3 bringen (Scratchpad-Write war per Scope-Hook verweigert; erst wenn keine Quest den Scope sperrt), dann TDD Q-0016 (Knight, Sonnet), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden. Delta-Runde: https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373 (N1 major behoben in Fassung 3; N2-N4, K1, K2 eingearbeitet; N5 -> Issue Nacharbeit G-0006 mit PG-Conformance, Release-Gate-Widerrufsschritt, Sperrzeile 8.0).
+Schmale Warden-Prüfung der Markierungszeile (ADR-0008 Fassung 4, Head 9d245f1) lesen: PR #71 Kommentar 'Warden: schmale Prüfung Markierungszeile'. Bei approve: PR-Text auf Fassung 4 (Scope-Hook verweigerte Scratchpad-Write; erst ohne aktive Quest), dann TDD Q-0016 (Knight, Sonnet, model explizit), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden. Owner-Entscheid F1 21.11.: Markierungszeile. Nacharbeit-Issue G-0006: PG-Conformance (Testcontainers), N5 Kappung ohne Bedingung, Release-Gate-Widerrufsschritt.
 
 ## Offene Entscheidungen
-- Kein approve der schmalen Prüfung oder Einwand gegen den angepassten 8-Tab-Test (Erlaubnis 8, Regel 4): Frage an den User, nichts erzwingen.
+- Kein approve der schmalen Prüfung der Markierungszeile: Frage an den User (Regel 3), nichts erzwingen.
 - Q-0026 steht weiter in G-0006 (gate show), obwohl nach G-0019 verschoben; blockiert es gate merge: stoppen und den User fragen.
