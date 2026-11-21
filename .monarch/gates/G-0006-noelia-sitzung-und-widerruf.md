@@ -6,7 +6,7 @@ rank: A
 risk_tags: [auth, public-api]
 repo: Noelia
 state: proposed
-quests: [Q-0016, Q-0026, Q-0017, Q-0018, Q-0071]
+quests: [Q-0016, Q-0017, Q-0018, Q-0071]
 boss: "E2E-Suite RevocationPipeline (Bearer → UseTokenRevocation → 401, SignOutEverywhere ohne Grace-Geschwister) grün in CI"
 estimate: { session_pct: 60, weekly_pct: 8, gold_usd: 0 }
 board: { provider: github, milestone: 2 }
@@ -21,6 +21,5 @@ Der Kern der ursprünglichen JWT-Behauptung (02-Z1/Z2/Z3) und was davon heute no
 | Quest | Titel | Rank | Schwere |
 |---|---|---|---|
 | Q-0016 | Grace-Fenster respektiert Sitzungsende | A | medium |
-| Q-0026 | Shared-Secret-Fallback nur mit ausdrücklichem Opt-in | A | medium |
 | Q-0017 | Demo: Widerruf wirklich nutzen oder README korrigieren | A | low |
 | Q-0018 | E2E-Tests Widerruf und Authority-Pfad | D | low |

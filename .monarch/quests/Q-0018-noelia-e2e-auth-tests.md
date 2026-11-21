@@ -20,7 +20,7 @@ dod:
   - "Gegenprobe gegen eine absichtlich kaputte Kette"
 boss: "RevocationPipeline_E2E + AuthorityPath_RejectsForeignAlgKidIss grün in CI"
 evidence: ["tests/…/Authorization/PermissionAuthorizationTests.cs:288-443", "tests/…/Builder/ExternalIdentityProviderTests.cs:26-98", "07-warden-noelia.md NO-13"]
-board: { provider: github, issue: 37 }
+board: { provider: github, issue: 37, pr: 71 }
 ---
 # E2E-Tests Widerruf und Authority-Pfad
 

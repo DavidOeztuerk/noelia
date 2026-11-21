@@ -13,5 +13,6 @@ scope:
   exclude: []
 estimate: { session_pct: 6, weekly_pct: 1, gold_usd: 0 }
 boss: "SharedSecretFallback_LogsWarningAtStart grün in CI"
+board: { pr: 71 }
 ---
 # Warnung beim stillen Shared-Secret-Fallback (7.2.0)

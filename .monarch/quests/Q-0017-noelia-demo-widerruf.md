@@ -20,7 +20,7 @@ dod:
   - "README beschreibt die Grenze in Development bei den Microservices (Widerruf je Prozess)"
 boss: "Demo SignOut_RevokesAccessToken grün"
 evidence: ["demo/src/shared/Demo.Platform/DemoProviders.cs:104-107,131-134", "demo/…/UserService.Api/Program.cs:72-93", "demo/README.md:76,83", "07-warden-noelia.md N1"]
-board: { provider: github, issue: 36 }
+board: { provider: github, issue: 36, pr: 71 }
 ---
 # Demo: Widerruf wirklich nutzen oder README korrigieren
 
