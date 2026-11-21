@@ -1,6 +1,6 @@
 # ADR-0008 — Sitzungsende und Widerruf gelten je angemeldeter Person
 
-**Status:** Entwurf (Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190)), Delta-Runde offen. · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Entwurf (Fassung 3: Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190), dazu der Fix von N1 aus der [Delta-Runde](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373)), schmale Prüfung des N1-Fixes offen. · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 Minor, weil 7.2.0 schon die Änderungen aus G-0018 trägt; der Fix allein wäre ein Patch. Der Text von Q-0016 sagt noch „Patch-Release“; das ist durch die Owner-Entscheide vom 21.11. überholt.
 
@@ -14,6 +14,25 @@ Minor, weil 7.2.0 schon die Änderungen aus G-0018 trägt; der Fix allein wäre 
 - **Entscheidung 7:** Der Vertrag steht in den Remarks von `IRefreshTokenStore` (m10).
 - **Prüfplan:** zwei Geschwister, Abmelden zwischen Sperre und Schreiben, Weg über das erneute Lesen, Erlaubnis 1, Obergrenze der Schleife, Wirkung in der Demo, kaputte Ketten für Q-0018, alle Boss-Tests; „vorher rot“ nur für Tests, die einen Fehler belegen (M1, M2, m1, m2, m3, m9, c2).
 - **Datenbanken:** Die Prämisse ist eingeschränkt, getestet ist nur SQLite (m4).
+
+## Was Fassung 3 ändert (Delta-Runde)
+
+- **N1 (major):** Der Grace-Zweig sperrt nicht mehr alle offenen Zeilen der Sitzung, sondern nur das offene **Ende der
+  Kette** seines Vorgängers. Ist dieses Ende geschlossen, ergibt das `Revoked`, und das bleibt so. Nach dem ersten
+  Schließ-Durchlauf erzeugt das alte Token darum keine Geschwister mehr, egal wie viele Anfragen kommen. Statt „fail
+  closed“ heißt es jetzt „laut, die Sitzung kann offen bleiben“, und die Demo schreibt den Stichtag auch dann.
+  (Entscheidungen 2, 3, 5)
+- **Folge von N1 (vom Kritiker gefunden):** Lösen mehr Tabs dasselbe alte Token gleichzeitig ein, als die Erlaubnis
+  zulässt, bekommen die überzähligen sofort `Revoked`. Der bestehende Test mit acht Einlösungen läuft darum mit
+  Erlaubnis 8; seine Erwartungen bleiben wörtlich (Entscheidung 2).
+- **N2:** Wartet die Sperre auf eine gleichzeitige Rotation des Kettenendes, folgt sie der Kette. `Revoked` heißt:
+  Das Kettenende wurde geschlossen, nicht rotiert. Der Vertragstext von `TryConsumeAsync` wird angepasst.
+- **N3:** Deadlocks sind als neue, laute Fehlerart benannt (Entscheidung 3, 7, Folgen).
+- **N4:** Die Erwartung für REPEATABLE READ gilt nur für PostgreSQL und SQL Server SNAPSHOT; unter MySQL/InnoDB braucht
+  das Schließen READ COMMITTED oder keine Transaktion des Aufrufers.
+- **N5:** Die Kappung prüft beim Schließen nicht, ob die Zeile noch offen ist. Das lässt sich auf SQLite nicht rot
+  testen und kommt deshalb mit der PostgreSQL-Conformance in die Nacharbeit G-0006.
+- **K1, K2:** Beweissatz berichtigt; der Monolith-Test kommt in das bestehende `demo/tests/Demo.Monolith.Tests`.
 
 ## Owner-Entscheide (wörtlich)
 
@@ -40,10 +59,12 @@ schließt Noelia nur die gerade gültigen Tokens. Das eben ersetzte Token bleibt
 restlichen Sekunden ein neues, gültiges Token. Die Sitzung lebt weiter, obwohl die Person sich abgemeldet hat.
 
 **Die Lösung:** Eine Sitzung gilt als beendet, wenn sie kein offenes Token mehr hat. Das Fenster gibt nur noch ein neues
-Token aus, wenn die Sitzung noch offen ist. Damit ein Abmelden im selben Augenblick nicht verliert, hält der Refresh die
-offenen Tokens der Sitzung fest, bis er fertig ist. Ein gleichzeitiges Abmelden wartet darauf und schließt danach auch
-das neue Token. Das Abmelden hört erst auf, wenn wirklich nichts mehr offen ist. Die Datenbanktabelle der Anwendungen
-ändert sich nicht.
+Token aus, solange das jüngste Token der Kette, aus der das alte Token stammt, noch offen ist. Damit ein Abmelden im
+selben Augenblick nicht verliert, hält der Refresh dieses jüngste Token fest, bis er fertig ist. Ein gleichzeitiges
+Abmelden wartet darauf und schließt danach auch das neue Token. Ist das jüngste Token einmal geschlossen, gibt das alte
+Token nie wieder ein neues her, auch nicht bei vielen gleichzeitigen Versuchen. Das Abmelden hört erst auf, wenn
+wirklich nichts mehr offen ist, oder es meldet nach einer festen Zahl von Versuchen laut einen Fehler. Die
+Datenbanktabelle der Anwendungen ändert sich nicht.
 
 Dazu: Die Demo sperrt beim Abmelden auch die Access-Tokens sofort und meldet alle Sitzungen der Person ab, und Tests
 prüfen das in jedem Dienst. Ein Dienst, der still ein geteiltes Geheimnis als Schlüssel nimmt, schreibt beim Start eine
@@ -103,47 +124,72 @@ Warnung; in 8.0 startet er so nicht mehr.
    CloseAllSessions markieren auch rotierte Vorgänger“ formuliert. Die heutigen DoD-Zeilen von Q-0016 lauten: „Ein
    rotiertes Refresh-Token einer geschlossenen Sitzung erzeugt im Grace-Fenster kein Geschwister mehr (Ergebnis
    Revoked), in EF- und InMemory-Store“ und „Auch ein Abmelden zwischen Prüfung und Schreiben des Geschwisters lässt
-   keine offene Sitzung zurück“. Dieses ADR erfüllt die erste, indem das Fenster den Zustand der Sitzung liest, und die
-   zweite mit Entscheidung 3.
+   keine offene Sitzung zurück“. Dieses ADR erfüllt die erste, indem das Fenster das Ende der Kette liest (Entscheidung
+   2; mindestens so streng wie „Sitzung beendet“), und die zweite mit Entscheidung 3.
 
-2. **Der Grace-Zweig fragt zuerst die Sitzung.** In `AlreadyRotatedAsync` (EF) bzw. im Zweig `ReplacedBy is not null`
+2. **Der Grace-Zweig fragt zuerst das Ende der Kette.** In `AlreadyRotatedAsync` (EF) bzw. im Zweig `ReplacedBy is not null`
    (InMemory), in dieser Reihenfolge:
    0. **Nur EF, Weg über das erneute Lesen:** Trägt die neu gelesene Zeile kein `ReplacedBy`, ergibt das
       **`ConsumeOutcome.Revoked`**. Sie wurde geschlossen, nicht rotiert, wie in `:61–64`. Damit lebt ein durch
       Abmelden oder Kappung geschlossenes Token auch auf diesem Weg nicht wieder auf.
    1. Fenster vorbei oder Vorgänger nie geschlossen → wie heute `ReuseDetected` mit Schließen der Sitzung.
-   2. Sitzung hat kein offenes Token → **`ConsumeOutcome.Revoked`**, kein Geschwister, kein Schreiben. In EF entscheidet
-      das die Sperre aus Entscheidung 3, nicht ein Lesen davor.
+   2. Das **Ende der Kette** des Vorgängers ist geschlossen → **`ConsumeOutcome.Revoked`**, kein Geschwister, kein
+      Schreiben. Die Kette folgt `ReplacedBy` vom Vorgänger aus (R0 → R1 → … ) bis zur ersten Zeile ohne `ReplacedBy`;
+      Geschwister gehören nicht dazu. Ist eine Sitzung beendet (Entscheidung 1), ist auch dieses Ende geschlossen. Das
+      Kriterium ist also mindestens so streng wie „Sitzung beendet“, und es ist **klebrig**: Eine geschlossene Zeile
+      öffnet sich nie wieder, und rotiert wird nur aus offenen Zeilen. Fehlt eine Zeile der Kette (Purge) oder ist die
+      Kette länger als 32 Glieder, gilt das Ende als geschlossen. In beiden Stores gilt dasselbe Kriterium; in EF
+      entscheidet es die Sperre aus Entscheidung 3, nicht ein Lesen davor.
    3. Obergrenze der Sitzung erreicht (`now >= SessionExpiresAt`) → **`ConsumeOutcome.SessionExpired`**, kein Geschwister.
    4. Sonst Geschwister wie heute (`RotatedWithinGrace`), danach Kappung.
    `Revoked` statt eines neuen Werts: Der Enum-Wert sagt schon „The session was ended deliberately“. `ReuseDetected` wäre
    falsch: Ein zweiter Tab, der nach dem Abmelden sein altes Token zeigt, ist kein Diebstahl, und der Dienst würde einen
    Diebstahl ins Log schreiben. Reihenfolge 1 vor 2: Ein Wiedergebrauch nach dem Fenster bleibt ein Wiedergebrauch, auch
    in einer beendeten Sitzung (das Schließen ist idempotent).
+   **Kappung und Kettenende:** Die Kappung schließt die ältesten offenen Tokens zuerst, und bei monotoner Uhr ist das
+   Kettenende R1 älter als seine Geschwister (bei gleichem `IssuedAt` ist die Reihenfolge offen). Schließt sie das
+   Kettenende, ergibt jedes weitere Einlösen des alten Tokens `Revoked`, auch wenn die Sitzung über Geschwister noch
+   offen ist. Das geschieht erst, wenn mehr als `allowance` Tokens der Sitzung offen sind (Standard 5), und es ist die
+   geschlossene Richtung. **Verhaltensänderung:** Lösen mehr Tabs dasselbe alte Token gleichzeitig ein, als die
+   Erlaubnis zulässt, bekommen die überzähligen `Revoked` statt eines Geschwisters. Heute bekommen sie eines, aber die
+   Kappung schließt die ältesten sofort wieder, und deren Tabs fliegen beim nächsten Refresh hinaus. Offen bleiben in
+   beiden Fällen höchstens `allowance` Tokens; neu ist nur, dass die Abweisung sofort kommt. Der bestehende
+   Conformance-Test `Concurrent_presentations_rotate_exactly_once_and_nobody_is_thrown_out` löst achtmal bei Erlaubnis 5
+   ein und würde damit je nach Reihenfolge rot. Er bekommt eine Erlaubnis von 8. Sein Gegenstand bleibt unverändert:
+   genau ein `Rotated`, und niemand wird sofort abgemeldet, solange die Erlaubnis reicht. Für mehr Einlösungen, als die
+   Erlaubnis zulässt, kommt ein eigener Test dazu (Prüfplan).
    **Erlaubnis 1** (`MaxConcurrentTokensPerSession = 1`, zulässig): Der zweite Tab bekommt sein Geschwister, und die
-   Kappung schließt das Token des ersten. Die Sitzung bleibt mit genau einem offenen Token offen. Kommen beide Tabs
-   gleichzeitig, kann der zweite statt eines Geschwisters `Revoked` bekommen, nämlich dann, wenn die Kappung des ersten
-   die einzige Zeile geschlossen hat, die der zweite sah. Das ist die geschlossene Richtung und folgt aus der Erlaubnis
-   selbst: Bei Erlaubnis 1 kann ohnehin nur ein Tab weiterarbeiten.
+   Kappung schließt das Kettenende, also das Token des ersten Tabs. Die Sitzung bleibt mit genau einem offenen Token
+   offen. Jedes weitere Einlösen des alten Tokens, auch ein gleichzeitiges, ergibt `Revoked`. Bei Erlaubnis 1 kann
+   ohnehin nur ein Tab weiterarbeiten.
 
 3. **Abmelden gewinnt auch im selben Augenblick (EF): Zeilensperren auf bestehenden Zeilen.** Prüfen und Schreiben im
    Grace-Zweig sind mehrere Anweisungen; ein Abmelden dazwischen darf kein offenes Geschwister zurücklassen. Praktisch
    erreichbar ist dieser Augenblick durch paralleles Einlösen desselben alten Tokens und durch das Rotieren erhaltener
    Geschwister, auch ohne Angreifer: zwei weitere Tabs im Augenblick des Abmeldens. Zwei Hälften:
-   - **Grace-Zweig: erst sperren, dann entscheiden, dann schreiben.** In einer Transaktion (eigene, oder die des
-     Aufrufers, wenn eine offen ist, wie in `ClaimAsync`):
-     1. Ein No-op-Update auf alle offenen Zeilen der Sitzung
-        (`SetProperty(t => t.RevokedAt, t => t.RevokedAt)` mit `SessionId == s && RevokedAt == null && ReplacedBy == null`).
-        Es ändert nichts, sperrt diese Zeilen aber bis zum Commit.
-     2. Trifft es **null** Zeilen, ist die Sitzung beendet → `Revoked`, nichts schreiben.
-     3. Obergrenze erreicht → `SessionExpired`, nichts schreiben.
-     4. Geschwister schreiben, Kappung, Commit (bei eigener Transaktion).
+   - **Grace-Zweig: erst das Kettenende sperren, dann entscheiden, dann schreiben.** In einer Transaktion (eigene, oder
+     die des Aufrufers, wenn eine offen ist, wie in `ClaimAsync`):
+     1. Das Kettenende E suchen: von `ReplacedBy` des Vorgängers aus den Verweisen folgen bis zur ersten Zeile ohne
+        `ReplacedBy` (Entscheidung 2, Schritt 2).
+     2. E mit einem No-op-Update sperren
+        (`SetProperty(t => t.RevokedAt, t => t.RevokedAt)` mit `Id == E && RevokedAt == null && ReplacedBy == null`).
+        Es ändert nichts, sperrt E aber bis zum Commit.
+     3. Trifft es **null** Zeilen, E frisch lesen: Trägt E jetzt ein `ReplacedBy`, wurde E gleichzeitig rotiert; dann mit
+        dessen Nachfolger weiter bei Schritt 2. Sonst ist E geschlossen (Abmelden, Kappung, Wiedergebrauch) oder
+        gelöscht → `Revoked`, nichts schreiben. Alle Glieder zusammen höchstens 32, darüber → `Revoked`.
+     4. Obergrenze erreicht → `SessionExpired`, nichts schreiben.
+     5. Geschwister schreiben, Kappung, Commit (bei eigener Transaktion).
+     Gesperrt wird nur E, nicht jede offene Zeile der Sitzung. In Fassung 2 sperrte jede neue Grace-Anfrage alle
+     offenen Zeilen, auch das jüngste Geschwister, bevor der nächste Durchlauf des Schließens es erreichte; ein stetiger
+     Strom paralleler Anfragen trieb das Schließen so bis zur Grenze (Delta-Runde, N1).
    - **Schließen: wiederholen, bis eine frische Zählung nichts Offenes findet.** `CloseSessionAsync` und
      `CloseAllSessionsAsync` führen das bedingte Update aus und zählen danach in einer eigenen Anweisung die offenen
      Zeilen der Sitzung bzw. der Person. Ist die Zahl größer als null, folgt der nächste Durchlauf. Nach **32**
-     Durchläufen wirft die Methode eine `InvalidOperationException` (fail closed): Das Abmelden meldet einen Fehler und
-     ist idempotent wiederholbar; still zurückkehren wäre „vorhanden, aber nicht wirksam“. Die Rückgabe ist die Summe der
-     geschlossenen Zeilen.
+     Durchläufen wirft die Methode eine `InvalidOperationException`. Das ist **laut, nicht geschlossen**: Das Abmelden
+     meldet einen Fehler, die Sitzung kann offen bleiben, und Wiederholen ist idempotent. Still zurückkehren wäre
+     „vorhanden, aber nicht wirksam“. Die Meldung nennt die Sitzung bzw. die Person (Kennungen, keine Token-Werte), damit
+     das Log zeigt, was offen geblieben sein kann; im Wiedergebrauchszweig steht sie an der Stelle der Warnung. Die
+     Rückgabe ist die Summe der geschlossenen Zeilen.
      **Warum die Zählung und nicht „bis ein Update null Zeilen trifft“:** Wartet ein Durchlauf auf die Sperre einer
      gleichzeitigen **Rotation**, sieht er danach den Vorgänger geschlossen und überspringt ihn. Den Nachfolger sieht er
      nicht, weil der erst nach dem Start der Anweisung bestätigt wurde. Der Durchlauf trifft also null Zeilen, während
@@ -158,28 +204,48 @@ Warnung; in 8.0 startet er so nicht mehr.
    **Beweis für beliebig viele Geschwister.** Invariante: Jede Transaktion, die einer bestehenden Sitzung ein offenes
    Token hinzufügt, hält bis zu ihrem Commit eine Sperre auf einer Zeile derselben Sitzung, die beim Sperren offen war.
    Die Rotation sperrt so ihren Vorgänger über das bedingte Update in `ClaimAsync`, der Grace-Zweig über das No-op-Update
-   alle offenen Zeilen. Eine Anmeldung (`CreateAsync`) beginnt eine neue Sitzung und fällt nicht darunter.
+   das Kettenende E. Eine Anmeldung (`CreateAsync`) beginnt eine neue Sitzung und fällt nicht darunter.
    Angenommen, das Schließen endet, weil die Zählung zum Zeitpunkt σ null offene Zeilen sieht, und danach bestätigt eine
    Transaktion X ein offenes Token der Sitzung. X hielt eine Sperre auf einer Zeile O, die beim Sperren offen war. Ein
-   Schließen von O wartet zwischen dieser Sperre und dem Commit von X auf X (a). Ein Schließen, das vor der Sperre
-   bestätigt war, hätte X gesehen, (c) oder (b), und X hätte O nicht gesperrt. Also ist O bis zum Commit von X nicht geschlossen, und dieser Commit liegt
-   nach σ. War O vor σ bestätigt, hätte die Zählung O als offen gesehen: Widerspruch. Sonst hat eine frühere Transaktion
-   O nach σ bestätigt, und für sie gilt dasselbe. Diese Kette ist endlich und endet bei einer Zeile, die vor σ bestätigt
+   Schließen von O wartet zwischen dieser Sperre und dem Commit von X auf X (a). Wäre O vor der Sperre schon
+   geschlossen und bestätigt gewesen, hätte X das gesehen, nach (c) bzw. (b), und O nicht gesperrt. Also ist O bis zum
+   Commit von X nicht geschlossen, und dieser Commit liegt nach σ. War O vor σ bestätigt, hätte die Zählung O als
+   offen gesehen: Widerspruch. Sonst hat eine frühere Transaktion O nach σ bestätigt, und für sie gilt dasselbe. Diese Kette ist endlich und endet bei einer Zeile, die vor σ bestätigt
    war, denn die Sitzung bestand schon beim Abmelden. Wieder ein Widerspruch.
    Für den Grace-Zweig heißt das: Sperrt er zuerst, wartet das Schließen auf seinen Commit und schließt danach auch das
    Geschwister. Die Antwort an den Client lautet dann `RotatedWithinGrace`, aber das Token ist zu, sobald das Abmelden
-   zurückkehrt. Schließt das Abmelden zuerst, findet die Sperre null Zeilen, und das Ergebnis ist `Revoked`. Für zwei
+   zurückkehrt. Schließt das Abmelden zuerst, findet die Sperre E geschlossen, und das Ergebnis ist `Revoked`. Für zwei
    Geschwister aus Runde 1 (M1) gilt das je Geschwister einzeln; ein Geschwister bezeugt das andere nicht mehr, weil
    keines mehr nachträglich zählt.
+   **Terminierung.** Der Beweis zeigt, dass nach dem Ende des Schließens nichts offen ist, aber nicht, dass es endet.
+   Dafür sorgt die Klebrigkeit aus Entscheidung 2: Hat ein Durchlauf das Kettenende E geschlossen, ergibt jedes spätere
+   Einlösen eines Tokens, dessen Kette in E endet, `Revoked`. Geschwister entstehen dann nur noch aus Grace-Anfragen,
+   die E schon vor diesem Durchlauf gesperrt hatten; auf sie wartet er. Die Zahl paralleler Anfragen verlängert das
+   Schließen darum nicht mehr. Verlängern kann es nur, wer ein offenes Kettenende rotiert, bevor ein Durchlauf es
+   erreicht, auch ein eben erhaltenes Geschwister. Dafür braucht er das Token aus der Antwort der vorigen Anfrage,
+   also je Generation einen Netz-Roundtrip. Schafft ein Akteur so viele Generationen nacheinander, wie das Schließen
+   Durchläufe hat, endet es nach 32 Durchläufen laut, und die Sitzung kann offen bleiben. Das ist ein Restrisiko.
+   Ganz schließen ließe es sich nur mit einer Sperrzeile je Sitzung, also einer Migration (Verworfen; Folge-Issue als
+   Kandidat für 8.0).
    **Transaktion des Aufrufers:** Unter READ COMMITTED gilt dasselbe. Die Sperren halten bis zum Commit des Aufrufers,
    ein gleichzeitiges Abmelden wartet so lange. Eine lange Transaktion verzögert also das Abmelden, öffnet aber kein
    Fenster. Die Grenze aus Fassung 1 entfällt. Der README-Abschnitt „Inside a transaction you already have“
    (`README.md:851–872`) nennt künftig die Isolation, das Warten und den Rat, Refresh und Abmelden nicht in lange
    Transaktionen zu legen; die Remarks von `IRefreshTokenStore` und `TokenSessionService` ebenso.
-   **REPEATABLE READ oder SNAPSHOT** (vom Aufrufer gewählt): Hier erwarten wir bei einer Überschneidung einen Fehler
-   der Datenbank (Serialisierungs- bzw. Update-Konflikt), also ein lautes Scheitern, nie eine offene Sitzung. Geprüft
-   ist das nicht.
-   **InMemory** braucht keine Sperren: Ein Lock umfasst Prüfen, Schreiben, Kappen und Schließen.
+   **REPEATABLE READ, SERIALIZABLE oder SNAPSHOT** (vom Aufrufer gewählt): Unter PostgreSQL (REPEATABLE READ,
+   SERIALIZABLE) und SQL Server (SNAPSHOT) erwarten wir bei einer Überschneidung einen Fehler der Datenbank
+   (Serialisierungs- bzw. Update-Konflikt), also ein lautes Scheitern, nie eine offene Sitzung. Geprüft ist das nicht.
+   **Nicht** unter MySQL/InnoDB, wo REPEATABLE READ der Standard ist: Dort liest das Update den aktuellen Stand ohne
+   Konflikt, die Zählung aber aus dem Snapshot der Transaktion, und kann in einer Transaktion des Aufrufers still null
+   ergeben. Das Schließen braucht dort READ COMMITTED oder keine Transaktion des Aufrufers; Remarks und README sagen das.
+   **Deadlocks** sind eine neue Fehlerart: Der Grace-Zweig sperrt E und dann in der Kappung überzählige Zeilen, die
+   Rotation ihren Vorgänger und dann ebenso, das Schließen alle offenen Zeilen über `SessionId` bzw. `(SubjectId,
+   RevokedAt)` (`NoeliaRefreshToken.cs:90–91`). Kreuzen sich diese Reihenfolgen, bricht die Datenbank eine Transaktion
+   ab, und Refresh oder Abmelden scheitern laut; eine offene Sitzung entsteht daraus nicht (der Beweis setzt nur
+   bestätigte Transaktionen voraus). Der Store wiederholt nicht selbst; Abmelden ist idempotent, ein Refresh kann neu
+   angestoßen werden. Folgen und `MIGRATION.md` nennen das.
+   **InMemory** braucht keine Sperren: Ein Lock umfasst Prüfen, Schreiben, Kappen und Schließen. Er entscheidet am
+   selben Kriterium (Kettenende offen), damit beide Stores dieselbe Conformance-Suite bestehen.
    **Getestet ist nur SQLite.** Die Tests laufen gegen einen einzigen Schreiber. Damit belegen sie die Reihenfolge der
    Schritte, aber nicht (b) auf einer MVCC-Datenbank. Conformance- und Augenblick-Tests gegen PostgreSQL über
    Testcontainers (`Category=Integration`, wie bei Redis) kommen als Folge-Issue (Nacharbeit G-0006).
@@ -210,8 +276,10 @@ Warnung; in 8.0 startet er so nicht mehr.
      `ITokenRevocationWriter.RevokeSubjectBeforeAsync(person, now, "signed out")`. Diese Reihenfolge, weil die umgekehrte
      schlechter endet. Käme der Stichtag zuerst, bekäme ein Refresh zwischen Stichtag und Schließen ein Access-Token,
      das nach dem Stichtag ausgestellt ist. Und schlägt das Schließen nach dem Stichtag fehl, holen sich gesperrte
-     Access-Tokens mit offener Refresh-Kette sofort ein neues. Schlägt der Widerruf fehl, antwortet der Endpunkt mit
-     einem Fehler; das Abmelden ist idempotent und kann wiederholt werden.
+     Access-Tokens mit offener Refresh-Kette sofort ein neues. Wirft das Schließen (Grenze aus Entscheidung 3,
+     Deadlock), schreibt der Endpunkt den Stichtag trotzdem und antwortet danach mit einem Fehler: Gesperrte
+     Access-Tokens sind besser als keine, und ein Wiederholen schließt den Rest. Schlägt der Widerruf fehl, antwortet
+     der Endpunkt ebenfalls mit einem Fehler; das Abmelden ist idempotent und kann wiederholt werden.
    - **Rest-Rennen, dokumentiert:** Liegt der Store-Schritt eines Refresh vor dem Schließen, wird sein Access-Token
      trotzdem erst danach ausgestellt (`UserService.Api/Program.cs:199–216`, Monolith `:159–174`). Fällt dessen `iat`
      über eine Sekundengrenze hinter den aufgerundeten Stichtag, gilt dieses eine Access-Token bis zu seinem Ablauf. Die
@@ -252,18 +320,23 @@ Warnung; in 8.0 startet er so nicht mehr.
      öffentliche API wächst nicht. G-0019 übernimmt dieselbe Abgrenzung für den Startabbruch.
 
 7. **Keine neue öffentliche API, Minor 7.2.0.** Kein neuer Enum-Wert, keine neue Methode, keine neue Spalte. Für
-   Konsumenten ändert sich Verhalten an vier Stellen, alle in die geschlossene Richtung, Text für `MIGRATION.md`:
-   - Ein Refresh im Grace-Fenster einer beendeten Sitzung ergibt `Revoked` statt eines neuen Tokens, auch auf dem Weg
-     über das erneute Lesen.
+   Konsumenten ändert sich Verhalten an fünf Stellen, alle in die geschlossene oder laute Richtung, Text für
+   `MIGRATION.md`:
+   - Ein Refresh im Grace-Fenster ergibt `Revoked` statt eines neuen Tokens, wenn das Ende der Kette geschlossen ist:
+     nach dem Abmelden, nach einer Kappung des Kettenendes und auf dem Weg über das erneute Lesen.
    - Ein Refresh im Grace-Fenster nach der Obergrenze der Sitzung ergibt `SessionExpired` statt eines toten Tokens.
    - `CloseSessionAsync`/`CloseAllSessionsAsync` können mehr als ein Update ausführen und werfen nach 32 Durchläufen.
-   - Der Grace-Zweig läuft in einer Transaktion und sperrt die offenen Zeilen der Sitzung bis zum Commit.
+   - Der Grace-Zweig läuft in einer Transaktion und sperrt das Kettenende bis zum Commit.
+   - Unter PostgreSQL und SQL Server sind Deadlocks zwischen Refresh, Kappung und Abmelden möglich; sie enden als Fehler
+     einer Anfrage.
    **Der Vertrag** steht in den XML-Remarks von `IRefreshTokenStore`, denn die Conformance-Suite liegt in `tests/` und
-   wird nicht ausgeliefert: Ein Geschwister entsteht nur in einer offenen Sitzung, entschieden unter einer Sperre, auf
-   die ein gleichzeitiges Schließen wartet. Das Schließen kehrt erst zurück, wenn ein frisches Lesen nichts Offenes mehr
-   findet. Ein geschlossenes Token ohne `ReplacedBy` ergibt auf jedem Weg `Revoked`. Eigene `IRefreshTokenStore`
-   brauchen diese Semantik, sonst bleibt NO-1 bei ihnen offen. `MIGRATION.md` verweist dafür auf den Quelltext von
-   `RefreshTokenStoreConformance`.
+   wird nicht ausgeliefert: Ein Geschwister entsteht nur, solange das Ende der Kette des Vorgängers offen ist,
+   entschieden unter einer Sperre auf diesem Ende, auf die ein gleichzeitiges Schließen wartet. Das Schließen kehrt erst
+   zurück, wenn ein frisches Lesen nichts Offenes mehr findet, oder es wirft. Ein geschlossenes Token ohne `ReplacedBy`
+   ergibt auf jedem Weg `Revoked`. Der Satz in `IRefreshTokenStore.cs:24–29` („Concurrent callers must see
+   RotatedWithinGrace or ReuseDetected“) bekommt `Revoked` dazu, für den Fall, dass das Kettenende inzwischen
+   geschlossen ist. Eigene `IRefreshTokenStore` brauchen diese Semantik, sonst bleibt NO-1 bei ihnen offen.
+   `MIGRATION.md` verweist dafür auf den Quelltext von `RefreshTokenStoreConformance`.
    Dazu die Warnung aus Entscheidung 6 und die Ankündigung für 8.0.
 
 8. **Was dieses Gate nicht anfasst.** Die Bibliothek koppelt `SignOutEverywhereAsync` nicht an den Widerrufsspeicher
@@ -281,11 +354,17 @@ Warnung; in 8.0 startet er so nicht mehr.
   Nachprüfung ein Lesen ohne Sperre.
 - **Schließen, bis ein Update null Zeilen trifft.** Ein Durchlauf, der auf eine gleichzeitige Rotation wartet, trifft
   null Zeilen, während deren Nachfolger offen ist (Entscheidung 3).
+- **Grace-Zweig sperrt alle offenen Zeilen der Sitzung (Fassung 2).** Sicher, aber ohne Terminierung: Jede neue
+  Grace-Anfrage sperrt das jüngste Geschwister, bevor der nächste Durchlauf es erreicht, und ein stetiger Strom
+  paralleler Anfragen mit demselben alten Token treibt das Schließen bis zur Grenze (Delta-Runde, N1). Außerdem hieß
+  „null Zeilen“ dort nicht sicher „beendet“ (N2).
 - **SERIALIZABLE erzwingen.** Die Isolation wählt die Anwendung für ihre Verbindung und ihre Transaktion; der Store würde
   sie in einer Transaktion des Aufrufers gar nicht ändern können.
 - **Neue Spalte `SessionClosedAt`, eine Sitzungstabelle oder eine Sperrzeile je Sitzung.** Jede Anwendung müsste eine
-  Migration ihrer Tabelle ausrollen; die Tabelle ist Datenformat-Oberfläche. Seit Fassung 2 ist auch kein Fenster mehr
-  übrig, das eine Sperrzeile schließen müsste: Sperren auf den bestehenden Zeilen reichen.
+  Migration ihrer Tabelle ausrollen; die Tabelle ist Datenformat-Oberfläche. Für die Sicherheit reichen Sperren auf den
+  bestehenden Zeilen. Eine Sperrzeile würde zusätzlich das Restrisiko der Terminierung schließen (Entscheidung 3:
+  ein Akteur, der je Durchlauf eine Generation rotiert). Das rechtfertigt keine Migration in einem Minor; Folge-Issue
+  als Kandidat für 8.0.
 - **Beim Abmelden `RevokedAt` der rotierten Vorgänger überschreiben.** `RevokedAt` ist der Beginn des Grace-Fensters;
   ein späterer Wert würde das Fenster **verlängern**, also das Gegenteil bewirken.
 - **Beim Abmelden `SessionExpiresAt` aller Zeilen auf die Abmeldezeit setzen.** Würde die gespeicherte Obergrenze
@@ -312,7 +391,19 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
   - `RefreshGrace_AfterTheCeiling_IsSessionExpired`: `SessionExpired`, kein Geschwister. Rot.
   - `RefreshGrace_WithAllowanceOne_KeepsTheSessionOpen` (Erlaubnis 1): `RotatedWithinGrace`, genau ein offenes Token,
     die Sitzung ist nicht beendet. Sichert ab.
-  - Die bestehenden Grace-Tests bleiben grün (zwei Tabs ohne Abmelden bekommen weiter ein Geschwister). Sichert ab.
+  - `RefreshGrace_AfterTheCapClosedTheChainEnd_IsRevoked` (Erlaubnis 1): ein drittes Einlösen desselben alten Tokens
+    ergibt `Revoked`, das Geschwister des zweiten Tabs bleibt offen. Rot (Verhaltensänderung, geschlossene Richtung).
+  - `RefreshGrace_FollowsTheChainToItsOpenEnd`: R0 → R1 → R2, danach R0 im Fenster → Geschwister. Sichert ab.
+  - `RefreshGrace_WhenTheChainIsBrokenOrTooLong_IsRevoked`: eine gelöschte Zeile in der Kette bzw. eine Kette mit 33
+    Gliedern → `Revoked`. Rot.
+  - `ConcurrentPresentations_BeyondTheAllowance_AreRevokedNeverRotatedTwice`: achtmal gleichzeitig bei Erlaubnis 5 →
+    genau ein `Rotated`, kein `ReuseDetected`, die übrigen `RotatedWithinGrace` oder `Revoked`, höchstens 5 offene
+    Tokens. Rot, sobald die Reihenfolge das Kettenende in die Kappung bringt.
+  - `A_replay_after_the_grace_window_in_an_ended_session_is_still_reuse`: Abmelden, danach das alte Token nach dem
+    Fenster → `ReuseDetected` (Reihenfolge 1 vor 2). Sichert ab.
+  - Die bestehenden Grace-Tests bleiben grün (zwei Tabs ohne Abmelden bekommen weiter ein Geschwister), mit einer
+    Ausnahme: `Concurrent_presentations_rotate_exactly_once_and_nobody_is_thrown_out` läuft mit Erlaubnis 8 statt 5
+    (Entscheidung 2, Verhaltensänderung). Seine Erwartungen bleiben wörtlich.
 - **Der Augenblick (nur EF, deterministisch über `DbCommandInterceptor` bzw. `DbTransactionInterceptor`):**
   - `TwoGraceSiblings_SignOutInBetween_AreBothRevoked` (M1): Zwei Clients lösen dasselbe rotierte Token ein und
     pausieren vor ihrem ersten schreibenden Befehl im Grace-Zweig. Das ist vor dem BEGIN, sonst wartet SQLite auf den
@@ -325,9 +416,19 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
   - `Refresh_SignOutBetweenReadAndClaim_IsRevoked` (Weg über das erneute Lesen): pausiert nach dem Lesen (`:48–49`),
     vor dem Claim; `CloseSessionAsync` läuft. Erwartet: `Revoked`, null offene Tokens. Rot. Dazu derselbe Weg mit einem
     durch Kappung geschlossenen Token.
+  - `GraceAfterTheFirstPass_IsRevoked_AndClosingEndsWithinTwoPasses` (N1): Ein Interceptor spielt eine Grace-Anfrage,
+    die das Kettenende vor Durchlauf 1 gesperrt hat; eine weitere Grace-Anfrage mit demselben alten Token nach
+    Durchlauf 1 ergibt `Revoked`, und das Schließen endet nach höchstens 2 Durchläufen (der Interceptor zählt sie).
+    Rot (heute entsteht nach dem Schließen ein Geschwister).
+  - `GraceLock_AfterTheChainEndWasRotated_FollowsTheChain` (N2): pausiert zwischen dem Suchen des Kettenendes und der
+    Sperre; dazwischen wird das Kettenende rotiert. Erwartet: `RotatedWithinGrace`, nicht `Revoked`. Sichert ab.
   - `CloseSession_WhenTokensKeepAppearing_ThrowsAfter32Passes`: Ein Interceptor legt nach jedem Durchlauf ein neues
-    offenes Token an. Erwartet: `InvalidOperationException` nach dem 32. Durchlauf. Rot (heute kehrt das Schließen nach
-    einem Update zurück).
+    offenes Token an. Erwartet: `InvalidOperationException` nach dem 32. Durchlauf, die Meldung nennt die Sitzung und
+    keinen Token-Wert. Dasselbe für `CloseAllSessionsAsync`, dessen Meldung die Person nennt. Rot (heute kehrt das
+    Schließen nach einem Update zurück).
+  - `Grace_InsideTheCallersTransaction_HoldsTheLockUntilItsCommit` (neben `TransactionBracketTests`): Der Grace-Zweig
+    tritt einer offenen Transaktion des Aufrufers bei; ein Schließen auf einer zweiten Verbindung kehrt erst nach deren
+    Commit zurück, und danach ist nichts offen. Rot.
 - **Q-0071:**
   - `SharedSecretFallback_LogsWarningAtStart` (Boss): `InfrastructureBuilder.AddJwtAuthentication()` ohne Schlüssel →
     beim Host-Start genau eine Warnung, ohne Geheimniswert. Rot.
@@ -339,8 +440,10 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
   - `SignOut_RevokesAccessToken` (Boss, UserService): Nach `/auth/sign-out` ergibt das alte Access-Token 401, der
     Refresh 401, und eine zweite, parallel geöffnete Sitzung derselben Person ist beendet (Refresh und Access-Token 401).
     Ersetzt `The_access_token_outlives_the_sign_out_until_it_expires`. Rot.
-  - Monolith: dasselbe über `/auth/sign-out` am Monolithen (`Demo.Tests` bekommt dafür eine Referenz auf
-    `Demo.Monolith.Api`). Rot.
+  - Monolith: dasselbe über `/auth/sign-out` am Monolithen, im bestehenden Projekt `demo/tests/Demo.Monolith.Tests`
+    (`MonolithFactory`), das S3 schon ausführt. Rot.
+  - Wirft das Schließen, schreibt der Endpunkt den Stichtag trotzdem und antwortet mit einem Fehler (Store-Double, das
+    wirft). Rot.
   - TodoService in Development: einen Stichtag über den eigenen `ITokenRevocationWriter` aus den Diensten des Test-Hosts
     schreiben; danach ergibt das alte Token an `/api/todos` 401. Ohne `UseTokenRevocation` in
     `TodoService.Api/Program.cs:59–80` ist dieser Test rot.
@@ -364,12 +467,20 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
 ## Folgen
 
 - NO-1 ist für die mitgelieferten Stores geschlossen, auch für gleichzeitige Geschwister und auf dem Weg über das
-  erneute Lesen; WT Q-0008 kann auf 7.2.0 aufbauen.
+  erneute Lesen; WT Q-0008 kann auf 7.2.0 aufbauen. Das gilt, sobald das Schließen zurückkehrt; zum Restrisiko, dass
+  es laut endet, siehe unten.
 - Eigene Stores von Konsumenten bleiben offen, bis sie den Vertrag aus den Remarks von `IRefreshTokenStore` erfüllen
   (`MIGRATION.md`, Verweis auf die Suite).
 - Ein Abmelden wartet auf laufende Refreshs derselben Sitzung, eine lange Transaktion des Aufrufers verzögert es. Ein
   Fenster öffnet das nicht.
-- Getestet ist nur SQLite; PostgreSQL-Conformance über Testcontainers und ein Widerrufsschritt im Release-Gate gegen
-  den laufenden Stack werden ein Folge-Issue (Nacharbeit G-0006).
+- Restrisiko: Ein Akteur mit einem gültigen Refresh-Token, der je Durchlauf eine Generation rotiert (je Generation ein
+  Netz-Roundtrip), kann das Schließen bis zur Grenze treiben. Es endet dann laut, die Demo sperrt die Access-Tokens
+  trotzdem, die Refresh-Kette kann offen bleiben. Eine Sperrzeile je Sitzung (Migration) würde das schließen;
+  Folge-Issue als Kandidat für 8.0.
+- Unter PostgreSQL und SQL Server sind Deadlocks zwischen Refresh, Kappung und Abmelden möglich; sie enden als Fehler
+  einer Anfrage, nie als offene Sitzung.
+- Getestet ist nur SQLite; PostgreSQL-Conformance über Testcontainers, die Bedingung „offen“ im Update der Kappung (N5,
+  nur auf einer MVCC-Datenbank rot zu testen) und ein Widerrufsschritt im Release-Gate gegen den laufenden Stack
+  werden ein Folge-Issue (Nacharbeit G-0006).
 - Die Demo zeigt Widerruf in jedem Token-lesenden Dienst; das Release-Gate sieht ihn über S3, nicht im laufenden Stack.
 - G-0019 entfernt in 8.0 den stillen Fallback, mit derselben Abgrenzung von „still“.
