@@ -1,10 +1,10 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-21T10:19:38Z
+- Zeitpunkt: 2026-11-21T11:28:12Z
 - Plan: Pro
-- Mana 5h: 19% (Limit 90%, Reset 2026-11-21T15:00:00Z)
-- Mana 7d: 23% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 45% (Limit 90%, Reset 2026-11-21T15:00:00Z)
+- Mana 7d: 27% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
@@ -25,8 +25,8 @@
 - Q-0070: MIGRATION.md (Bruch, Weg, IPrincipalFactory, 401 bei zweiter Identität, eigener Code), README, Befund unter docs/befunde/; kein Release, keine Versionserhöhung
 
 ## Nächster konkreter Schritt
-Schmale Warden-Prüfung der Markierungszeile (ADR-0008 Fassung 4, Head 9d245f1) lesen: PR #71 Kommentar 'Warden: schmale Prüfung Markierungszeile'. Bei approve: PR-Text auf Fassung 4 (Scope-Hook verweigerte Scratchpad-Write; erst ohne aktive Quest), dann TDD Q-0016 (Knight, Sonnet, model explizit), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden. Owner-Entscheid F1 21.11.: Markierungszeile. Nacharbeit-Issue G-0006: PG-Conformance (Testcontainers), N5 Kappung ohne Bedingung, Release-Gate-Widerrufsschritt.
+Schmale Warden-Prüfung F4-F6 (ADR-0008 Fassung 5, Head 00c23fc) lesen: PR #71 Kommentar 'Warden: schmale Prüfung F4–F6'. Bei approve: PR-Text auf Fassung 5, dann TDD Q-0016 (Knight, Sonnet), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden, gate merge, Aufräumen, Kurzbericht, STOPP. KEINE Release-Vorbereitung 7.2.0 (Owner 21.11.: erst nach eigenem Gate mit PostgreSQL-Beweis und F4-Test). Nacharbeit-Issue G-0006: PG-Gate vor 7.2.0 mit F4-Test (rot -> F4 technisch schließen, eigene Verbindung), N5, Release-Gate-Widerrufsschritt.
 
 ## Offene Entscheidungen
-- Kein approve der schmalen Prüfung der Markierungszeile: Frage an den User (Regel 3), nichts erzwingen.
-- Q-0026 steht weiter in G-0006 (gate show), obwohl nach G-0019 verschoben; blockiert es gate merge: stoppen und den User fragen.
+- Kein approve der schmalen Prüfung F4-F6: Frage an den User (Regel 3).
+- Q-0026 steht weiter in G-0006 (gate show); blockiert es gate merge: stoppen und den User fragen.
