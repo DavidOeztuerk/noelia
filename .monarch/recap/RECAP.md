@@ -1,14 +1,14 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-21T18:02:01Z
+- Zeitpunkt: 2026-11-21T20:50:03Z
 - Plan: Pro
-- Mana 5h: 77% (Limit 90%, Reset 2026-11-21T20:00:00Z)
-- Mana 7d: 43% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 24% (Limit 90%, Reset 2026-11-22T01:00:00Z)
+- Mana 7d: 47% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
-- keine aktive Quest
+- Gate G-0020 · Quest Q-0073 [A] · Phase in_progress
 
 ## Erledigt
 - noch nichts
@@ -20,10 +20,12 @@
 - Q-0070: Widerruf je Personen-Identität einzeln inkl. Sitzung, zwei Personen-Schemes; Datensatzprüfung fail-closed
 - Q-0070: IClaimsTransformation: zusätzliche Identität ohne AuthenticationType zählt nicht, Weg über die Personen-Identität getestet, Dienst-Principal unberührt
 - Q-0070: MIGRATION.md (Bruch, Weg, IPrincipalFactory, 401 bei zweiter Identität, eigener Code), README, Befund unter docs/befunde/; kein Release, keine Versionserhöhung
+- Q-0073: F4-Test deterministisch über Interceptoren und pg_stat_activity, vier Fälle plus Kontrolle ohne Klammer, Deadlock-Zähler belegt den Zyklus
+- Q-0073: N5 und Index-Test auf PostgreSQL
+- Q-0073: Befund unter docs/befunde, ADR-0008 Nachtrag nur bei durchweg grünen Tests; offen für SQL Server benannt
 
 ## Nächster konkreter Schritt
-Nach dem 5h-Reset (20:00 UTC): Kritiker über docs/befunde/postgresql-beweis-adr-0008.md, Design committen, eine schmale Delta-Runde (Warden, Opus) über die Fassung 2, danach Q-0072 (Postgres-Fixture, Conformance, Moment-Basis abstrahieren), Q-0073 (F4 Deadlock/Generationen, Markierungskonflikt, N5, Index). Docker läuft (29.9.3).
+Owner entscheidet: F4 rot -> Punkt 6c (technisch schließen, rote F4-Tests als TDD-Start), N5 rot -> Fix vor 7.2.0. Danach Gate G-0020 entweder in 6c weiterführen oder mit dem Befund ablegen. Nicht mergen, solange 7 Tests rot sind.
 
 ## Offene Entscheidungen
-- Generationen-Fall: wird er zu komplex, geht er mit Begründung an den Owner zurück (im Befund als nicht geprüft).
-- Rote Tests: Stopp mit Testname und Ausgabe, kein Merge, kein Fix unter src/.
+- Wohin mit dem Branch monarch/G-0020-postgresql-beweis (lokal committet, nicht gepusht, 7 Tests rot): als Grundlage für 6c nutzen oder ablegen?
