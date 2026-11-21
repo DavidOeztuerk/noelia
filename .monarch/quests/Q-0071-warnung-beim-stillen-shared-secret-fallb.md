@@ -3,7 +3,7 @@ id: Q-0071
 gate: G-0006
 kind: main
 rank: A
-state: proposed
+state: in_progress
 dod:
   - "Baut der Dienst seinen Schlüsselring still aus JWT_SECRET bzw. JwtSettings:Secret, schreibt er beim Start eine Warnung, die den Weg zu ausdrücklichen Schlüsseln nennt (ohne Geheimniswerte)"
   - "Mit ausdrücklichen Schlüsseln oder Authority keine Warnung (Test für beide Seiten)"
