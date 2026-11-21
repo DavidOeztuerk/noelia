@@ -93,6 +93,15 @@ sonst nicht festgehalten (sinngemäß: `.monarch/quests/Q-0017-…md`, DoD).
   künftig, Refresh und Abmelden nicht in eine eigene Transaktion zu legen, wenn der Schutz gegen Token-Diebstahl
   unter Last zählt (Audit-Zeile danach schreiben); das Muster bleibt erlaubt, das Restrisiko steht in README,
   MIGRATION und Remarks und als Owner-Entscheid im ADR. (Wortlaut aus dieser Sitzung.)
+- **21.11.2026, Algorithmus-Pin auf dem Authority-Pfad (Befund aus Q-0018):** „Option 1, mit einer Änderung: Das Gate
+  für den Algorithmus-Pin auf dem Authority-Pfad kommt nach Release 7.2.0, nicht davor (Teil der Härtung). Grund: nur
+  mit dem privaten Schlüssel des Anbieters ausnutzbar, none und der HMAC-Trick bleiben gesperrt. Lege das Issue mit
+  Label Sicherheit an und nenne es im Nacharbeit-Issue. G-0006 läuft ohne den alg-Fall auf dem Authority-Pfad
+  weiter.“ Option 1 hieß ausgeführt: Der Authority-Pfad setzt keine `ValidAlgorithms`
+  (`ServiceCollectionExtensions.cs`, Zweig `keys is null`); ein Token mit dem Schlüssel des Anbieters, aber RS512 statt
+  RS256, kommt durch. G-0006 testet `kid`, `iss` und `aud` auf dem Authority-Pfad und den Algorithmus-Pin auf dem
+  Schlüsselring-Pfad; der Fall `alg` auf dem Authority-Pfad kommt im Härtungs-Gate zuerst rot zurück (#72).
+  (Wortlaut aus dieser Sitzung.)
 
 ### Auslegung durch dieses ADR (nicht Teil des Wortlauts)
 
@@ -655,8 +664,11 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
     am TodoService 401. Rot.
   - Eine neue Anmeldung nach der Sekundengrenze funktioniert. Sichert ab.
 - **Q-0018:**
-  - `AuthorityPath_RejectsForeignAlgKidIss` (Boss): Authority-Pfad mit lokalem JWKS-Stub (Backchannel im Test). Falsches
-    `alg`, unbekanntes `kid`, falscher `iss`, falsches `aud` → 401; richtiges Token → 200.
+  - `AuthorityPath_RejectsForeignAlgKidIss` (Boss): Authority-Pfad mit lokalem JWKS-Stub (Backchannel im Test).
+    Unbekanntes `kid`, falscher `iss`, falsches `aud` → 401; richtiges Token → 200. Der Name behält „Alg“, weil der
+    Boss der Quest ihn trägt. Falsches `alg` ergibt auf dem Authority-Pfad heute 200, weil dort kein Pin gesetzt ist;
+    nach dem Owner-Entscheid vom 21.11. fehlt der Fall in G-0006 und kommt im Härtungs-Gate nach 7.2.0 (#72). Den
+    Algorithmus-Pin prüft G-0006 auf dem Schlüsselring-Pfad: HS512 mit demselben Geheimnis → 401.
   - `RevocationPipeline_E2E` (Boss): Sitzungs-Widerruf (`RevokeSessionAsync`) über die echte Kette → 401, andere
     Sitzung derselben Person → 200; `SignOutEverywhereAsync` über `TokenSessionService` lässt im Fenster kein
     Geschwister entstehen.
@@ -664,7 +676,8 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
     (`ServiceCallerFullChainTests.A_revoked_person_token_is_refused`, G-0016), nur verweisen.
   - **Gegenprobe, Teil der Suite:** Dieselben Prüfungen laufen gegen absichtlich kaputte Ketten und müssen dort
     durchfallen, also das Token durchlassen: ohne `UseTokenRevocation`; mit `UseTokenRevocation` vor `UseAuth`; mit
-    abgeschalteter Prüfung von Issuer bzw. Audience; ohne Algorithmus-Pin (`ValidAlgorithms` leer). Fällt eine Prüfung
+    abgeschalteter Prüfung von Issuer bzw. Audience; ohne Algorithmus-Pin (`ValidAlgorithms` leer, auf dem
+    Schlüsselring-Pfad). Fällt eine Prüfung
     gegen ihre kaputte Kette nicht durch, ist sie wertlos.
 
 ## Folgen
