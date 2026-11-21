@@ -23,6 +23,12 @@ public static class JwtModule
     /// any subject. Prefer a key pair, and give the private half to the issuer
     /// alone.
     /// </para>
+    /// <para>
+    /// That fallback is silent no longer: the host logs one warning at start,
+    /// because Noelia 8.0 will refuse it. Passing keys or an authority, or
+    /// <c>UseJwt(jwt => jwt.FromSharedSecret())</c>, is the explicit choice and
+    /// does not warn.
+    /// </para>
     /// </remarks>
     /// <param name="builder">The infrastructure builder.</param>
     /// <param name="configure">Supplies the keys. Omit for the shared secret.</param>
@@ -38,7 +44,7 @@ public static class JwtModule
         // Built here rather than lazily: a key that cannot be read is a
         // composition error, and finding it on the first request means finding
         // it in production.
-        var keys = KeyRingFactory.Build(options, builder.Configuration);
+        var keys = KeyRingFactory.Build(options, builder.Configuration, out var fromFallback);
 
         // The key ring and IJwtService are registered by the call below, together,
         // whenever there are keys at all: a service that only verifies still
@@ -46,6 +52,11 @@ public static class JwtModule
         // the missing signing key.
         builder.Services.AddJwtAuthentication(
             keys, options.Authority, builder.Configuration, builder.Environment);
+
+        if (fromFallback)
+        {
+            SharedSecretFallbackWarning.AddSharedSecretFallbackWarning(builder.Services);
+        }
 
         return builder;
     }

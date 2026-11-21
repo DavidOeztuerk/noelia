@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Demo.Platform;
 using Microsoft.AspNetCore.RateLimiting;
 using Noelia.Abstractions.Hosting;
+using Noelia.Abstractions.Security;
 using Noelia.Abstractions.Security.Sessions;
 using Noelia.Core.Identity;
 using Noelia.Infrastructure.Builder;
@@ -122,6 +123,11 @@ app.UseNoelia(builder.Environment, serviceName, pipeline => pipeline
     .UseHealthCheckEndpoints()
     .UseRateLimiting()
     .UseAuth()
+    // Right after authentication and before the principal: a signed-out token
+    // is refused here, so nothing behind it ever sees the person. The default
+    // chain leaves this step out, and without it the cutoff signing out writes
+    // is a record nobody reads.
+    .UseTokenRevocation()
     .UsePrincipal()
     // After the principal: an audit entry that cannot name who acted is a
     // record of a request, not of a decision.
@@ -219,32 +225,34 @@ auth.MapPost("/refresh", async (
         subject.Id.Value, subject.DisplayName, access.Value, access.ExpiresAt));
 });
 
-// Signing out ends the session in this service's own database. Nothing else
-// has to be running for that to take effect.
+// Signing out ends every session of the person in this service's own database
+// and refuses every access token they hold. The two routes do the same thing on
+// purpose: ending one session while the person's other tokens kept working made
+// "sign out" mean less than it said. The order of the two steps is in SignOut.
 auth.MapPost("/sign-out", async (
     HttpContext http,
     ICurrentPrincipal principal,
     ITokenSessionService sessions,
+    ITokenRevocationWriter revocations,
+    TimeProvider clock,
+    ILogger<ServiceEntryPoint> logger,
     CancellationToken cancellationToken) =>
 {
-    if (SessionId.TryParse(http.User.FindFirst("session_id")?.Value, out var session))
-    {
-        await sessions.SignOutAsync(session, cancellationToken);
-    }
-
     RefreshCookie.Clear(http);
-    return Results.NoContent();
+    return await SignOut.EverywhereAsync(principal, sessions, revocations, clock, logger, cancellationToken);
 }).RequireAuthorization();
 
 auth.MapPost("/sign-out-everywhere", async (
     HttpContext http,
     ICurrentPrincipal principal,
     ITokenSessionService sessions,
+    ITokenRevocationWriter revocations,
+    TimeProvider clock,
+    ILogger<ServiceEntryPoint> logger,
     CancellationToken cancellationToken) =>
 {
-    await sessions.SignOutEverywhereAsync(principal.Require().Subject, cancellationToken);
     RefreshCookie.Clear(http);
-    return Results.NoContent();
+    return await SignOut.EverywhereAsync(principal, sessions, revocations, clock, logger, cancellationToken);
 }).RequireAuthorization();
 
 app.MapGet("/api/users/me", async (

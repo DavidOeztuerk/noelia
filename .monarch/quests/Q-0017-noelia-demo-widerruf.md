@@ -5,19 +5,22 @@ kind: main
 rank: A
 severity: low
 risk_tags: [auth]
-state: proposed
+state: in_review
 findings: [N1]
 scope:
   repo: Noelia
-  include: ["demo/src/services/UserService/UserService.Api/Program.cs", "demo/src/monolith/Demo.Monolith.Api/Program.cs", "demo/src/services/TodoService/**/Program.cs", "demo/src/shared/Demo.Platform/DemoProviders.cs", "demo/README.md", "demo/tests/Demo.Tests/SignInTests.cs"]
+  include: ["demo/**"]
   exclude: []
-estimate: { session_pct: 10, weekly_pct: 1.5, gold_usd: 0 }
+estimate: { session_pct: 12, weekly_pct: 2, gold_usd: 0 }
 dod:
-  - Entscheidung: Demo zeigt Widerruf (UseTokenRevocation + Revoke beim Sign-out) ODER README sagt klar „optional, in der Demo nicht aktiv“
-  - SignInTests.cs:146-165 entsprechend angepasst (Token nach Sign-out → 401, falls aktiv)
-boss: "Demo SignOut_RevokesAccessToken_InAllServices grün (falls aktiv) bzw. README-Prüfung im Release-Gate"
+  - "Owner-Entscheid 21.11.2026: Demo zeigt echten Widerruf"
+  - "Jeder Token-lesende Demo-Dienst führt UseTokenRevocation in der Kette"
+  - "Abmelden beendet alle Sitzungen der Person und sperrt ihre Access-Tokens sofort (Owner-Entscheid 27.10.)"
+  - "SignInTests: Access-Token nach dem Abmelden ergibt 401"
+  - "README beschreibt die Grenze in Development bei den Microservices (Widerruf je Prozess)"
+boss: "Demo SignOut_RevokesAccessToken grün"
 evidence: ["demo/src/shared/Demo.Platform/DemoProviders.cs:104-107,131-134", "demo/…/UserService.Api/Program.cs:72-93", "demo/README.md:76,83", "07-warden-noelia.md N1"]
-board: { provider: github, issue: 36 }
+board: { provider: github, issue: 36, pr: 71 }
 ---
 # Demo: Widerruf wirklich nutzen oder README korrigieren
 

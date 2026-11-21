@@ -1,6 +1,7 @@
 using Demo.Platform;
 using Demo.Monolith.Api;
 using Noelia.Abstractions.Hosting;
+using Noelia.Abstractions.Security;
 using Noelia.Abstractions.Security.Sessions;
 using Noelia.Application.Extensions;
 using Noelia.Core.Identity;
@@ -97,6 +98,11 @@ app.UseNoelia(builder.Environment, serviceName, pipeline => pipeline
     .UseHealthCheckEndpoints()
     .UseRateLimiting()
     .UseAuth()
+    // Right after authentication and before the principal: a signed-out token
+    // is refused here, for the todos as much as for the sign-in. The default
+    // chain leaves this step out, and without it the cutoff signing out writes
+    // is a record nobody reads.
+    .UseTokenRevocation()
     .UsePrincipal()
     // After the principal: an audit entry that cannot name who acted is a
     // record of a request, not of a decision.
@@ -177,29 +183,32 @@ auth.MapPost("/refresh", async (
         subject.Id.Value, subject.DisplayName, access.Value, access.ExpiresAt));
 });
 
+// Both routes end every session of the person and refuse every access token they
+// hold; the order of the two steps is in SignOut.
 auth.MapPost("/sign-out", async (
     HttpContext http,
+    ICurrentPrincipal principal,
     ITokenSessionService sessions,
+    ITokenRevocationWriter revocations,
+    TimeProvider clock,
+    ILogger<ServiceEntryPoint> logger,
     CancellationToken cancellationToken) =>
 {
-    if (SessionId.TryParse(http.User.FindFirst("session_id")?.Value, out var session))
-    {
-        await sessions.SignOutAsync(session, cancellationToken);
-    }
-
     MonolithRefreshCookie.Clear(http);
-    return Results.NoContent();
+    return await SignOut.EverywhereAsync(principal, sessions, revocations, clock, logger, cancellationToken);
 }).RequireAuthorization();
 
 auth.MapPost("/sign-out-everywhere", async (
     HttpContext http,
     ICurrentPrincipal principal,
     ITokenSessionService sessions,
+    ITokenRevocationWriter revocations,
+    TimeProvider clock,
+    ILogger<ServiceEntryPoint> logger,
     CancellationToken cancellationToken) =>
 {
-    await sessions.SignOutEverywhereAsync(principal.Require().Subject, cancellationToken);
     MonolithRefreshCookie.Clear(http);
-    return Results.NoContent();
+    return await SignOut.EverywhereAsync(principal, sessions, revocations, clock, logger, cancellationToken);
 }).RequireAuthorization();
 
 app.MapGet("/api/users/me", async (

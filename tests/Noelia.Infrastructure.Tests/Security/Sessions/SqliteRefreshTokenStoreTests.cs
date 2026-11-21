@@ -78,6 +78,11 @@ public class SqliteRefreshTokenStoreTests : RefreshTokenStoreConformance, IDispo
                                  && token.RevokedAt == null
                                  && token.ReplacedBy == null);
 
+    protected override async Task DeleteRowAsync(byte[] tokenHash) =>
+        await _context.Set<NoeliaRefreshToken>()
+            .Where(token => token.TokenHash == tokenHash)
+            .ExecuteDeleteAsync();
+
     public void Dispose()
     {
         foreach (var context in _contexts)

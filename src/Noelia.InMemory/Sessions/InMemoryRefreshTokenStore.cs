@@ -19,6 +19,9 @@ namespace Noelia.InMemory.Sessions;
 /// </remarks>
 public sealed class InMemoryRefreshTokenStore : IRefreshTokenStore
 {
+    // How far a rotation chain is followed; the database store uses the same.
+    private const int MaxChainLinks = 32;
+
     private readonly Lock _gate = new();
     private readonly Dictionary<RefreshTokenId, RefreshTokenRecord> _tokens = [];
     private readonly Dictionary<string, RefreshTokenId> _byHash = new(StringComparer.Ordinal);
@@ -65,16 +68,31 @@ public sealed class InMemoryRefreshTokenStore : IRefreshTokenStore
             // indistinguishable, which is why the window is seconds.
             if (current.ReplacedBy is not null)
             {
-                if (now <= current.RevokedAt!.Value + grace)
+                if (now > current.RevokedAt!.Value + grace)
                 {
-                    var sibling = Rotate(current, successor, now, isGrace: true);
-                    Cap(current.Session, maxConcurrentPerSession, now);
-                    return Task.FromResult(
-                        new ConsumeResult(ConsumeOutcome.RotatedWithinGrace, sibling));
+                    CloseSession(current.Session, now);
+                    return Task.FromResult(new ConsumeResult(ConsumeOutcome.ReuseDetected, null));
                 }
 
-                CloseSession(current.Session, now);
-                return Task.FromResult(new ConsumeResult(ConsumeOutcome.ReuseDetected, null));
+                // A sibling exists only while the newest token of the chain the
+                // presented one belongs to is open. If that was closed — by a
+                // sign-out, by the cap, by a replay — the session is no longer
+                // one to give a token to, and this is not a theft either.
+                if (!ChainEndIsOpen(current))
+                {
+                    return Task.FromResult(new ConsumeResult(ConsumeOutcome.Revoked, null));
+                }
+
+                // A sibling past the ceiling would be born dead.
+                if (now >= current.SessionExpiresAt)
+                {
+                    return Task.FromResult(new ConsumeResult(ConsumeOutcome.SessionExpired, null));
+                }
+
+                var sibling = Rotate(current, successor, now, isGrace: true);
+                Cap(current.Session, maxConcurrentPerSession, now);
+                return Task.FromResult(
+                    new ConsumeResult(ConsumeOutcome.RotatedWithinGrace, sibling));
             }
 
             if (current.RevokedAt is not null)
@@ -234,6 +252,33 @@ public sealed class InMemoryRefreshTokenStore : IRefreshTokenStore
         }
 
         return issued;
+    }
+
+    /// <summary>
+    /// Whether the end of the chain that <paramref name="rotated"/> belongs to is
+    /// still open.
+    /// </summary>
+    /// <remarks>
+    /// The chain follows the replacements from the presented token to the first
+    /// row that has none; siblings are not part of it. A hole in it (a purge) or
+    /// a chain longer than the store follows cannot be shown to end in an open
+    /// token, so it counts as closed. The database store applies the same rule,
+    /// there under a lock; here the lock around the whole transition does that
+    /// work.
+    /// </remarks>
+    private bool ChainEndIsOpen(RefreshTokenRecord rotated)
+    {
+        var end = rotated;
+
+        for (var hops = 1; end.ReplacedBy is { } next; hops++)
+        {
+            if (hops > MaxChainLinks || !_tokens.TryGetValue(next, out end!))
+            {
+                return false;
+            }
+        }
+
+        return end.RevokedAt is null;
     }
 
     /// <summary>Revokes every still-open token of a session.</summary>
