@@ -1,7 +1,7 @@
 # PostgreSQL-Beweis für ADR-0008
 
 **Gate:** G-0020 (Issue #73, Nacharbeit G-0006) · **Art:** Beweis, kein Fix. Unter `src/` ändert sich in diesem Gate
-nichts, die Version bleibt 7.1.1. · **Stand:** Design, Fassung 3 (Warden-Runde 1: 4 Major, 10 Minor eingearbeitet; Delta-Runde: approve), noch ohne Ergebnis.
+nichts, die Version bleibt 7.1.1. · **Stand:** Ergebnis liegt vor, 7 Tests rot, Gate angehalten (Owner entscheidet); das Design (Fassung 3, Warden: approve) steht unverändert darunter.
 
 ## In einfacher Sprache
 
@@ -158,3 +158,80 @@ mindestens 2 s je Deadlock-Fall (`deadlock_timeout` von C); ein Lauf mit Opfer G
 - REPEATABLE READ und SERIALIZABLE unter PostgreSQL (ADR: „erwarten ein lautes Scheitern"): nicht Teil dieses Gates.
 - Last-Test (siehe oben).
 - Index-Wanderung unter sperrendem READ COMMITTED (siehe §3): nur auf SQL Server prüfbar.
+
+## Befund (21.11.2026): Gate angehalten, 7 Tests rot
+
+Alle Läufe gegen `postgres:17-alpine`, fünfmal hintereinander mit gleichem Ergebnis (kein Wechsel zwischen grün und
+rot, keine Aufbaufehler-Meldung). Unter `src/` hat sich nichts geändert, die Tests sind nicht abgeschwächt. Nach der
+Vorgabe des Owners wird nicht nach `develop` gemergt, und der ADR-0008-Nachtrag „auf PostgreSQL geprüft" wird nicht
+geschrieben.
+
+### Grün
+
+| Test | Was er belegt |
+|---|---|
+| `PostgresRefreshTokenStoreTests` (Conformance) und `PostgresRefreshTokenStoreMomentTests` (davon 4 neue `TransactionScope`-Tests) | Conformance und Augenblick-Tests von ADR-0008 laufen auf PostgreSQL grün |
+| `F4_Deadlock_ControlWithoutABracket_IsRetriedAndLeavesNothingOpen` | Der Aufbau erreicht den Zyklus (40P01 auf C, mindestens zwei Durchlauf-Updates, Zähler +1); ohne Klammer wiederholt der Store, danach ist nichts offen |
+| `F4_Generations_ControlWithoutABracket_EndsWithinTwoPasses` | Ohne Klammer sieht der Akteur die Markierung, das Schließen endet nach höchstens zwei Durchläufen |
+| `MarkerConflict_TwoSignOutsOfOneSession_BehavesAsTheAdrDescribesFor` (`BeginTransaction`, `TransactionScope`) | Savepoint fängt 23505 ab (Klammer bleibt brauchbar); unter `TransactionScope` bricht der Konflikt die Transaktion ab, danach 25P02 |
+| `CloseAll_AcrossACommittedRotation_UsesTheSessionIndex_LeavesNothingOpen` | `enable_seqscan = off` belegt, `EXPLAIN` zeigt `IX_noelia_refresh_tokens_SessionId` und kein `Seq Scan`; nach der Rückkehr nichts offen |
+
+### Rot
+
+**F4, Deadlock** (`F4_Deadlock_CloseInTheCallersTransaction_LeavesNothingOpen`, fünf Fälle, alle gleich:
+`(SignOut, BeginTransaction)`, `(SignOut, TransactionScope)`, `(Theft, BeginTransaction)`, `(Theft, TransactionScope)`,
+`(SignOutAll, BeginTransaction)`). Die Vorbedingungen sind erfüllt: C scheitert mit 40P01, G nicht, der Zähler
+`pg_stat_database.deadlocks` steigt um genau 1. Ausgabe (Beispiel `SignOut, BeginTransaction`, Zeilen gekürzt):
+
+```
+Expected open to be 0L because after the sign-out nothing of the session may be open; C threw InvalidOperationException
+(SQLSTATE 40P01): An exception has been raised that is likely due to a transient failure.; G returned
+RotatedWithinGrace; rows of S: [T0 ... revoked=12:00:10 replacedBy=T1] [R ... revoked=12:01:45 replacedBy=null]
+[T1 ... revoked=12:01:40 replacedBy=E] [E ... revoked=12:01:45 replacedBy=null]
+[6a3cf9f2 issued=12:01:45 revoked=null replacedBy=null] , but found 1L (difference of 1).
+```
+
+Hergang: PostgreSQL bricht die Transaktion von C ab, der Rollback nimmt die Markierung mit, und G schließt R und E und
+schreibt das Geschwister X fest. **Nach dem Abmelden ist eine Sitzung offen (X).** Das Abmelden hat laut geworfen
+(`InvalidOperationException` mit innerer `PostgresException` 40P01), aber die Sitzung blieb offen und von G
+fortgeführt. Das ist der Hergang, den ADR-0008 als Restrisiko beschreibt; der Test zeigt, dass er unter PostgreSQL
+tatsächlich eintritt: für Abmelden und Diebstahl-Erkennung unter `BeginTransaction` und unter `TransactionScope`, für
+`CloseAllSessionsAsync` nur unter `BeginTransaction` (dort ist es nur als ein Fall gebaut).
+
+**F4, Generationen** (`F4_Generations_CloseInTheCallersTransaction_LeavesNothingOpen`): C wirft nach 32 Durchläufen,
+die jüngste Zeile bleibt offen (laut ADR vorhergesagt).
+
+```
+Expected open to be 0L ...; C threw InvalidOperationException (SQLSTATE none): Closing session 0939970d-... did not
+finish: tokens were still being opened after 32 passes. Some of them may still be open; closing again is safe.;
+passes sent by C: 32; rows of S: [O1 ... revoked=12:00:02 replacedBy=5c8f29e9] ...
+[079206cf issued=12:00:33 revoked=null replacedBy=null] , but found 1L (difference of 1).
+```
+
+Offen bleibt der Nachfolger der 32. Rotation des Akteurs, also O_33 (die Vorhersage in Fassung 3 sagte O_32).
+
+**N5** (`N5_ACapAfterAConcurrentRotation_KeepsTheRotationTime`), laut #73 Punkt 2 erwartet:
+
+```
+Expected revokedAt to be <2026-08-20 12:00:05> because the cap closed a row that had been rotated meanwhile, and wrote
+over the moment of the rotation, but found <2026-08-20 12:00:10>.
+Expected answer.Outcome to be ConsumeOutcome.ReuseDetected {value: 2} because the grace of Z ended at t_rot + grace;
+the cap at t_cap > t_rot must not give it more, but found ConsumeOutcome.RotatedWithinGrace {value: 1}.
+```
+
+Die Kappung überschreibt `RevokedAt` einer zwischenzeitlich rotierten Zeile; ihr Grace-Fenster verschiebt sich.
+
+### Folgen (Entscheidung des Owners)
+
+- F4 rot führt nach der Vorgabe zu Punkt 6c (technisch schließen, etwa Markierung über eine eigene Verbindung). Die
+  roten F4-Tests sind der TDD-Start. Der Beweis stützt die Annahme von ADR-0008 nicht, dass nach einem Abbruch der
+  Klammer nur ein lautes Scheitern bleibt: Das Abmelden wirft zwar, aber die Sitzung ist danach offen und fortgeführt.
+- N5 rot führt zu einem Fix vor 7.2.0 (`RevokedAt == null && ReplacedBy == null` in die Bedingung von `CapAsync`).
+
+### Was für SQL Server offen bleibt
+
+Die Annahmen (a) bis (c) aus ADR-0008 unter sperrendem READ COMMITTED (mit und ohne `READ_COMMITTED_SNAPSHOT`); der
+zweite Zyklus („Grace-Anfrage hält E und wartet auf das unbestätigte INSERT der Markierung"); die Wanderung einer
+Zeile im Index `(SubjectId, RevokedAt)` beim Schließen und Rotieren (auf PostgreSQL nicht prüfbar, siehe §3); die
+Wiederholung nach Deadlock (`IsTransient`) dort. Weiter offen: MySQL/InnoDB, REPEATABLE READ und SERIALIZABLE unter
+PostgreSQL, ein Last-Test (entfällt, siehe §2).

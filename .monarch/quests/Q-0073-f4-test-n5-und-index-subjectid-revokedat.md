@@ -3,7 +3,7 @@ id: Q-0073
 gate: G-0020
 kind: main
 rank: A
-state: proposed
+state: in_progress
 dod:
   - "F4-Test deterministisch über Interceptoren und pg_stat_activity, vier Fälle plus Kontrolle ohne Klammer, Deadlock-Zähler belegt den Zyklus"
   - "N5 und Index-Test auf PostgreSQL"
