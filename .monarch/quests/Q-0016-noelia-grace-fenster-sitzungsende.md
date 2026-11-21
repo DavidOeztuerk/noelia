@@ -20,7 +20,7 @@ dod:
   - "MIGRATION- und README-Eintrag"
 boss: "RefreshGrace_AfterSignOutEverywhere_ReturnsSessionEnded grün in CI (EF + InMemory)"
 evidence: ["EntityFrameworkRefreshTokenStore.cs:56-59,146-196", "InMemoryRefreshTokenStore.cs:66-75", "TokenSessionService.cs:127-142", "TokenSessionOptions.cs:43 (Grace 15 s)", "07-warden-noelia.md NO-1"]
-board: { provider: github, issue: 35 }
+board: { provider: github, issue: 35, pr: 71 }
 ---
 # Grace-Fenster respektiert Sitzungsende
 
