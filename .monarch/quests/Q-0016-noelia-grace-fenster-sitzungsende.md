@@ -5,7 +5,7 @@ kind: main
 rank: A
 severity: medium
 risk_tags: [auth]
-state: in_review
+state: cleared
 findings: [NO-1]
 scope:
   repo: Noelia
