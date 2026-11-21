@@ -13,8 +13,18 @@ internal static class KeyRingFactory
     /// The ring for this service, or <c>null</c> when an external provider
     /// supplies the keys and this service signs nothing.
     /// </summary>
-    internal static KeyRing? Build(JwtOptions options, IConfiguration configuration)
+    /// <param name="options">What the caller passed.</param>
+    /// <param name="configuration">Where the shared secret is read from.</param>
+    /// <param name="fromSharedSecretFallback">
+    /// True only when the ring was built from the shared secret because the
+    /// caller passed neither keys nor an authority. Told here, by the branch that
+    /// takes the decision, so the caller need not re-derive the condition.
+    /// </param>
+    internal static KeyRing? Build(
+        JwtOptions options, IConfiguration configuration, out bool fromSharedSecretFallback)
     {
+        fromSharedSecretFallback = false;
+
         if (options.ValidationKeys.Count > 0 || options.SigningKey is not null)
         {
             // A configured signing key is always honoured too, or an issuer
@@ -41,6 +51,7 @@ internal static class KeyRingFactory
                 "No signing key configured. Pass keys to AddJwtAuthentication(o => ...), "
                 + "or set JwtSettings:Secret for the shared-secret path.");
 
+        fromSharedSecretFallback = true;
         var shared = SigningKey.FromSharedSecret(secret, kid: null);
         return new KeyRing([shared], shared);
     }

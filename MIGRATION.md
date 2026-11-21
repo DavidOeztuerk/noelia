@@ -183,6 +183,20 @@ vor Release 7.2.0 in einem eigenen Gate.
 **Zwei Personen-Identitäten in einer Anfrage:** `ICurrentPrincipal` ist die erste. Ein Abmelden beendet nur die Sitzungen
 und sperrt nur die Access-Tokens dieser Person; die zweite Person meldet sich mit einer eigenen Anfrage ab.
 
+## Neu: Warnung beim Start für den stillen Shared-Secret-Weg (Q-0071)
+
+Wer `AddJwtAuthentication()` ohne Schlüssel aufruft oder `services.AddJwtAuthentication(configuration, environment)`
+direkt, bekommt den Schlüsselring aus `JWT_SECRET` oder `JwtSettings:Secret`, ohne ihn gewählt zu haben. Dieser Weg
+schreibt jetzt **eine** Warnung beim Start des Hosts (Logger-Kategorie `Noelia.Infrastructure.Security.Keys`), auch wenn
+beide Wege im selben Container laufen. Der Text nennt weder den Wert noch seine Länge noch die Quelle.
+
+Keine Warnung gibt es für die ausdrücklichen Wege: Schlüssel in `o.SigningKey` / `o.ValidationKeys` (auch
+`SigningKey.FromSharedSecret(...)`), `UseJwt(jwt => jwt.Issue(...))`, `VerifyOnly(...)`, eine Authority und
+`UseJwt(jwt => jwt.FromSharedSecret())`. Wer das gemeinsame Geheimnis bewusst behalten will, schreibt Letzteres.
+
+Das ist kein Bruch: Verhalten, Schlüsselring und `noelia.jwt.key-separation` bleiben wie sie sind. Noelia 8.0 (G-0019,
+Q-0026) startet auf dem stillen Weg nicht mehr.
+
 ## Was sich nicht ändert
 
 Eigener Code zählt in ASP.NET weiter alle Identitäten: `[Authorize(Roles = …)]`, `RequireRole`, `RequireClaim` und

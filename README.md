@@ -598,6 +598,15 @@ The accepted algorithms come from these keys, never from a token header.
 Calling `AddJwtAuthentication()` with no options keeps the shared-secret path
 from `JwtSettings:Secret` or `JWT_SECRET`, unchanged.
 
+That silent fallback now logs one warning when the host starts (logger category
+`Noelia.Infrastructure.Security.Keys`), and Noelia 8.0 will refuse to start this
+way. The same goes for calling `services.AddJwtAuthentication(configuration,
+environment)` directly. The warning never carries the secret, its length or its
+source. To be explicit, pass keys (`o.SigningKey` / `o.ValidationKeys`, or
+`SigningKey.FromSharedSecret(...)`), use `UseJwt(jwt => jwt.Issue(...))` or
+`VerifyOnly(...)`, or name an authority. Whoever wants to keep the shared secret
+writes `UseJwt(jwt => jwt.FromSharedSecret())`, which does not warn.
+
 ### Swapping Noelia's own sign-in for a provider
 
 A library whose authentication cannot be exchanged for Keycloak, Zitadel or
