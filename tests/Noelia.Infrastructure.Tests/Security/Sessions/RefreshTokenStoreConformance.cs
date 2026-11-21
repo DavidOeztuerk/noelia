@@ -74,6 +74,12 @@ public abstract class RefreshTokenStoreConformance
     [Fact]
     public async Task Concurrent_presentations_rotate_exactly_once_and_nobody_is_thrown_out()
     {
+        // Allowance 8 for eight presentations: once the cap closes the end of
+        // the chain, every further presentation of the old token is Revoked, so
+        // the claim "nobody is thrown out" holds exactly as long as the
+        // allowance covers the tabs (ADR-0008, decision 2). The expectations
+        // below are the original ones.
+        const int allowance = 8;
         var (session, token) = await SignInAsync();
 
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -89,7 +95,7 @@ public abstract class RefreshTokenStoreConformance
             // test's fault.
             var (successor, _) = NewSuccessor(session);
             return await NewClient().TryConsumeAsync(
-                Hash(token), successor, _now.AddSeconds(i), Grace, MaxConcurrent);
+                Hash(token), successor, _now.AddSeconds(i), Grace, allowance);
         })).ToArray();
 
         gate.SetResult();
@@ -358,6 +364,235 @@ public abstract class RefreshTokenStoreConformance
         removed.Should().Be(2, "a single unbounded delete competes with the sign-in path");
     }
 
+    // ---- the end of a session ends the grace window (ADR-0008, NO-1) ----
+
+    /// <summary>
+    /// Boss test of Q-0016: a token that was rotated a moment ago must not hand
+    /// out a sibling once the person has signed out everywhere.
+    /// </summary>
+    [Fact]
+    public async Task RefreshGrace_AfterSignOutEverywhere_ReturnsSessionEnded()
+    {
+        var subject = SubjectId.New();
+        var (session, token) = await SignInAsync(subject);
+        (await ConsumeAsync(session, token, _now)).Outcome.Should().Be(ConsumeOutcome.Rotated);
+
+        await Store.CloseAllSessionsAsync(subject, _now.AddSeconds(1));
+        var replay = await ConsumeAsync(session, token, _now.AddSeconds(2));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.Revoked);
+        replay.Issued.Should().BeNull();
+        (await CountOpenAsync(session)).Should().Be(0, "a sign-out that a sibling survives is not a sign-out");
+    }
+
+    [Fact]
+    public async Task RefreshGrace_AfterSignOut_ReturnsSessionEnded()
+    {
+        var (session, token) = await SignInAsync();
+        (await ConsumeAsync(session, token, _now)).Outcome.Should().Be(ConsumeOutcome.Rotated);
+
+        await Store.CloseSessionAsync(session, _now.AddSeconds(1));
+        var replay = await ConsumeAsync(session, token, _now.AddSeconds(2));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.Revoked);
+        (await CountOpenAsync(session)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// A sibling past the ceiling would be born dead and reported as a success.
+    /// </summary>
+    [Fact]
+    public async Task RefreshGrace_AfterTheCeiling_IsSessionExpired()
+    {
+        var (session, token) = await SignInAsync(sessionLifetime: TimeSpan.FromHours(2));
+        var ceiling = _now.AddHours(2);
+
+        // Rotated just before the ceiling, replayed just after it: still inside
+        // the grace window, already outside the sign-in.
+        (await ConsumeAsync(session, token, ceiling - TimeSpan.FromSeconds(5))).Outcome
+            .Should().Be(ConsumeOutcome.Rotated);
+        var replay = await ConsumeAsync(session, token, ceiling + TimeSpan.FromSeconds(1));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.SessionExpired);
+        replay.Issued.Should().BeNull();
+        (await CountOpenAsync(session)).Should().Be(1, "only the successor of the rotation, no sibling");
+    }
+
+    /// <summary>
+    /// With an allowance of one, a second tab is still served, and the session
+    /// stays open with exactly one token.
+    /// </summary>
+    [Fact]
+    public async Task RefreshGrace_WithAllowanceOne_KeepsTheSessionOpen()
+    {
+        var (session, token) = await SignInAsync();
+        (await ConsumeAsync(session, token, _now, maxConcurrent: 1)).Outcome
+            .Should().Be(ConsumeOutcome.Rotated);
+
+        var second = await ConsumeAsync(session, token, _now.AddSeconds(1), maxConcurrent: 1);
+
+        second.Outcome.Should().Be(ConsumeOutcome.RotatedWithinGrace);
+        (await CountOpenAsync(session)).Should().Be(1);
+        (await Store.ActiveSessionsAsync(SubjectOf(session), _now.AddSeconds(2)))
+            .Should().ContainSingle("the session is not ended, only narrowed to one token");
+    }
+
+    /// <summary>
+    /// The cap closed the end of the chain, so the old token yields nothing
+    /// more, while the sibling of the second tab stays usable.
+    /// </summary>
+    [Fact]
+    public async Task RefreshGrace_AfterTheCapClosedTheChainEnd_IsRevoked()
+    {
+        var (session, token) = await SignInAsync();
+        await ConsumeAsync(session, token, _now, maxConcurrent: 1);
+        var second = await ConsumeAsync(session, token, _now.AddSeconds(1), maxConcurrent: 1);
+        second.Outcome.Should().Be(ConsumeOutcome.RotatedWithinGrace);
+        var siblingToken = LastIssuedToken;
+
+        var third = await ConsumeAsync(session, token, _now.AddSeconds(2), maxConcurrent: 1);
+
+        third.Outcome.Should().Be(ConsumeOutcome.Revoked);
+        third.Issued.Should().BeNull();
+        (await ConsumeAsync(session, siblingToken, _now.AddSeconds(3), maxConcurrent: 1)).Outcome
+            .Should().Be(ConsumeOutcome.Rotated, "the second tab's token was not touched");
+    }
+
+    [Fact]
+    public async Task RefreshGrace_FollowsTheChainToItsOpenEnd()
+    {
+        var (session, token) = await SignInAsync();
+        await ConsumeAsync(session, token, _now);
+        var second = LastIssuedToken;
+        await ConsumeAsync(session, second, _now.AddSeconds(1));
+
+        var replay = await ConsumeAsync(session, token, _now.AddSeconds(2));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.RotatedWithinGrace);
+        (await CountOpenAsync(session)).Should().Be(2, "the end of the chain and the new sibling");
+    }
+
+    /// <summary>
+    /// A chain of 32 links is followed to its end; one more is read as closed.
+    /// </summary>
+    [Fact]
+    public async Task RefreshGrace_AChainOfThirtyTwoLinks_StillReachesItsOpenEnd()
+    {
+        var (session, first) = await SignInAsync();
+        var token = first;
+        for (var i = 0; i < 32; i++)
+        {
+            (await ConsumeAsync(session, token, _now)).Outcome.Should().Be(ConsumeOutcome.Rotated);
+            token = LastIssuedToken;
+        }
+
+        var replay = await ConsumeAsync(session, first, _now.AddSeconds(1));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.RotatedWithinGrace);
+    }
+
+    [Fact]
+    public async Task RefreshGrace_WhenTheChainIsTooLong_IsRevoked()
+    {
+        var (session, first) = await SignInAsync();
+        var token = first;
+        for (var i = 0; i < 33; i++)
+        {
+            (await ConsumeAsync(session, token, _now)).Outcome.Should().Be(ConsumeOutcome.Rotated);
+            token = LastIssuedToken;
+        }
+
+        var replay = await ConsumeAsync(session, first, _now.AddSeconds(1));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.Revoked, "an unreadable end is read as closed");
+        (await CountOpenAsync(session)).Should().Be(1, "no sibling was written");
+    }
+
+    [Fact]
+    public async Task RefreshGrace_WhenTheChainIsBroken_IsRevoked()
+    {
+        var (session, first) = await SignInAsync();
+        await ConsumeAsync(session, first, _now);
+        var second = LastIssuedToken;
+        await ConsumeAsync(session, second, _now.AddSeconds(1));
+        await DeleteRowAsync(Hash(second));
+
+        var replay = await ConsumeAsync(session, first, _now.AddSeconds(2));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.Revoked, "a purged link means the end cannot be shown to be open");
+        (await CountOpenAsync(session)).Should().Be(1);
+    }
+
+    /// <summary>
+    /// Eight tabs, an allowance of five: the surplus may be turned away, but
+    /// never a second rotation, never an alarm, and never more than five tokens.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentPresentations_BeyondTheAllowance_AreRevokedNeverRotatedTwice()
+    {
+        var (session, token) = await SignInAsync();
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        {
+            await gate.Task;
+            var (successor, _) = NewSuccessor(session);
+            return await NewClient().TryConsumeAsync(
+                Hash(token), successor, _now.AddSeconds(i), Grace, MaxConcurrent);
+        })).ToArray();
+
+        gate.SetResult();
+        var results = await Task.WhenAll(attempts);
+
+        results.Count(r => r.Outcome == ConsumeOutcome.Rotated).Should().Be(1);
+        results.Should().NotContain(r => r.Outcome == ConsumeOutcome.ReuseDetected);
+        results.Should().AllSatisfy(r => r.Outcome.Should().BeOneOf(
+            ConsumeOutcome.Rotated, ConsumeOutcome.RotatedWithinGrace, ConsumeOutcome.Revoked));
+        (await CountOpenAsync(session)).Should().BeLessThanOrEqualTo(MaxConcurrent);
+    }
+
+    /// <summary>
+    /// A replay after the window is a theft even in a session that was ended
+    /// meanwhile: the window is judged first.
+    /// </summary>
+    [Fact]
+    public async Task A_replay_after_the_grace_window_in_an_ended_session_is_still_reuse()
+    {
+        var (session, token) = await SignInAsync();
+        await ConsumeAsync(session, token, _now);
+        await Store.CloseSessionAsync(session, _now.AddSeconds(1));
+
+        var replay = await ConsumeAsync(session, token, _now + Grace + TimeSpan.FromSeconds(1));
+
+        replay.Outcome.Should().Be(ConsumeOutcome.ReuseDetected);
+    }
+
+    [Fact]
+    public async Task Closing_twice_counts_only_what_the_first_call_closed()
+    {
+        var (session, _) = await SignInAsync();
+
+        (await Store.CloseSessionAsync(session, _now)).Should().Be(1);
+        (await Store.CloseSessionAsync(session, _now.AddSeconds(1)))
+            .Should().Be(0, "whatever a store keeps to remember an ended session is not a token");
+    }
+
+    /// <summary>
+    /// An open token of a session that has reached its ceiling is still closed
+    /// and counted, as it always was.
+    /// </summary>
+    [Fact]
+    public async Task Closing_everything_still_closes_the_open_tokens_of_a_session_past_its_ceiling()
+    {
+        var subject = SubjectId.New();
+        var (session, _) = await SignInAsync(subject, sessionLifetime: TimeSpan.FromHours(1));
+
+        var closed = await Store.CloseAllSessionsAsync(subject, _now.AddHours(2));
+
+        closed.Should().Be(1);
+        (await CountOpenAsync(session)).Should().Be(0);
+    }
+
     // ---- harness ----
 
     // Read from several threads in the concurrency case.
@@ -400,10 +635,11 @@ public abstract class RefreshTokenStoreConformance
         SessionId session,
         string token,
         DateTimeOffset now,
-        TimeSpan? tokenLifetime = null)
+        TimeSpan? tokenLifetime = null,
+        int maxConcurrent = MaxConcurrent)
     {
         var successor = Successor(session, tokenLifetime, now);
-        var result = await Store.TryConsumeAsync(Hash(token), successor, now, Grace, MaxConcurrent);
+        var result = await Store.TryConsumeAsync(Hash(token), successor, now, Grace, maxConcurrent);
         return result;
     }
 
@@ -451,6 +687,13 @@ public abstract class RefreshTokenStoreConformance
 
     /// <summary>Implementations expose their own count; the default probes.</summary>
     protected abstract Task<int> CountOpenAsync(SessionId session);
+
+    /// <summary>
+    /// Removes one row the way a purge would, to leave a hole in a rotation
+    /// chain. Not part of the contract, so each implementation reaches its own
+    /// storage.
+    /// </summary>
+    protected abstract Task DeleteRowAsync(byte[] tokenHash);
 
     private static string NewToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 

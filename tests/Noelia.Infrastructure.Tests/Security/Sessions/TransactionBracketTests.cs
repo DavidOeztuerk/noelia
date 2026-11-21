@@ -166,6 +166,40 @@ public class TransactionBracketTests : IDisposable
     }
 
     /// <summary>
+    /// The grace branch joins a bracket the caller owns, and what it wrote is
+    /// protected from a sign-out until the caller commits: the sign-out waits,
+    /// and then it closes the sibling too.
+    /// </summary>
+    [Fact]
+    public async Task Grace_InsideTheCallersTransaction_HoldsTheLockUntilItsCommit()
+    {
+        var person = SubjectId.New();
+        var angemeldet = await _sessions.SignInAsync(person);
+        var erste = await _sessions.RefreshAsync(angemeldet.RefreshToken);
+        erste.Outcome.Should().Be(ConsumeOutcome.Rotated);
+
+        var abmeldung = new EntityFrameworkRefreshTokenStore<SessionTestContext>(NewContext());
+        RefreshResult geschwister;
+        Task<int> abmelden;
+        await using (var klammer = await _context.Database.BeginTransactionAsync())
+        {
+            geschwister = await _sessions.RefreshAsync(angemeldet.RefreshToken);
+            geschwister.Outcome.Should().Be(ConsumeOutcome.RotatedWithinGrace);
+
+            abmelden = Task.Run(() => abmeldung.CloseAllSessionsAsync(person, _clock.GetUtcNow()));
+            await Task.WhenAny(abmelden, Task.Delay(400));
+            abmelden.IsCompleted.Should().BeFalse("the sibling is not committed yet, and the sign-out must see it");
+
+            await klammer.CommitAsync();
+        }
+
+        (await abmelden.WaitAsync(TimeSpan.FromSeconds(10)))
+            .Should().Be(2, "the end of the chain and the sibling, both open when the sign-out looked");
+        (await _sessions.RefreshAsync(geschwister.RefreshToken!)).Outcome.Should().Be(ConsumeOutcome.Revoked);
+        (await _sessions.RefreshAsync(erste.RefreshToken!)).Outcome.Should().Be(ConsumeOutcome.Revoked);
+    }
+
+    /// <summary>
     /// Leaves a session holding two open tokens and hands back the one whose
     /// row the race will move out from under the update.
     /// </summary>

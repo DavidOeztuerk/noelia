@@ -482,8 +482,8 @@ Warnung; in 8.0 startet er so nicht mehr.
      Markierungszeile (Entscheidung 3). Keine
      Spalte, keine Migration. Ihre `Id`-Ableitung mit dem Domain-Separator `noelia.refresh-token.session-ended.v1` ist
      Datenformat-Oberfläche: Sie zu ändern wäre eine Migration. Eigene Abfragen auf `noelia_refresh_tokens` sehen diese
-     Zeilen als geschlossene Tokens. Ein Zurückgehen auf 7.1.x liest sie genauso und bleibt möglich. Jede Rotation
-     liest die Markierung einmal über den Primärschlüssel. Das Schließen ruft für die Markierung erstmals
+     Zeilen als geschlossene Tokens. Ein Zurückgehen auf 7.1.x liest sie genauso und bleibt möglich. Refreshs lesen
+     die Markierung über den Primärschlüssel (die Rotation einmal, der Grace-Zweig vor und nach seiner Sperre). Das Schließen ruft für die Markierung erstmals
      `SaveChanges` auf dem geteilten Kontext; wie schon `CreateAsync` und die Rotation schreibt das ausstehende
      Änderungen der Anwendung mit. In einer Transaktion der Anwendung gilt die Grenze aus Entscheidung 3 für
      Abmelden und Wiedergebrauch, mit dem geänderten README-Rat.

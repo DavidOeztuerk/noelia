@@ -1,7 +1,7 @@
 # Noelia 7.1.2 → 7.2.0
 
 **Version:** Im Repository steht weiter 7.1.1. 7.2.0 ist die vorgesehene Release-Nummer; den Sprung und die
-Veröffentlichung macht der Owner im Release. Dieser Abschnitt beschreibt, was der Fix aus G-0018 ändert.
+Veröffentlichung macht der Owner im Release. Dieser Abschnitt beschreibt, was die Fixes aus G-0018 und G-0006 ändern.
 
 **Behoben: Rechte und Rollen zählen nur aus angemeldeten Identitäten** ([ADR-0007](docs/adr/0007-rechte-und-rollen-nur-aus-angemeldeten-identitaeten.md),
 #59). Ein `ClaimsPrincipal` kann mehrere Identitäten tragen. `PermissionMiddleware` und
@@ -77,6 +77,111 @@ Nicht:
   mehreren Personen muss jede bestehen. Fehlte die Nutzer-ID oder der Claim, lehnten sie schon bisher ab; **neu** ist: Eine
   unangemeldete Identität mit Nutzer-ID, Kontostand oder Admin-Rolle zählt nicht mehr als Person. Mit einem **eigenen**
   Provider der Datensatzprüfung ist es strenger als heute.
+
+## Behoben: das Grace-Fenster kennt das Ende der Sitzung (NO-1, Q-0016, #35)
+
+([ADR-0008](docs/adr/0008-sitzungsende-und-widerruf-je-person.md).) Ein Refresh-Token, das eben erst rotiert wurde, bekam
+im Grace-Fenster (`ReuseGracePeriod`, 15 Sekunden) ein neues Geschwister, **auch nachdem die Person sich abgemeldet
+hatte**: `CloseSessionAsync` und `CloseAllSessionsAsync` schlossen nur die gerade gültigen Tokens, nicht den rotierten
+Vorgänger. Die Sitzung lebte so bis zu 15 Sekunden weiter. Das ist behoben, in den mitgelieferten Stores
+(`EntityFrameworkRefreshTokenStore`, `InMemoryRefreshTokenStore`). Keine neue öffentliche API, kein neuer Enum-Wert,
+keine neue Spalte. Für Konsumenten ändert sich Verhalten an sechs Stellen, alle in die geschlossene oder laute Richtung:
+
+1. **Neue Zeilenart in `noelia_refresh_tokens` (nur EF).** Ein Abmelden schreibt je betroffener Sitzung eine
+   **Markierungszeile**: ein geschlossenes, abgelaufenes Token, das niemand vorlegen kann. Siehe unten, „Die Markierung
+   als Datenformat“.
+2. **Ein Refresh im Grace-Fenster ergibt `Revoked` statt eines neuen Tokens**, wenn das Ende der Kette geschlossen ist:
+   nach dem Abmelden, nach einer Kappung des Kettenendes (erst wenn mehr als `MaxConcurrentTokensPerSession` Tokens offen
+   wären) und auf dem Weg, auf dem ein Abmelden das Token zwischen Lesen und Einlösen schließt. Ebenso ergibt jede Rotation
+   und jeder Grace-Refresh `Revoked`, der nach der Markierung eines laufenden Abmeldens kommt (EF). Wer „zweiter Tab“
+   testet: Lösen mehr Tabs dasselbe alte Token gleichzeitig ein, als die Erlaubnis zulässt, können die überzähligen
+   `Revoked` bekommen; offen bleiben in beiden Fällen höchstens so viele Tokens, wie die Erlaubnis zulässt. Ein Wiedergebrauch
+   **nach** dem Fenster bleibt `ReuseDetected`, auch in einer beendeten Sitzung.
+3. **Ein Refresh im Grace-Fenster nach der Obergrenze der Sitzung ergibt `SessionExpired`** statt eines Geschwisters mit
+   Ablauf in der Vergangenheit, das als `RotatedWithinGrace` gemeldet wurde.
+4. **`CloseSessionAsync` und `CloseAllSessionsAsync` können mehr als ein Update ausführen** und kehren erst zurück, wenn
+   eine frische Zählung nichts Offenes mehr findet. Wird das nach 32 Durchläufen nicht erreicht, werfen sie eine
+   `InvalidOperationException` mit der Sitzungs- bzw. Personen-Id (nie ein Token). Das ist laut und nicht geschlossen: Die
+   Sitzung kann offen bleiben, ein erneutes Abmelden ist idempotent. Die Rückgabe zählt wie bisher nur geschlossene Tokens,
+   keine Markierungen.
+5. **Der Grace-Zweig läuft in einer Transaktion** und sperrt das Ende der Kette bis zum Commit. Ein gleichzeitiges
+   Abmelden wartet darauf und schließt danach auch das Geschwister. Ist schon eine Transaktion des Aufrufers offen
+   (`BeginTransaction` oder eine umgebende `TransactionScope`), tritt der Store ihr bei und öffnet keine eigene; bisher
+   prüfte das nur `CurrentTransaction`.
+6. **Deadlocks sind eine neue, laute Fehlerart** unter PostgreSQL und SQL Server, zwischen Refresh, Kappung und Abmelden.
+   Trifft es einen Refresh, scheitert er laut, seine Transaktion wird zurückgerollt und er hinterlässt nichts. Trifft es
+   das Abmelden, wiederholt der Store die Anweisung bis zu dreimal (nach 20, 100 und 500 ms), wenn die Datenbank den Fehler
+   als vorübergehend meldet (`DbException.IsTransient`, auch als innere Ausnahme) und keine Transaktion des Aufrufers offen
+   ist; danach scheitert das Abmelden laut. In einer Transaktion der Anwendung scheitert es sofort.
+
+### Eigene `IRefreshTokenStore`
+
+NO-1 bleibt bei einem eigenen Store offen, bis er denselben Vertrag erfüllt. Der Vertrag steht in den XML-Remarks von
+`IRefreshTokenStore`; die ausführbare Fassung ist die Suite
+`tests/Noelia.Infrastructure.Tests/Security/Sessions/RefreshTokenStoreConformance.cs` (sie wird nicht ausgeliefert; lesen
+Sie den Quelltext). Kurz:
+
+- Ein Geschwister entsteht nur, solange das **Ende der Kette** des Vorgängers offen ist (den Verweisen `ReplacedBy` bis
+  zur ersten Zeile ohne Nachfolger folgen; Geschwister gehören nicht zur Kette). Ist es geschlossen, fehlt eine Zeile oder
+  ist die Kette länger als 32 Glieder, ist das Ergebnis `Revoked`, und es wird nichts geschrieben.
+- Das wird **unter einer Sperre auf diesem Ende** entschieden, auf die ein gleichzeitiges Schließen wartet. Ein Geschwister
+  darf nie bestätigt werden, nachdem ein Schließen zurückgekehrt ist.
+- Schließen kehrt erst zurück, wenn ein frisches Lesen nichts Offenes findet, oder wirft. Es muss auch gegen
+  gleichzeitige Rotationen in begrenzt vielen Schritten enden; wie, ist Sache des Stores.
+- Ein geschlossenes Token ohne `ReplacedBy` ergibt auf jedem Weg `Revoked`; ein Wiedergebrauch nach dem Fenster bleibt
+  `ReuseDetected`; nach der Obergrenze gilt `SessionExpired`.
+
+### Die Markierung als Datenformat
+
+Das Schließen schreibt vor dem eigentlichen Schließen je Sitzung eine Zeile in dieselbe Tabelle. Sie hat keine neue
+Spalte und braucht keine Migration:
+
+| Feld | Wert |
+|---|---|
+| `Id` | `new Guid(SHA256(UTF8("noelia.refresh-token.session-ended.v1") ‖ SessionId.ToByteArray())[0..16])` |
+| `TokenHash` | 32 Zufallsbytes, der Hash keines ausgegebenen Tokens |
+| `IssuedAt`, `ExpiresAt`, `RevokedAt` | der Zeitpunkt des Abmeldens |
+| `SessionId`, `SubjectId`, `SessionStartedAt`, `SessionExpiresAt` | aus einer Zeile der Sitzung |
+| `ReplacedBy`, `ClientFingerprint` | leer |
+
+Sie ist von Anfang an geschlossen und abgelaufen: Sie zählt nie als offen, erscheint nicht in `ActiveSessionsAsync` und
+nicht in der Rückgabe des Schließens, und `PurgeAsync` entfernt sie wie jede geschlossene Zeile. Eigene Abfragen auf
+`noelia_refresh_tokens` sehen sie als geschlossenes Token. Ein Zurückgehen auf 7.1.x liest sie genauso und bleibt möglich.
+
+- **Datenformat:** Die Ableitung der `Id` samt Domain-Separator ist Oberfläche des gespeicherten Formats. Sie zu ändern
+  wäre eine Migration, kein Umbenennen. Refreshs lesen die Markierung über den Primärschlüssel: die Rotation einmal,
+  der Grace-Zweig vor und nach seiner Sperre.
+- **`PurgeAsync`:** Der Horizont muss weit hinter der Gegenwart liegen (Lebensdauer des Refresh-Tokens plus Fenster, nicht
+  Minuten). Sonst entfernt er die Markierung mitten im Schließen, und das Abmelden stützt sich nur noch auf seine
+  Durchläufe.
+- **Effekt von `SaveChanges`:** Das Schließen ruft erstmals `SaveChanges` auf dem geteilten `DbContext` auf (für die
+  Markierung). Wie schon `CreateAsync` und die Rotation schreibt das ausstehende Änderungen der Anwendung auf diesem
+  Kontext mit. Wer das Abmelden auf einem Kontext aufruft, auf dem er etwas Unfertiges hält, sollte das vorher speichern
+  oder einen eigenen Kontext nehmen. Ein Schlüsselkonflikt der Markierung (zwei Tabs melden gleichzeitig ab) wird
+  abgefangen: Der Store löst die Zeile aus dem ChangeTracker und prüft frisch, jeder andere Fehler wirft.
+
+### Die Grenze: Abmelden und Wiedergebrauch in einer Transaktion der Anwendung
+
+Eine Anwendung, die ein Abmelden oder einen Refresh in eine **eigene** Transaktion legt, bekommt die Markierung erst mit
+deren Commit sichtbar; vorher sehen andere Verbindungen sie nicht. Das betrifft das Abmelden und den Wiedergebrauchszweig
+eines Refresh in der Klammer (das Muster im README, „Inside a transaction you already have“). Bis zum Commit bleiben zwei
+Wege offen: Ein Akteur, der je Durchlauf eine Generation rotiert, kann das Schließen bis zur Grenze von 32 Durchläufen
+treiben, und eine Flut von Anfragen mit dem ersetzten Token kann einen Deadlock herbeiführen, in dem die Datenbank eine
+Transaktion abbricht; in der Klammer wird nichts wiederholt. **Beides ist laut**, keine Sitzung bleibt still offen, und
+die Last erzeugt der Angreifer selbst. Der Owner hat das am 21.11.2026 als Restrisiko angenommen.
+
+**Rat:** Wenn der Schutz gegen Token-Diebstahl unter Last zählt, legen Sie Refresh und Abmelden **nicht** in eine eigene
+Transaktion; schreiben Sie die Audit-Zeile danach. Das Muster bleibt erlaubt. Unter MySQL/InnoDB (REPEATABLE READ als
+Standard) liest die Zählung den Snapshot der Transaktion und kann dort still null ergeben: Das Abmelden braucht dort READ
+COMMITTED oder keine Transaktion der Anwendung. Unter PostgreSQL (REPEATABLE READ, SERIALIZABLE) und SQL Server (SNAPSHOT)
+erwarten wir bei einer Überschneidung einen Fehler der Datenbank, also lautes Scheitern.
+
+**Getestet ist nur SQLite**, einen Schreiber nach dem anderen. Die Reihenfolge der Schritte ist belegt, das Verhalten einer
+Datenbank mit Zeilenversionen nicht; PostgreSQL-Tests (Testcontainers) und ein Test, der diese Grenze nachstellt, kommen
+vor Release 7.2.0 in einem eigenen Gate.
+
+**Zwei Personen-Identitäten in einer Anfrage:** `ICurrentPrincipal` ist die erste. Ein Abmelden beendet nur die Sitzungen
+und sperrt nur die Access-Tokens dieser Person; die zweite Person meldet sich mit einer eigenen Anfrage ab.
 
 ## Was sich nicht ändert
 

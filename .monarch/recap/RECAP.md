@@ -1,10 +1,10 @@
 # RECAP
 
 ## Stand
-- Zeitpunkt: 2026-11-21T11:28:12Z
+- Zeitpunkt: 2026-11-21T11:43:49Z
 - Plan: Pro
-- Mana 5h: 45% (Limit 90%, Reset 2026-11-21T15:00:00Z)
-- Mana 7d: 27% (Limit 96%, Reset 2026-11-25T11:00:00Z)
+- Mana 5h: 59% (Limit 90%, Reset 2026-11-21T15:00:00Z)
+- Mana 7d: 29% (Limit 96%, Reset 2026-11-25T11:00:00Z)
 - Limits: 5h 90%, 7d 96% (plan default)
 
 ## Aktiv
@@ -25,8 +25,7 @@
 - Q-0070: MIGRATION.md (Bruch, Weg, IPrincipalFactory, 401 bei zweiter Identität, eigener Code), README, Befund unter docs/befunde/; kein Release, keine Versionserhöhung
 
 ## Nächster konkreter Schritt
-Schmale Warden-Prüfung F4-F6 (ADR-0008 Fassung 5, Head 00c23fc) lesen: PR #71 Kommentar 'Warden: schmale Prüfung F4–F6'. Bei approve: PR-Text auf Fassung 5, dann TDD Q-0016 (Knight, Sonnet), Q-0071, Q-0017, Q-0018, Gate-Schlussrunde Warden, gate merge, Aufräumen, Kurzbericht, STOPP. KEINE Release-Vorbereitung 7.2.0 (Owner 21.11.: erst nach eigenem Gate mit PostgreSQL-Beweis und F4-Test). Nacharbeit-Issue G-0006: PG-Gate vor 7.2.0 mit F4-Test (rot -> F4 technisch schließen, eigene Verbindung), N5, Release-Gate-Widerrufsschritt.
+Knight Q-0016 (Sonnet) läuft/lief in der Worktree, ohne Commit: Ergebnis prüfen (git status/diff, dotnet test Category=Unit), Kritiker, quest submit Q-0016, Commit, dann Q-0071, Q-0017, Q-0018 (je Knight Sonnet), PR-Text auf Fassung 5 (zwischen zwei Quests, ohne aktive Quest), Gate-Schlussrunde Warden (Opus), gate merge, Nacharbeit-Issue, Aufräumen, Kurzbericht, STOPP. KEINE Release-Vorbereitung 7.2.0. ADR-0008 freigegeben: https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7062043960 (Head fe35af6).
 
 ## Offene Entscheidungen
-- Kein approve der schmalen Prüfung F4-F6: Frage an den User (Regel 3).
 - Q-0026 steht weiter in G-0006 (gate show); blockiert es gate merge: stoppen und den User fragen.

@@ -844,6 +844,15 @@ alarm — reported as `RotatedWithinGrace`, so a run of them on one session is
 still visible. It is a deliberate concession, and bounded: inside it a replay
 genuinely cannot be told from a second tab.
 
+The window ends with the session, though. A sibling exists only while the newest
+token of the chain the presented token belongs to is still open: after a
+sign-out, or once the cap on concurrent tokens has closed that newest token, the
+old token gets `Revoked` and nothing else, however many times it is presented,
+and past the session's ceiling it gets `SessionExpired`. With the default cap of
+five tokens per session, more than five tabs presenting one old token at the same
+moment can therefore see `Revoked` where they used to see a token that the cap
+closed again a moment later.
+
 `AbsoluteSessionLifetime` (30 days) is the ceiling. Without it, refreshing
 forever keeps a session alive forever, which is exactly what an undetected
 stolen token wants.
@@ -871,7 +880,63 @@ that did not happen.
 
 Rotation is still one atomic step whichever way it runs. The store never rolls a
 caller's transaction back; where a concurrent refresh has already taken the row,
-it says so and leaves the caller's work alone.
+it says so and leaves the caller's work alone. A surrounding
+`System.Transactions.TransactionScope` counts as the caller's transaction too:
+the store opens none of its own inside it.
+
+What the bracket costs a **sign-out**, and what it does not:
+
+- **Locks are held until your commit.** A refresh inside the bracket locks the
+  token it builds on (the one it rotates, or for a second presentation the newest
+  token of its chain) until the transaction ends, and a sign-out of that
+  session on another connection waits for it, then closes whatever the refresh
+  wrote. A long transaction delays a sign-out; it does not open a window in which
+  a signed-out session can still be refreshed.
+- **The isolation level is yours.** The store does not change it. Under
+  PostgreSQL `REPEATABLE READ` or `SERIALIZABLE`, and SQL Server `SNAPSHOT`, an
+  overlap is expected to end in an error of the database, a loud failure and
+  never a silently open session; that is expected, not tested. Under
+  MySQL/InnoDB, where `REPEATABLE READ` is the default, the count that ends a
+  sign-out reads the snapshot of your transaction and can come out as zero when
+  it should not. Sign out there under `READ COMMITTED`, or outside a transaction
+  of your own.
+- **Ending a session writes a marker row**, one per session, into the same
+  table (a closed, expired token nobody can present). Refreshes read it and write
+  nothing once it is there; that is what lets a sign-out finish against a client
+  that keeps rotating. In a bracket of your own that row is only visible to other
+  connections after your commit, and until then the sign-out has no such
+  protection.
+- **So a sign-out, and a refresh whose replay detection must close the session,
+  can fail in your bracket under load.** A client that rotates a generation per
+  pass can keep the sign-out running up to its limit of 32 passes, after which it
+  throws; a flood of requests with the replaced token can make the database abort
+  a transaction, and inside your bracket nothing is repeated. Both are loud, the
+  session may be left open, and signing out again is safe. **The load that does
+  it is produced by whoever you are signing out**, which is why it is worth
+  avoiding rather than tuning around.
+
+Our advice, therefore: where protection against token theft matters under load,
+do not put a refresh or a sign-out in a transaction of your own. Call them first,
+and **write the audit row afterwards** in a transaction that holds nothing of the
+session's:
+
+```csharp
+await sessions.SignOutEverywhereAsync(subject, ct);
+
+await using var transaction = await db.Database.BeginTransactionAsync(ct);
+db.AuditEvents.Add(AuditEvent.SignedOut(subject));
+await db.SaveChangesAsync(ct);
+await transaction.CommitAsync(ct);
+```
+
+The bracket above stays allowed, and for a refresh that is only ever a second
+tab it behaves as described. This is a known residual risk, accepted as such; the
+store is tested against SQLite only, and a PostgreSQL run, with a test that
+reproduces it, comes before 7.2.0 is released.
+
+With two person identities on one request (two person schemes), the current
+principal is the first of them: `SignOutEverywhereAsync` ends that person's
+sessions only. The other person signs out with a request of their own.
 
 ### Where the refresh token belongs in a browser
 
