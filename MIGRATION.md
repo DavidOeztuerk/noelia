@@ -167,8 +167,9 @@ deren Commit sichtbar; vorher sehen andere Verbindungen sie nicht. Das betrifft 
 eines Refresh in der Klammer (das Muster im README, „Inside a transaction you already have“). Bis zum Commit bleiben zwei
 Wege offen: Ein Akteur, der je Durchlauf eine Generation rotiert, kann das Schließen bis zur Grenze von 32 Durchläufen
 treiben, und eine Flut von Anfragen mit dem ersetzten Token kann einen Deadlock herbeiführen, in dem die Datenbank eine
-Transaktion abbricht; in der Klammer wird nichts wiederholt. **Beides ist laut**, keine Sitzung bleibt still offen, und
-die Last erzeugt der Angreifer selbst. Der Owner hat das am 21.11.2026 als Restrisiko angenommen.
+Transaktion abbricht; in der Klammer wird nichts wiederholt. **Beides ist laut**: Das Abmelden scheitert mit einer
+Ausnahme, aber die Sitzung kann dabei offen bleiben (auf PostgreSQL nachgewiesen, siehe unten). Die
+Last erzeugt der Angreifer selbst. Der Owner hat das am 21.11.2026 als Restrisiko angenommen.
 
 **Rat:** Wenn der Schutz gegen Token-Diebstahl unter Last zählt, legen Sie Refresh und Abmelden **nicht** in eine eigene
 Transaktion; schreiben Sie die Audit-Zeile danach. Das Muster bleibt erlaubt. Unter MySQL/InnoDB (REPEATABLE READ als
@@ -176,9 +177,18 @@ Standard) liest die Zählung den Snapshot der Transaktion und kann dort still nu
 COMMITTED oder keine Transaktion der Anwendung. Unter PostgreSQL (REPEATABLE READ, SERIALIZABLE) und SQL Server (SNAPSHOT)
 erwarten wir bei einer Überschneidung einen Fehler der Datenbank, also lautes Scheitern.
 
-**Getestet ist nur SQLite**, einen Schreiber nach dem anderen. Die Reihenfolge der Schritte ist belegt, das Verhalten einer
-Datenbank mit Zeilenversionen nicht; PostgreSQL-Tests (Testcontainers) und ein Test, der diese Grenze nachstellt, kommen
-vor Release 7.2.0 in einem eigenen Gate.
+**Auf PostgreSQL nachgewiesen (G-0020, PostgreSQL 17, `docs/befunde/postgresql-beweis-adr-0008.md`):** Die Grenze besteht
+tatsächlich. In einer Transaktion der Anwendung (Abmelden und Wiedergebrauch unter `BeginTransaction` und `TransactionScope`,
+`CloseAllSessionsAsync` nur unter `BeginTransaction` geprüft) bricht die Datenbank bei dem Deadlock die Transaktion der Anwendung ab: Das Abmelden wirft
+(SQLSTATE 40P01), der Rollback nimmt die Markierung mit, und eine gleichzeitige Grace-Anfrage lässt ein Geschwister offen,
+**nach dem Abmelden ist also eine Sitzung offen**. Gegen einen Akteur, der je Durchlauf eine Generation rotiert, wirft das
+Schließen nach 32 Durchläufen, und der neueste Token bleibt offen. Ohne Transaktion der Anwendung sind beide Fälle
+beherrscht (der Store wiederholt, die Markierung beendet das Schließen nach höchstens zwei Durchläufen). Der Owner hat am
+22.11.2026 entschieden, das Restrisiko nicht technisch zu schließen: Es trifft nur Anwendungen, die den Store in ihrer
+eigenen Transaktion nutzen, und davon rät das README ab. Der Rat oben gilt. Ein späterer Anlauf ist Issue #75.
+
+**Auf SQL Server ungeprüft** (Issue #74), ebenso MySQL/InnoDB. Die Sperr-Annahmen aus ADR-0008 sind auf PostgreSQL belegt;
+für SQL Server gilt weiter „erwartet, nicht getestet“.
 
 **Zwei Personen-Identitäten in einer Anfrage:** `ICurrentPrincipal` ist die erste. Ein Abmelden beendet nur die Sitzungen
 und sperrt nur die Access-Tokens dieser Person; die zweite Person meldet sich mit einer eigenen Anfrage ab.

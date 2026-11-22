@@ -939,9 +939,15 @@ await transaction.CommitAsync(ct);
 ```
 
 The bracket above stays allowed, and for a refresh that is only ever a second
-tab it behaves as described. This is a known residual risk, accepted as such; the
-store is tested against SQLite only, and a PostgreSQL run, with a test that
-reproduces it, comes before 7.2.0 is released.
+tab it behaves as described. This is a known residual risk, accepted as such, and
+it is **demonstrated on PostgreSQL 17** (`docs/befunde/postgresql-beweis-adr-0008.md`):
+inside such a bracket the database aborts the application's transaction on a
+deadlock, the rollback takes the marker with it, and a refresh that is running at
+that moment leaves a session open after the sign-out threw; against a client that
+rotates a generation per pass, the sign-out throws after 32 passes and the newest
+token stays open. Outside a bracket of your own the same cases are handled (the
+store repeats the aborted statement, and the marker ends the sign-out within two
+passes). **On SQL Server this is untested** (issue #74); so is MySQL/InnoDB.
 
 With two person identities on one request (two person schemes), the current
 principal is the first of them: `SignOutEverywhereAsync` ends that person's

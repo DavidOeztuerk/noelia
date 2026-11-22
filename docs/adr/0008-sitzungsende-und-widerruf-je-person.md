@@ -1,6 +1,6 @@
 # ADR-0008 — Sitzungsende und Widerruf gelten je angemeldeter Person
 
-**Status:** Freigegeben, Fassung 5 (Fassung 3: Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190), dazu der Fix von N1 aus der [Delta-Runde](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373); Fassung 4: Markierungszeile nach der [schmalen Prüfung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056847467) und dem Owner-Entscheid F1; Fassung 5: F4 bis F6 nach der [Prüfung der Markierung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7061382243) und dem Owner-Entscheid F4). **Freigegeben** vom Warden am 21.11. ([approve](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7062043960)); die Minors daraus (M1–M4, K7, K8) sind eingearbeitet. Release 7.2.0 erst nach einem eigenen Gate mit PostgreSQL-Beweis (Owner 21.11.). · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
+**Status:** Freigegeben, Fassung 5, **auf PostgreSQL geprüft (Nachtrag 22.11.2026 am Ende, F4 rot und als Restrisiko angenommen)** (Fassung 3: Fassung 2 nach Warden-Runde 1, [Review](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7054852190), dazu der Fix von N1 aus der [Delta-Runde](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056522373); Fassung 4: Markierungszeile nach der [schmalen Prüfung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7056847467) und dem Owner-Entscheid F1; Fassung 5: F4 bis F6 nach der [Prüfung der Markierung](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7061382243) und dem Owner-Entscheid F4). **Freigegeben** vom Warden am 21.11. ([approve](https://github.com/DavidOeztuerk/noelia/pull/71#issuecomment-7062043960)); die Minors daraus (M1–M4, K7, K8) sind eingearbeitet. Release 7.2.0 erst nach einem eigenen Gate mit PostgreSQL-Beweis (Owner 21.11.). · **Datum:** 2026-11-21 · **Gate:** G-0006 (Rank A, Anmeldung und Sitzung) · **Quests:** Q-0016 (Grace-Fenster), Q-0071 (Warnung Shared Secret), Q-0017 (Demo), Q-0018 (Tests) · **Issues:** #35, #36, #37 · **Baut auf:** ADR-0007 (Rechte, Rollen und Nutzer-ID nur aus angemeldeten Identitäten), ADR-0003 (Dienst-Tokens hinter der Tür) · **Ziel:** Minor 7.2.0, **keine** neue öffentliche API. Dieses Gate veröffentlicht nichts.
 
 Minor, weil 7.2.0 schon die Änderungen aus G-0018 trägt; der Fix allein wäre ein Patch. Der Text von Q-0016 sagt noch „Patch-Release“; das ist durch die Owner-Entscheide vom 21.11. überholt.
 
@@ -706,3 +706,37 @@ läuft und `gate_plan` den Boss nicht überschreibt; das Ergebnis heißt `Revoke
   7.2.0.
 - Die Demo zeigt Widerruf in jedem Token-lesenden Dienst; das Release-Gate sieht ihn über S3, nicht im laufenden Stack.
 - G-0019 entfernt in 8.0 den stillen Fallback, mit derselben Abgrenzung von „still“.
+
+## Nachtrag 22.11.2026: auf PostgreSQL geprüft (G-0020)
+
+Der Beweis, den die Owner-Entscheide vom 21.11.2026 verlangen (Wortlaut oben unverändert), ist erbracht:
+`docs/befunde/postgresql-beweis-adr-0008.md`, PostgreSQL 17 über Testcontainers (`Category=Integration`), Issue #73.
+
+- **Geprüft und grün:** Die Conformance-Suite und die Augenblick-Tests dieses ADR laufen gegen PostgreSQL wie gegen
+  SQLite. Damit gelten die Annahmen (a) bis (c) der Entscheidung 3 (Sperren halten bis zum Commit, ein wartendes Update
+  prüft seine Bedingung neu, eine neue Anweisung sieht frühere Commits) auf PostgreSQL als belegt. Ohne Transaktion der
+  Anwendung schließt das Abmelden auch gegen einen Deadlock (Kontrolle: der Store wiederholt) und gegen einen Akteur, der
+  je Durchlauf eine Generation rotiert (die Markierung beendet es nach höchstens zwei Durchläufen). Der Markierungskonflikt
+  verhält sich wie in Entscheidung 3 beschrieben (`BeginTransaction`: Savepoint fängt ihn ab; `TransactionScope`: die
+  Transaktion bricht ab, 25P02 danach, laut). Rotation und Grace in einer `TransactionScope` schreiben mit dem Scope fest
+  und rollen mit ihm zurück.
+- **F4 war rot, das Restrisiko bleibt angenommen.** In einer Transaktion der Anwendung (Abmelden und
+  Wiedergebrauch unter `BeginTransaction` und `TransactionScope`, `CloseAllSessionsAsync` nur unter `BeginTransaction`
+  geprüft) bricht PostgreSQL bei dem Deadlock die
+  Transaktion der Anwendung ab: Das Abmelden wirft (40P01), der Rollback nimmt die Markierung mit, und die gleichzeitige
+  Grace-Anfrage schreibt ihr Geschwister fest, **nach dem Abmelden ist eine Sitzung offen**. Mit einem Akteur, der je
+  Durchlauf rotiert, wirft das Schließen nach 32 Durchläufen und die jüngste Zeile bleibt offen. Beides trat so ein, wie
+  die Grenze in Entscheidung 3 es beschreibt. Der Owner hat am 22.11.2026 entschieden, F4 nicht technisch zu schließen
+  (Wortlaut in ADR-0009): Es trifft nur Anwendungen, die den Store in ihrer eigenen Transaktion nutzen, davon rät das
+  README seit G-0006 ab, und keine unserer Anwendungen tut es. Der Rat im README gilt; README und `MIGRATION.md` nennen
+  das Restrisiko als nachgewiesen. ADR-0009 (die eigene Verbindung) ist verworfen, die roten Tests sind in Commit
+  `4abaf8b` und im Befund festgehalten, ein späterer Anlauf ist Issue #75.
+- **N5 ist behoben (Q-0076):** `CapAsync` schließt nur noch Zeilen, die beim Update noch offen sind. Der Test
+  `N5_ACapAfterAConcurrentRotation_KeepsTheRotationTime` war rot und ist unverändert grün.
+- **Index `(SubjectId, RevokedAt)`:** Auf PostgreSQL nicht prüfbar. Der wartende Durchlauf des Schließens filtert über
+  `SessionId` (`CloseAsync`), der Index trägt nur den lesenden Schritt 1 von `CloseAllSessionsAsync`; unter MVCC liest
+  jede Anweisung je Zeile genau eine Version. Der Hinweis in „Nach der Freigabe eingearbeitet“ (Wanderung einer Zeile im
+  Index unter sperrendem READ COMMITTED) bleibt eine Frage an SQL Server.
+- **Offen:** SQL Server (mit und ohne `READ_COMMITTED_SNAPSHOT`) einschließlich des zweiten Zyklus unter sperrendem READ
+  COMMITTED, Issue #74. README und `MIGRATION.md` sagen bis dahin: auf SQL Server ungeprüft. Weiter ungeprüft: MySQL/InnoDB,
+  REPEATABLE READ und SERIALIZABLE unter PostgreSQL, ein Last-Test.
