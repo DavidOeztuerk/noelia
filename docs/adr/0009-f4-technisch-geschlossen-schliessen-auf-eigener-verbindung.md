@@ -1,8 +1,23 @@
 # ADR-0009: Abmelden und Wiedergebrauch in einer Transaktion der Anwendung (F4 technisch geschlossen)
 
-**Status:** Entwurf, Fassung 1 (Design-Runde offen) · **Datum:** 2026-11-21 · **Gate:** G-0020 (Rank A) · **Quests:**
-Q-0074 (dieses Design), Q-0075 (Umsetzung), Q-0076 (N5) · **Baut auf:** ADR-0008 (Sitzungsende und Widerruf je Person),
-Befund `docs/befunde/postgresql-beweis-adr-0008.md` · **Ziel:** Minor 7.2.0, **keine neue öffentliche API**.
+**Status:** **Verworfen (Owner 22.11.2026)**, Entwurf Fassung 1, nicht freigegeben, keine weitere Design-Runde ·
+**Datum:** 2026-11-21 · **Gate:** G-0020 (Rank A) · **Quests:** Q-0074 (dieses Design) und Q-0075 (Umsetzung), beide
+abgebrochen; Q-0076 (N5) ist davon unabhängig und umgesetzt · **Baut auf:** ADR-0008 (Sitzungsende und Widerruf je
+Person), Befund `docs/befunde/postgresql-beweis-adr-0008.md` · **Ziel war:** Minor 7.2.0, **keine neue öffentliche API**.
+
+## Verworfen (Owner-Entscheid 22.11.2026)
+
+Wortlaut aus der Owner-Nachricht dieser Sitzung (22.11.2026): „Die technische Schließung von F4 wird gestoppt. Grund: F4
+trifft nur Anwendungen, die unseren EF-Store in ihrer eigenen Transaktion nutzen. Davon rät das README seit G-0006 ab,
+und keine unserer Anwendungen tut das. Der Aufwand steht in keinem Verhältnis.“
+
+Folge: F4 bleibt ein **angenommenes und auf PostgreSQL nachgewiesenes Restrisiko** (ADR-0008, Nachtrag vom 22.11.2026).
+Der Rat im README gilt. Die roten Tests, die den Fall nachstellen, liegen in Commit `4abaf8b` auf dem Branch
+`monarch/G-0020-postgresql-beweis` und im Befund; ein späterer Anlauf ist Issue #75 (ohne Termin). Dieser Text bleibt als
+Entwurf erhalten, weil er die Optionen und die Vorgaben des Owners festhält; er ist weder von der Design-Runde des
+Wardens freigegeben noch Teil der Entscheidung. **Der Text darunter ist im Stand des Entwurfs vom 21.11.2026**: Er
+spricht von den roten F4-Tests in der Gegenwart, obwohl sie nur noch in Commit `4abaf8b` liegen, und die Zeilenangaben
+zum Store gelten für den Stand vor dem N5-Fix. Die Warden-Befunde der ersten Runde (M1 bis M5) stehen in Issue #75.
 
 ## Owner-Entscheide (wörtlich)
 

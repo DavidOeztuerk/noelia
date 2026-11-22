@@ -1,7 +1,9 @@
 # PostgreSQL-Beweis für ADR-0008
 
-**Gate:** G-0020 (Issue #73, Nacharbeit G-0006) · **Art:** Beweis, kein Fix. Unter `src/` ändert sich in diesem Gate
-nichts, die Version bleibt 7.1.1. · **Stand:** Ergebnis liegt vor, 7 Tests rot, Gate angehalten (Owner entscheidet); das Design (Fassung 3, Warden: approve) steht unverändert darunter.
+**Gate:** G-0020 (Issue #73, Nacharbeit G-0006) · **Art:** Beweis; unter `src/` ändert sich nur N5 (Q-0076,
+eine Bedingung in `CapAsync`), die Version bleibt 7.1.1. · **Stand (22.11.2026):** abgeschlossen. F4 ist auf PostgreSQL
+nachgewiesen und bleibt als Restrisiko angenommen (Owner 22.11.), N5 ist behoben; das Design (Fassung 3, Warden: approve)
+steht unverändert darunter, der Befund als Ergebnis des Laufs vom 21.11.
 
 ## In einfacher Sprache
 
@@ -159,12 +161,15 @@ mindestens 2 s je Deadlock-Fall (`deadlock_timeout` von C); ein Lauf mit Opfer G
 - Last-Test (siehe oben).
 - Index-Wanderung unter sperrendem READ COMMITTED (siehe §3): nur auf SQL Server prüfbar.
 
-## Befund (21.11.2026): Gate angehalten, 7 Tests rot
+## Befund (Lauf vom 21.11.2026): 7 Tests rot, danach entschieden am 22.11.2026
 
 Alle Läufe gegen `postgres:17-alpine`, fünfmal hintereinander mit gleichem Ergebnis (kein Wechsel zwischen grün und
-rot, keine Aufbaufehler-Meldung). Unter `src/` hat sich nichts geändert, die Tests sind nicht abgeschwächt. Nach der
-Vorgabe des Owners wird nicht nach `develop` gemergt, und der ADR-0008-Nachtrag „auf PostgreSQL geprüft" wird nicht
-geschrieben.
+rot, keine Aufbaufehler-Meldung). Zum Zeitpunkt des Laufs hatte sich unter `src/` nichts geändert, und die Tests waren
+nicht abgeschwächt. **Was daraus wurde (Owner, 22.11.2026):** F4 wird nicht technisch geschlossen (ADR-0009 verworfen,
+Issue #75 ohne Termin); die 6 roten F4-Tests mit Klammer (5 Deadlock-Fälle, Generationen) sind nicht nach `develop`
+gekommen und liegen in Commit `4abaf8b` auf dem Branch `monarch/G-0020-postgresql-beweis`; N5 ist behoben (Q-0076), der
+Test ist unverändert grün; ADR-0008 hat den Nachtrag „auf PostgreSQL geprüft“. Die folgenden Abschnitte geben den Lauf
+vom 21.11. wieder.
 
 ### Grün
 
@@ -221,12 +226,15 @@ the cap at t_cap > t_rot must not give it more, but found ConsumeOutcome.Rotated
 
 Die Kappung überschreibt `RevokedAt` einer zwischenzeitlich rotierten Zeile; ihr Grace-Fenster verschiebt sich.
 
-### Folgen (Entscheidung des Owners)
+### Folgen (Entscheidung des Owners, 22.11.2026)
 
-- F4 rot führt nach der Vorgabe zu Punkt 6c (technisch schließen, etwa Markierung über eine eigene Verbindung). Die
-  roten F4-Tests sind der TDD-Start. Der Beweis stützt die Annahme von ADR-0008 nicht, dass nach einem Abbruch der
-  Klammer nur ein lautes Scheitern bleibt: Das Abmelden wirft zwar, aber die Sitzung ist danach offen und fortgeführt.
-- N5 rot führt zu einem Fix vor 7.2.0 (`RevokedAt == null && ReplacedBy == null` in die Bedingung von `CapAsync`).
+- **F4:** nicht technisch geschlossen. Grund (Owner): F4 trifft nur Anwendungen, die den EF-Store in ihrer eigenen
+  Transaktion nutzen; davon rät das README seit G-0006 ab, und keine unserer Anwendungen tut das. ADR-0009 ist
+  verworfen. Der Beweis zeigt, dass nach einem Abbruch der Klammer nicht nur „laut gescheitert“ bleibt: Das Abmelden wirft
+  zwar, aber die Sitzung ist danach offen und fortgeführt. Das steht jetzt so in README, `MIGRATION.md` und im Nachtrag
+  von ADR-0008. Ein späterer Anlauf: Issue #75 (mit den Warden-Befunden M1 bis M5 zum verworfenen Entwurf).
+- **N5:** behoben in Q-0076 (`RevokedAt == null && ReplacedBy == null` in der Bedingung von `CapAsync`); der Test
+  `N5_ACapAfterAConcurrentRotation_KeepsTheRotationTime` ist ohne Änderung grün.
 
 ### Was für SQL Server offen bleibt
 

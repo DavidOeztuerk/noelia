@@ -14,18 +14,6 @@ namespace Noelia.Infrastructure.Tests.Security.Sessions;
 // bracket has ended, committed or not.
 public sealed partial class PostgresRefreshTokenStoreProofTests
 {
-    public enum Closing
-    {
-        /// <summary><c>CloseSessionAsync</c>.</summary>
-        SignOut,
-
-        /// <summary>A rotated token presented after its grace: <c>TryConsumeAsync</c> closes the session.</summary>
-        Theft,
-
-        /// <summary><c>CloseAllSessionsAsync</c>.</summary>
-        SignOutAll
-    }
-
     // ---- the deadlock ----
     //
     // The session has an older open sibling R and a chain T0 -> T1 -> E (E open),
@@ -148,70 +136,15 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
         }
     }
 
-    [Theory]
-    [InlineData(Closing.SignOut, Bracket.BeginTransaction)]
-    [InlineData(Closing.SignOut, Bracket.TransactionScope)]
-    [InlineData(Closing.Theft, Bracket.BeginTransaction)]
-    [InlineData(Closing.Theft, Bracket.TransactionScope)]
-    [InlineData(Closing.SignOutAll, Bracket.BeginTransaction)]
-    public Task F4_Deadlock_CloseInTheCallersTransaction_LeavesNothingOpen(Closing closing, Bracket bracket) =>
-        Bounded(async () =>
-        {
-            await ArrangeAsync();
-            var world = await BuildWorldAsync();
-            var before = await DeadlocksAsync();
-
-            var (g, gate, gTask) = await StartGraceHolderAsync(world);
-
-            // C: the application's transaction, its close at a time after G's.
-            var c = NewClient("-c deadlock_timeout=2s");
-            var backendId = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var closeAt = Now.AddSeconds(101);
-            Func<Task<long>> call = closing switch
-            {
-                Closing.SignOut => async () => await c.Store.CloseSessionAsync(world.Session, closeAt),
-                Closing.SignOutAll => async () => await c.Store.CloseAllSessionsAsync(world.Subject, closeAt),
-                _ => async () =>
-                {
-                    var result = await PresentAsync(c, world.Session, world.Subject, world.T0, closeAt);
-                    return result.Outcome == ConsumeOutcome.ReuseDetected
-                        ? 1
-                        : throw new SetupFailure($"the old token was answered {result.Outcome}, not ReuseDetected");
-                }
-            };
-            var cTask = Task.Run(() => InBracketAsync(c, bracket, call, backendId));
-
-            var pidC = (await Task.WhenAny(backendId.Task, cTask, Task.Delay(Patience))) == backendId.Task
-                ? backendId.Task.Result
-                : throw new SetupFailure("C did not report its backend id inside the bracket");
-
-            await WaitUntilBlockedByAsync(pidC, g.Pid, "C waits for G (pg_blocking_pids)", cTask);
-            await WaitUntilAsync(async () => await IsHeldAsync(world.R), "C holds R", cTask);
-
-            // The state is there: let G go, at once.
-            gate.Release();
-            await AwaitCycleAsync(cTask, gTask, pidC, g.Pid);
-
-            var outcome = await cTask;
-            var gDescription = Describe(gTask);
-
-            if (outcome.SqlState != "40P01" || gTask.IsFaulted)
-            {
-                throw new SetupFailure(
-                    $"C must fail with 40P01 and G must not; C {outcome}; G {gDescription}");
-            }
-
-            await ExpectOneDeadlockMoreAsync(before, c, g);
-
-            var open = await OpenRowsAsync(world.Session);
-            var rows = await DumpAsync(world.Session);
-            open.Should().Be(
-                0,
-                "after the sign-out nothing of the session may be open; C {0}; G {1}; rows of S: {2}",
-                outcome.ToString(),
-                gDescription,
-                rows);
-        });
+    // The test of this arrangement with a bracket of the application
+    // (F4_Deadlock_CloseInTheCallersTransaction_LeavesNothingOpen, five cases)
+    // is red on PostgreSQL: the database aborts the application's transaction,
+    // the rollback takes the marker with it, and the grace request's sibling
+    // stays open. The owner accepted that as a residual risk (22.11.2026, ADR-0008
+    // addendum), so it is not kept here; it is in commit 4abaf8b on the branch
+    // monarch/G-0020-postgresql-beweis, in docs/befunde/postgresql-beweis-adr-0008.md
+    // and in issue #75. Below is the control that shows the arrangement does
+    // reach the cycle.
 
     /// <summary>
     /// The control: the same arrangement without a bracket. The marker is
@@ -307,78 +240,10 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
         return new Round(gate, task, next);
     }
 
-    [Fact]
-    public Task F4_Generations_CloseInTheCallersTransaction_LeavesNothingOpen() =>
-        Bounded(async () =>
-        {
-            await ArrangeAsync();
-
-            var session = SessionId.New();
-            var subject = SubjectId.New();
-            var first = NewToken();
-            await CreateAsync(session, subject, first, Now, "O1");
-
-            if (await OpenRowsAsync(session) != 1)
-            {
-                throw new SetupFailure("the session must have exactly one open row");
-            }
-
-            var a = NewClient();
-            var c = NewClient();
-            var held = new ConcurrentDictionary<int, TaskCompletionSource>();
-            var pass = 0;
-            c.Hooks.Before = async command =>
-            {
-                if (IsClosePass(command))
-                {
-                    var n = Interlocked.Increment(ref pass);
-                    await held.GetOrAdd(n, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).Task
-                        .WaitAsync(TimeSpan.FromSeconds(20));
-                }
-            };
-
-            var round = await StartRoundAsync(a, session, subject, first, 1, held);
-
-            var backendId = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var cTask = Task.Run(() => InBracketAsync(
-                c, Bracket.BeginTransaction, async () => await c.Store.CloseSessionAsync(session, Now.AddSeconds(1000)), backendId));
-
-            var pidC = (await Task.WhenAny(backendId.Task, cTask, Task.Delay(Patience))) == backendId.Task
-                ? backendId.Task.Result
-                : throw new SetupFailure("C did not report its backend id inside the bracket");
-
-            for (var n = 1; n <= 32; n++)
-            {
-                await WaitUntilBlockedByAsync(pidC, a.Pid, $"C blocks on O{n} held by A (pass {n})", cTask);
-
-                if (n == 1 && await RowsWithIdAsync(MarkerId(session.Value)) != 0)
-                {
-                    throw new SetupFailure("the marker is visible to other connections inside the bracket");
-                }
-
-                round.Gate.Release();
-                var answered = await BoundedAsync(round.Task, $"A, round {n}");
-                if (answered.Outcome != ConsumeOutcome.Rotated)
-                {
-                    throw new SetupFailure($"A is answered {answered.Outcome} in round {n}, not Rotated");
-                }
-
-                if (n < 32)
-                {
-                    round = await StartRoundAsync(a, session, subject, round.Next, n + 1, held);
-                }
-            }
-
-            var outcome = await BoundedAsync(cTask, "C after pass 32");
-            var open = await OpenRowsAsync(session);
-
-            open.Should().Be(
-                0,
-                "after the sign-out nothing of the session may be open; C {0}; passes sent by C: {1}; rows of S: {2}",
-                outcome.ToString(),
-                pass,
-                await DumpAsync(session));
-        });
+    // The test of this arrangement with a bracket of the application
+    // (F4_Generations_CloseInTheCallersTransaction_LeavesNothingOpen) is red on
+    // PostgreSQL: the close throws after 32 passes and the newest row stays open.
+    // See the note at the deadlock control above for where it is kept.
 
     /// <summary>
     /// The control: without a bracket the marker is committed before pass 1, A
