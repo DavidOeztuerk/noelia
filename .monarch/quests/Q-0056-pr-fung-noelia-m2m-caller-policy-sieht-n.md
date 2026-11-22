@@ -3,7 +3,7 @@ id: Q-0056
 gate: G-0017
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - "Design-ADR in einfacher Sprache im PR, Warden (Opus) gibt frei"
   - "Roter Test zuerst: Bericht nach echtem Start zeigt für Aussteller Pass und für reinen Empfänger die tatsächliche Türenzahl, nie Pass über 0 Türen"

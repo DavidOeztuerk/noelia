@@ -3,7 +3,7 @@ id: Q-0060
 gate: G-0017
 kind: main
 rank: B
-state: in_review
+state: cleared
 dod:
   - "Skript in demo/eng erzeugt eine Wegwerf-.env (nur Wegwerf-Schlüssel, gitignoriert)"
   - "Skill nennt den Schritt und docker compose down -v danach"

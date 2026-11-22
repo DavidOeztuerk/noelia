@@ -3,7 +3,7 @@ id: Q-0061
 gate: G-0017
 kind: main
 rank: B
-state: in_review
+state: cleared
 dod:
   - "CLAUDE.md, Skill und demo/README.md sagen dasselbe"
   - "Eindeutige Kandidatennummer und eigener Feed oder eigener Paketordner; rm -rf ~/.nuget/packages/noelia.* entfällt"

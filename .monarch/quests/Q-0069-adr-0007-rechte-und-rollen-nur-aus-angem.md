@@ -3,7 +3,7 @@ id: Q-0069
 gate: G-0018
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - "ADR-0007 mit Owner-Entscheid vom 20.11.2026 wörtlich zitiert"
   - "Einfache Sprache, Befund (Fälle A/B/C), Entscheidung, gemeinsamer Helfer, Widerruf und Prüfung je Datensatz, Dienst-Token-Claims, Migrationsweg für IClaimsTransformation"

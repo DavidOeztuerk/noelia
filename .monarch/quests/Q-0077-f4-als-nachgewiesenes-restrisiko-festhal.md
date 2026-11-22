@@ -3,7 +3,7 @@ id: Q-0077
 gate: G-0020
 kind: main
 rank: A
-state: in_review
+state: cleared
 dod:
   - "ADR-0009 hat den Status Verworfen (Owner 22.11.) mit dem Grund; ADR-0008 hat den Nachtrag 'auf PostgreSQL geprüft' (F4 rot, Restrisiko angenommen, Rat im README gilt), Wortlaut der Owner-Entscheide unverändert"
   - "README und MIGRATION nennen F4 als auf PostgreSQL nachgewiesen und SQL Server als ungeprüft"
