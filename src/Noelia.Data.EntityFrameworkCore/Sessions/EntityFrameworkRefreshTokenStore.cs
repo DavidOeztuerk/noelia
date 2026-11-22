@@ -705,11 +705,8 @@ public sealed class EntityFrameworkRefreshTokenStore<TContext>(TContext context)
             return;
         }
 
-        // Only rows that are still open. Between the read above and this update
-        // a surplus row may have been rotated (or closed) by someone else; its
-        // RevokedAt is then the moment of that rotation, and the grace window of
-        // its token counts from it. Writing the cap's time over it would move the
-        // window.
+        // Only rows still open: a surplus row rotated since the read keeps its
+        // RevokedAt, which its grace window counts from.
         await Tokens
             .Where(token => surplus.Contains(token.Id)
                             && token.RevokedAt == null

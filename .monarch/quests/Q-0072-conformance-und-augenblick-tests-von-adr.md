@@ -13,5 +13,6 @@ scope:
   exclude: ["src/**"]
 estimate: { session_pct: 12, weekly_pct: 3, gold_usd: 0 }
 boss: "dotnet test --filter Category=Integration gegen PostgreSQL: Ergebnis je Test festgehalten, rote Tests unverändert gemeldet"
+board: { pr: 76 }
 ---
 # Conformance und Augenblick-Tests von ADR-0008 gegen PostgreSQL

@@ -10,16 +10,9 @@ namespace Noelia.Infrastructure.Tests.Security.Sessions;
 
 public sealed partial class PostgresRefreshTokenStoreProofTests
 {
-    // ---- the marker conflict (ADR-0008: "Trifft ein gleichzeitiges zweites Schließen den Primärschlüssel") ----
-    //
-    // A signs out in a transaction and has not committed: its marker is written
-    // and invisible. B signs out the same session in a transaction of its own and
-    // waits for A's uncommitted primary key. A commits; B's insert fails with
-    // 23505.
-    //   BeginTransaction: EF sets a savepoint before saving and rolls back to it,
-    //     so the transaction stays usable and the store's fresh check succeeds.
-    //   TransactionScope: no savepoint; PostgreSQL aborts the transaction, the
-    //     fresh check fails with 25P02, loud, and only a rollback ends it.
+    // ---- the marker conflict (ADR-0008, decision 3) ----
+    // B waits for A's uncommitted marker, then fails with 23505: a savepoint keeps a BeginTransaction
+    // usable, a TransactionScope has none and ends in 25P02.
 
     [Theory]
     [InlineData(Bracket.BeginTransaction)]
@@ -90,14 +83,8 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
             }
         });
 
-    // ---- N5: the cap overwrites a rotation ----
-    //
-    // A rotation reads the open rows of its session for the cap and then updates
-    // the surplus ones. A second connection rotates one of those surplus rows in
-    // between and commits. The cap's update has no condition on the row, so it
-    // overwrites RevokedAt, the moment of that rotation, with the moment of the
-    // cap, and the grace window of the rotated token moves later. Expected: the
-    // rotation time stays, and a presentation after t_rot + grace is a reuse.
+    // ---- N5: the cap must not overwrite a rotation ----
+    // A surplus row rotated between the cap's read and update keeps its rotation time as RevokedAt.
 
     [Fact]
     public Task N5_ACapAfterAConcurrentRotation_KeepsTheRotationTime() =>
@@ -128,8 +115,7 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
                 throw new SetupFailure("Z must still be open when G has read the open rows");
             }
 
-            // The second connection rotates Z by hand and commits. By hand: its own cap
-            // would be a second writer on rows G holds.
+            // Rotated by hand on a second connection, so that no cap of its own runs.
             await using (var other = new NpgsqlConnection(Limited(_database.ConnectionString(enlist: false))))
             {
                 await other.OpenAsync();

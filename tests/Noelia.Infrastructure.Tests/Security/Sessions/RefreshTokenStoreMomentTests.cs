@@ -22,7 +22,7 @@ namespace Noelia.Infrastructure.Tests.Security.Sessions;
 /// does the other party's work on the spot. SQLite admits one writer at a time,
 /// which means two things for what follows. It proves the order of the steps
 /// the store takes, not the locking behaviour of a database with row versions
-/// (that is for the PostgreSQL conformance, a separate gate). And a client held
+/// (that is what the PostgreSQL heir is for). And a client held
 /// after its <c>BEGIN</c> would hold the write lock for everyone else, which is
 /// why a hold that is meant to let another writer through sits before the
 /// <c>BEGIN</c>, never after it.
@@ -553,11 +553,8 @@ public abstract class RefreshTokenStoreMomentTests : IAsyncLifetime
         thrown.Should().Be(1);
     }
 
-    // The Microsoft.Data.Sqlite provider cannot enlist a connection in an
-    // ambient transaction, so on SQLite a scope proves only that the store
-    // recognises one and keeps its hands off the transaction; that the work then
-    // commits and rolls back with the scope is the provider's part, and is for
-    // the PostgreSQL gate to show.
+    // SQLite cannot enlist a connection in an ambient transaction: a scope shows only that the
+    // store recognises it and opens no transaction of its own.
     [Fact]
     public async Task Rotation_InsideATransactionScope_OpensNoTransactionOfItsOwn()
     {

@@ -19,9 +19,7 @@ namespace Noelia.Infrastructure.Tests.Security.Sessions;
 /// cap overwriting a rotation (N5), and the index the close uses.
 /// </summary>
 /// <remarks>
-/// No test here is adjusted to what the store does. Where one is red, the store
-/// or the ADR is what is wrong, and the red result is the finding. What a test
-/// reports as <c>Aufbaufehler</c> is different: the arrangement did not reach
+/// What a test reports as <c>Aufbaufehler</c> is not a verdict: the arrangement did not reach
 /// the state the case is about (the cycle was not formed, the wrong party was
 /// the deadlock victim, a precondition was violated), and no verdict about the
 /// store can be read from it.

@@ -13,5 +13,6 @@ scope:
   exclude: ["src/**"]
 estimate: { session_pct: 6, weekly_pct: 1, gold_usd: 0 }
 boss: "dotnet test Noelia.slnx vollständig grün inkl. Category=Integration"
+board: { pr: 76 }
 ---
 # F4 als nachgewiesenes Restrisiko festhalten (ADR-0008 Nachtrag, ADR-0009 verworfen, README, MIGRATION)

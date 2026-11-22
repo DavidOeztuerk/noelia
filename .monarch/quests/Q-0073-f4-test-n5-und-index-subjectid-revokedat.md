@@ -13,5 +13,6 @@ scope:
   exclude: ["src/**"]
 estimate: { session_pct: 12, weekly_pct: 3, gold_usd: 0 }
 boss: "Alle neuen Tests ausgeführt; bei Rot Stopp und Befund mit Testname und Ausgabe an den Owner"
+board: { pr: 76 }
 ---
 # F4-Test, N5 und Index (SubjectId, RevokedAt) auf PostgreSQL

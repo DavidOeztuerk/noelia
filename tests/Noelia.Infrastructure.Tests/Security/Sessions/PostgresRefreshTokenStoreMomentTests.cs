@@ -12,9 +12,7 @@ namespace Noelia.Infrastructure.Tests.Security.Sessions;
 /// </summary>
 /// <remarks>
 /// The same tests as on SQLite (<see cref="RefreshTokenStoreMomentTests"/>), line
-/// for line, against a database whose writers do not queue. Where a test is red
-/// here, the store or the assumption behind it is what is wrong; the test is not
-/// adjusted to the database.
+/// for line, against a database whose writers do not queue.
 /// </remarks>
 [Trait("Category", "Integration")]
 public sealed class PostgresRefreshTokenStoreMomentTests
@@ -79,12 +77,8 @@ public sealed class PostgresRefreshTokenStoreMomentTests
             """,
             ("@id", MarkerId(session)), ("@session", session));
 
-    // ---- the TransactionScope half the SQLite tests could not show ----
-    //
-    // Npgsql enlists a connection in an ambient transaction, so here the work
-    // done under a scope really commits and rolls back with it. The rows are
-    // counted on a connection that does not enlist (Enlist=false): what it sees
-    // is what is committed, which is the only thing that says anything.
+    // ---- TransactionScope: the work commits and rolls back with the scope ----
+    // Rows are counted on a connection with Enlist=false, so it sees only what is committed.
 
     [Fact]
     public async Task Rotation_InsideATransactionScope_IsRolledBackWithoutComplete()

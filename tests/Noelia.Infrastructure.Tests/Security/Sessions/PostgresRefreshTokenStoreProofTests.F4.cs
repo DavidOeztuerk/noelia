@@ -7,22 +7,16 @@ using Npgsql;
 
 namespace Noelia.Infrastructure.Tests.Security.Sessions;
 
-// F4: a close inside the caller's transaction (ADR-0008, "Grenze: Schließen in
-// einer Transaktion des Aufrufers"). Two mechanisms are named there, a deadlock
-// and generations. The expectation is the safe one in both: when the close is
-// over, nothing of the session is open, measured on a fresh connection after the
-// bracket has ended, committed or not.
+// F4 (ADR-0008, decision 3): when a close is over, nothing of the session is open,
+// read on a fresh connection.
 public sealed partial class PostgresRefreshTokenStoreProofTests
 {
     // ---- the deadlock ----
     //
-    // The session has an older open sibling R and a chain T0 -> T1 -> E (E open),
-    // R written before E and issued before it. G, a grace request with T1, takes
-    // the lock on E and stops at the insert of its sibling. C, the close, locks R
-    // and waits for E. G goes on: its cap picks {R, E} and waits for R, which C
-    // holds. That is a cycle; C has the shorter deadlock_timeout and is the victim.
-    // The close is then rolled back with the caller's transaction, G writes its
-    // sibling X, and X is open: nothing noticed that the sign-out did not happen.
+    // Older open sibling R, chain T0 -> T1 -> E. G (grace request with T1) locks E
+    // and stops at the insert of its sibling; C (the close) locks R and waits for E.
+    // G's cap then picks {R, E} and waits for R: a cycle, and C, with the shorter
+    // deadlock_timeout, is the victim.
 
     private sealed record World(SessionId Session, SubjectId Subject, string T0, string T1, Guid R, Guid E);
 
@@ -136,15 +130,7 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
         }
     }
 
-    // The test of this arrangement with a bracket of the application
-    // (F4_Deadlock_CloseInTheCallersTransaction_LeavesNothingOpen, five cases)
-    // is red on PostgreSQL: the database aborts the application's transaction,
-    // the rollback takes the marker with it, and the grace request's sibling
-    // stays open. The owner accepted that as a residual risk (22.11.2026, ADR-0008
-    // addendum), so it is not kept here; it is in commit 4abaf8b on the branch
-    // monarch/G-0020-postgresql-beweis, in docs/befunde/postgresql-beweis-adr-0008.md
-    // and in issue #75. Below is the control that shows the arrangement does
-    // reach the cycle.
+    // In the application's own transaction: accepted residual risk, see ADR-0008 (addendum 22.11.) and #75.
 
     /// <summary>
     /// The control: the same arrangement without a bracket. The marker is
@@ -209,13 +195,9 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
 
     // ---- the generations ----
     //
-    // An actor A rotates the newest open token on a connection of its own and
-    // holds before it commits: its claim is a lock on O_k, its successor O_k+1 is
-    // not yet visible. C, the close, blocks on O_k in pass k. A commits; pass k
-    // skips O_k and the count sees O_k+1. Before pass k+1 an interceptor holds C
-    // until A has locked O_k+1. In a bracket the marker is invisible to A, so A
-    // can do this for as long as it likes, and the close ends at the limit of 32
-    // passes by throwing.
+    // A rotates the newest open token on its own connection and holds before its
+    // commit, so C (the close) blocks on O_k in pass k; when A commits, pass k
+    // skips O_k and sees O_k+1. Before pass k+1 C is held until A has locked O_k+1.
 
     private sealed class Round(ProofGate gate, Task<ConsumeResult> task, string next)
     {
@@ -239,11 +221,6 @@ public sealed partial class PostgresRefreshTokenStoreProofTests
         held.GetOrAdd(round, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
         return new Round(gate, task, next);
     }
-
-    // The test of this arrangement with a bracket of the application
-    // (F4_Generations_CloseInTheCallersTransaction_LeavesNothingOpen) is red on
-    // PostgreSQL: the close throws after 32 passes and the newest row stays open.
-    // See the note at the deadlock control above for where it is kept.
 
     /// <summary>
     /// The control: without a bracket the marker is committed before pass 1, A

@@ -13,5 +13,6 @@ scope:
   exclude: []
 estimate: { session_pct: 5, weekly_pct: 1, gold_usd: 0 }
 boss: "Der rote N5-Test aus Q-0073 wird grün, ohne dass er geändert wurde"
+board: { pr: 76 }
 ---
 # N5: Kappung schließt nur noch offene Zeilen
