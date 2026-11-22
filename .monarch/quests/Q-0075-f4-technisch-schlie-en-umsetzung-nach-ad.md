@@ -3,7 +3,7 @@ id: Q-0075
 gate: G-0020
 kind: main
 rank: A
-state: proposed
+state: abandoned
 dod:
   - "Die roten F4-Tests (Deadlock x5, Generationen) bleiben unverändert und sind grün"
   - "Kontrollen und alle Sitzungs-Tests (SQLite, PostgreSQL) grün"

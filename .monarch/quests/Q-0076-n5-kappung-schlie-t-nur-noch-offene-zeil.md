@@ -3,7 +3,7 @@ id: Q-0076
 gate: G-0020
 kind: main
 rank: A
-state: proposed
+state: in_review
 dod:
   - "CapAsync schließt nur Zeilen mit RevokedAt == null und ReplacedBy == null"
   - "N5_ACapAfterAConcurrentRotation_KeepsTheRotationTime unverändert und grün"

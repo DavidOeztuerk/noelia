@@ -3,7 +3,7 @@ id: Q-0074
 gate: G-0020
 kind: main
 rank: A
-state: in_progress
+state: abandoned
 dod:
   - "ADR-0009 prüft Markierung über eigene Verbindung und Schließen außerhalb der Transaktion der Anwendung gegen den Beweis und wählt eins"
   - "Beide F4-Mechanismen (Deadlock, Generationen) sind im Design als grün nach dem Fix begründet; neue öffentliche API nur wenn nötig, klein und begründet"

@@ -705,8 +705,15 @@ public sealed class EntityFrameworkRefreshTokenStore<TContext>(TContext context)
             return;
         }
 
+        // Only rows that are still open. Between the read above and this update
+        // a surplus row may have been rotated (or closed) by someone else; its
+        // RevokedAt is then the moment of that rotation, and the grace window of
+        // its token counts from it. Writing the cap's time over it would move the
+        // window.
         await Tokens
-            .Where(token => surplus.Contains(token.Id))
+            .Where(token => surplus.Contains(token.Id)
+                            && token.RevokedAt == null
+                            && token.ReplacedBy == null)
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(token => token.RevokedAt, at.UtcDateTime),
                 cancellationToken);
